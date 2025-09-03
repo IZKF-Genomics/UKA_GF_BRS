@@ -1,0 +1,15 @@
+authors:
+  - id: ckuo
+    name: "Chao-Chung Kuo"
+    affiliation: "Genomics Facility"
+    email: "ckuo@ukaachen.de"
+
+  - id: lgan
+    name: "Lin Gan"
+    affiliation: "Genomics Facility"
+    email: "lgan@ukaachen.de"
+
+  - id: mmabrouk
+    name: "Mohamed Hamdy Elsafi Mabrouk"
+    affiliation: "Genomics Facility"
+    email: "mmabrouk@ukaachen.de"

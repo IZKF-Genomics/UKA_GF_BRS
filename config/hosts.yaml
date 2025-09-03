@@ -1,0 +1,16 @@
+hosts:
+  nextgen:
+    aliases: [nextgen1]
+    mount_prefix: "/mnt/nextgen/"
+
+  nextgen2:
+    aliases: []
+    mount_prefix: "/mnt/nextgen2/"
+  
+  nextgen3:
+    aliases: []
+    mount_prefix: "/mnt/nextgen3/"
+  
+  web:
+    aliases: []
+    mount_prefix: "/mnt/web/"

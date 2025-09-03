@@ -1,0 +1,21 @@
+id: hello_world
+description: "A demo template that prints a greeting and project name."
+
+params:
+  name:
+    type: str
+    cli: "--name"
+    required: true
+    description: "Name to greet"
+
+render:
+  into: "${ctx.project.name}/${ctx.template.id}/"
+  files:
+    - run.sh.j2 -> run.sh
+
+run:
+  entry: "run.sh"
+
+publish:
+  greeting:
+    resolver: resolvers.hello.resolve_greeting

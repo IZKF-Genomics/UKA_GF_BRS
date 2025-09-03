@@ -1,0 +1,40 @@
+id: demux_bclconvert
+description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen, and MultiQC.
+
+params:
+  bcl_dir:
+    type: str
+    required: true
+    cli: "--bcl"
+  run_fastq_screen:
+    type: bool
+    default: false
+    cli: "--fastq-screen"
+  reserve_cores:
+    type: int
+    default: 10
+  threads_fraction:
+    type: float
+    default: 0.33
+  no_lane_splitting:
+    type: bool
+    default: true
+  sampleproject_subdirs:
+    type: bool
+    default: true
+  extra_bclconvert_args:
+    type: str
+    default: ""
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - samplesheet.csv -> samplesheet.csv
+    - run.sh.j2 -> run.sh
+
+run:
+  entry: "run.sh"
+
+publish:
+  multiqc_report:
+    resolver: "resolvers.get_multiqc_report"

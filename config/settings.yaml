@@ -1,0 +1,8 @@
+schema_version: 1
+
+policy:
+  # Human-friendly name and a strict regex that BPM enforces at `bpm project init`
+  project_name:
+    example: "250901_Tumor_RNAseq_UKA"
+    regex: '^\d{6}_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*$'
+    message: "Use YYMMDD_Parts_Separated_By_Underscores (e.g., 250901_Tumor_RNAseq_UKA)."
