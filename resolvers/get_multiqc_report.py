@@ -71,9 +71,10 @@ def main(ctx) -> str:
     Returns a hostname-aware string.
     """
     # Determine template directory (render root)
-    tpl_dir = Path(ctx.template.id).resolve()
-    if not tpl_dir.exists():
-        tpl_dir = Path.cwd().resolve()
+    if ctx.project:
+        tpl_dir = (Path(ctx.project_dir) / ctx.template.id).resolve()
+    else:
+        tpl_dir = Path(ctx.cwd).resolve()
 
     # 1) Preferred conventional location
     preferred = tpl_dir / "multiqc" / "multiqc_report.html"

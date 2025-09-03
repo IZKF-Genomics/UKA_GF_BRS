@@ -57,17 +57,24 @@ def _hostify(ctx, abs_local_path: Path) -> str:
 
 def main(ctx) -> str:
     """
-    Scan the current template directory (prefer <tpl_id>/output if present) for
-    the first folder containing FASTQ files (excluding 'Undetermined' paths).
-    Return that folder as a hostname-aware path string.
-    """
-    tpl_dir = Path(ctx.template.id).resolve()
-    if not tpl_dir.exists():
-        # If renderer/layout changes, fall back to CWD
-        tpl_dir = Path.cwd().resolve()
+    Locate the FASTQ output directory for this template run.
 
-    # Prefer the common bcl-convert layout: <tpl>/output
-    root = (tpl_dir / "output") if (tpl_dir / "output").is_dir() else tpl_dir
+    Behavior:
+      - Project mode: base is <project_dir>/<tpl_id>
+      - Ad‑hoc mode:  base is ctx.cwd (render.into='.')
+      - Prefer '<base>/output' if it exists, else use '<base>'
+      - Exclude any path containing 'Undetermined'
+
+    Returns a hostname-aware path string.
+    """
+    # Determine base directory depending on mode
+    if ctx.project:
+        base = (Path(ctx.project_dir) / ctx.template.id).resolve()
+    else:
+        base = Path(ctx.cwd).resolve()
+
+    # Prefer the common bcl-convert layout: <base>/output
+    root = (base / "output") if (base / "output").is_dir() else base
 
     candidates: list[tuple[int, Path]] = []
 

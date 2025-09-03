@@ -1,0 +1,52 @@
+# macOS system files
+.DS_Store
+
+# Node modules
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv/
+env/
+venv/
+
+# Logs
+*.log
+
+# VSCode settings
+.vscode/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Icon?
+.DS_Store
+
+# Build output
+dist/
+build/
+out/
+
+# Coverage reports
+coverage/
+*.cover
+*.coverage
+*.lcov
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
+
+# IDEs
+.idea/
+*.iml
+
+# Dependency directories
+bower_components/
+jspm_packages/

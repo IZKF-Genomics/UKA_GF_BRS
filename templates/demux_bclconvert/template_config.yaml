@@ -38,3 +38,5 @@ run:
 publish:
   multiqc_report:
     resolver: "resolvers.get_multiqc_report"
+  FASTQ_dir:
+    resolver: "resolvers.get_FASTQ_folder"
