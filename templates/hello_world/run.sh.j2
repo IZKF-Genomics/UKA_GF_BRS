@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
+# ----------------------------------------------------------------------------
+# Rendered script from templates/hello_world/run.sh.j2
+#
+# Notes for users editing this template:
+# - Lines like {{ ctx.params.name }} are Jinja expressions evaluated at render time.
+# - The 'ctx' object provides runtime context:
+#     * ctx.params       -> final parameters (e.g., ctx.params.name)
+#     * ctx.project.name -> project name (may be empty in ad-hoc mode)
+#     * ctx.now()        -> current time (ISO 8601)
+#     * ctx.hostname()   -> short hostname
+# - Anything starting with '#' is a bash comment (safe in the rendered script).
+# ----------------------------------------------------------------------------
 set -euo pipefail
 
 echo "Hello {{ ctx.params.name }}!"
 echo "This project is {{ ctx.project.name }}"
+# Example of using other ctx helpers if needed:
+# echo "Rendered at: {{ ctx.now() }} on {{ ctx.hostname() }}"

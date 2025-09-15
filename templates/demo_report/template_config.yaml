@@ -1,0 +1,95 @@
+# BPM Template Descriptor: demo_report
+# -----------------------------------------------------------------------------
+# This comprehensive example demonstrates key template features:
+# - Parameters with defaults/types/required
+# - Rendering Jinja templates vs copying static files
+# - Lifecycle hooks: post_render, pre_run, post_run
+# - Publish resolvers to record results in project.yaml
+# - Context usage: ${ctx.*} in render.into and {{ ctx.* }} in Jinja files
+#
+# Commands to try (project mode):
+#   bpm template render demo_report --param sample_id=NA12878
+#   bpm template run    demo_report
+#   bpm template publish demo_report
+#
+# Ad‑hoc mode (does not touch project.yaml, skips hooks):
+#   bpm template render demo_report --param sample_id=NA12878 --out ./adhoc
+# -----------------------------------------------------------------------------
+
+# Must match folder name under templates/
+id: demo_report
+
+description: "Comprehensive demo: params, hooks, and publish with a small report."
+
+# ------------------------------- Parameters ----------------------------------
+# Resolution order: descriptor defaults < stored project values < CLI --param
+# Types: str|int|float|bool
+params:
+  sample_id:
+    type: str
+    cli: "--sample-id"
+    required: true
+    description: "Primary identifier for this run"
+  threads:
+    type: int
+    cli: "--threads"
+    required: false
+    default: 4
+    description: "Threads to use (demo only)"
+  trim:
+    type: bool
+    cli: "--trim"
+    default: false
+    description: "Enable trimming (demonstrates booleans and conditionals)"
+  cutoff:
+    type: float
+    cli: "--cutoff"
+    default: 0.05
+    description: "Example numeric parameter"
+  contact_email:
+    type: str
+    cli: "--contact-email"
+    required: false
+    description: "Optional contact for notifications"
+
+# ------------------------------- Dependencies --------------------------------
+# Uncomment to demonstrate template dependencies (requires hello_world rendered)
+# required_templates:
+#   - hello_world
+
+# --------------------------------- Render ------------------------------------
+# into: Where files will be placed. We use ${ctx.project_dir} so rendering always
+# ends up under the project root on this machine, regardless of host mapping.
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    # Render Jinja templates (.j2) with {{ ctx.* }} variables available
+    - run.sh.j2      -> run.sh
+    - README.md.j2   -> README.md
+    - config.yaml.j2 -> config.yaml
+    # Copy static file as-is (no Jinja processing)
+    - static/example.txt -> static/example.txt
+
+# ---------------------------------- Run --------------------------------------
+# The entry script is made executable at render time, then executed by
+# `bpm template run`. It writes outputs (e.g., results.txt, metrics.json).
+run:
+  entry: "run.sh"
+
+# --------------------------------- Hooks -------------------------------------
+# Hooks are Python callables in the active BRS (hooks/...). Each gets `ctx`.
+# Supported forms: "hooks.mod" (calls main) or "hooks.mod:func".
+hooks:
+  post_render:
+    - hooks.demo:post_render   # e.g., sanity checks after rendering
+  pre_run:
+    - hooks.demo:pre_run       # validate environment/params just before run
+  post_run:
+    - hooks.demo:post_run      # summarize outputs; log next steps
+
+# -------------------------------- Publish ------------------------------------
+# After a successful run, publish resolvers compute values and store them under
+# project.yaml -> templates[demo_report].published
+publish:
+  metrics:
+    resolver: resolvers.demo:collect_metrics

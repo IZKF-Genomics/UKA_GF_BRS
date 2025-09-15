@@ -1,0 +1,2 @@
+nfcore_rnaseq
+# Add other templates that render without extra params, one per line

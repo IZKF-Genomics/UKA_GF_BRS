@@ -1,0 +1,11 @@
+# Optional per-template CLI params for smoke rendering
+# These are only for render-time; do not add secrets.
+templates:
+  # demux_bclconvert:
+  #   params:
+  #     run_id: DEMO
+  #     bcl_dir: /abs/path/to/small_fixture_bcl
+  # nfcore_rnaseq:
+  #   params:
+  #     profile: docker
+  #     outdir: results

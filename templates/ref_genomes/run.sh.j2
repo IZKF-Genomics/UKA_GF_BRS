@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# ----------------------------------------------------------------------------
+# ref_genomes runner (ad-hoc friendly, simple and transparent)
+#
+# Steps:
+#  1) Read genomes.yaml in the current directory (YAML; JSON also accepted)
+#  2) For each genome: download FASTA/annotation (if URLs), decompress FASTA
+#  3) If ERCC enabled: concatenate ERCC92 to create <id>_with_ERCC.fa
+#  4) If indices requested: run nf-core/references to build them
+#  5) Write everything under OUTDIR (default: current directory)
+#
+# Requirements: bash, python3, PyYAML (for YAML), nextflow, and a container/conda runtime
+# ----------------------------------------------------------------------------
+set -euo pipefail
+
+# Enable bash command tracing if VERBOSE=1
+if [[ "${VERBOSE:-0}" == "1" ]]; then set -x; fi
+
+# ---- Configuration knobs (override via environment) -------------------------
+OUTDIR="${OUTDIR:-$PWD}"             # Where outputs go (use your --out path)
+CFG_PATH="${CFG_PATH:-$PWD/genomes.yaml}"  # Config file
+THREADS="${THREADS:-16}"
+MEM_GB="${MEM_GB:-64}"
+NXF_PROFILE="${NXF_PROFILE:-docker}" # docker | singularity | conda
+NF_PIPELINE="${NF_PIPELINE:-nf-core/references}"
+NF_REVISION="${NF_REVISION:-stable}"
+NF_EXTRA_ARGS="${NF_EXTRA_ARGS:-}"
+
+# Default set of indices if none specified for a genome
+ALL_INDICES="star,bwa,bwamem2,bowtie2,hisat2,minimap2,salmon,kallisto"
+
+# ERCC bundle lives next to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ERCC_FA="$SCRIPT_DIR/ERCC92/ERCC92.fa"
+
+# ---- Small helpers ----------------------------------------------------------
+have() { command -v "$1" >/dev/null 2>&1; }
+log()  { printf "[%s] %s\n" "$(date -u +%FT%TZ)" "$*"; }
+
+download_if_url() {
+  # $1=url-or-path  $2=dest
+  local src="$1" dest="$2"
+  if [[ "$src" =~ ^https?:// ]]; then
+    log "download: $src -> $dest"
+    mkdir -p "$(dirname "$dest")"
+    if have curl; then curl -L --fail --retry 3 -o "$dest" "$src"; else wget -O "$dest" "$src"; fi
+  else
+    # Local path: copy to dest for reproducibility
+    mkdir -p "$(dirname "$dest")"; cp -f "$src" "$dest"
+  fi
+}
+
+decompress_to() {
+  # $1=maybe.gz  $2=plain.fa
+  local in="$1" out="$2"
+  mkdir -p "$(dirname "$out")"
+  if [[ "$in" =~ \.gz$ ]]; then
+    log "decompress: $in -> $out"; gzip -c -d "$in" > "$out"
+  else
+    cp -f "$in" "$out"
+  fi
+}
+
+run_nfcore_references() {
+  # $1=fasta  $2=gtf-or-empty  $3=aligners  $4=tx_aligners  $5=outdir  $6=genome_id
+  local fasta="$1" gtf="$2" aligners="$3" txaln="$4" outdir="$5" gid="$6"
+  mkdir -p "$outdir/work"
+  log "nextflow: $gid (aligners=$aligners tx=$txaln)"
+  NXF_DEFAULT_HOME="$outdir/.nxf" \
+  nextflow run "$NF_PIPELINE" -r "$NF_REVISION" -profile "$NXF_PROFILE" \
+    --fasta "$fasta" \
+    ${gtf:+--gtf "$gtf"} \
+    ${aligners:+--aligners "$aligners"} \
+    ${txaln:+--transcriptome_aligners "$txaln"} \
+    --outdir "$outdir" \
+    --genome "$gid" \
+    --species "$gid" \
+    --max_cpus "$THREADS" \
+    --max_memory "${MEM_GB}GB" \
+    -work-dir "$outdir/work" \
+    $NF_EXTRA_ARGS
+}
+
+# ---- Read config (YAML preferred, JSON allowed) -----------------------------
+# We parse with Python for clarity and print simple TSV lines for bash to read.
+mapfile -t GENOMES < <(python3 - "$CFG_PATH" << 'PY'
+import json, sys, os
+path = sys.argv[1]
+cfg = None
+if path.endswith('.json'):
+    with open(path) as fh: cfg = json.load(fh)
+else:
+    try:
+        import yaml  # type: ignore
+        with open(path) as fh: cfg = yaml.safe_load(fh)
+    except Exception as e:
+        print(f"YAML parse failed: {e}. Install PyYAML or use JSON.", file=sys.stderr)
+        sys.exit(2)
+if not isinstance(cfg, dict) or 'genomes' not in cfg:
+    print('Invalid config: missing top-level "genomes" list', file=sys.stderr)
+    sys.exit(3)
+with_ercc = cfg.get('with_ercc', True)
+nf = cfg.get('nfcore', {})
+out_root = cfg.get('out_root')  # may be None
+print(f"GLOBAL\t{with_ercc}\t{nf.get('pipeline','')}\t{nf.get('revision','')}\t{nf.get('profile','')}\t{nf.get('extra_args','')}\t{out_root or ''}")
+for g in (cfg.get('genomes') or []):
+    gid = g.get('id') or ''
+    fasta = g.get('fasta') or ''
+    gtf = g.get('gtf') or ''
+    indices = ','.join(g.get('indices') or [])
+    ercc = g.get('ercc')
+    ercc_s = '' if ercc is None else ('true' if ercc else 'false')
+    print(f"GENOME\t{gid}\t{fasta}\t{gtf}\t{indices}\t{ercc_s}")
+PY
+)
+
+# First line is GLOBAL settings
+IFS=$'\t' read -r _ WITH_ERCC CFG_PIPELINE CFG_REV CFG_PROFILE CFG_EXTRA CFG_OUT_ROOT <<< "${GENOMES[0]}"
+
+# Effective settings (env overrides config; config overrides script defaults)
+OUT_ROOT="${CFG_OUT_ROOT:-$OUTDIR}"
+NF_PIPELINE="${NF_PIPELINE:-${CFG_PIPELINE:-$NF_PIPELINE}}"
+NF_REVISION="${NF_REVISION:-${CFG_REV:-$NF_REVISION}}"
+NXF_PROFILE="${NXF_PROFILE:-${CFG_PROFILE:-$NXF_PROFILE}}"
+NF_EXTRA_ARGS="${NF_EXTRA_ARGS:-${CFG_EXTRA:-$NF_EXTRA_ARGS}}"
+
+log "Output root: $OUT_ROOT"
+mkdir -p "$OUT_ROOT"
+
+# Remaining lines are genomes
+for i in "${!GENOMES[@]}"; do
+  [ "$i" -eq 0 ] && continue
+  IFS=$'\t' read -r _ GID FASTA GTF INDICES ERCC_OVERRIDE <<< "${GENOMES[$i]}"
+  [ -n "$GID" ] || { log "skip genome with missing id"; continue; }
+  [ -n "$FASTA" ] || { log "skip $GID: missing fasta"; continue; }
+
+  log "=== $GID ==="
+  local_root="$OUT_ROOT/$GID"
+  mkdir -p "$local_root/src"
+
+  # 1) Stage FASTA and GTF into src/
+  fasta_staged="$local_root/src/$(basename "$FASTA")"
+  download_if_url "$FASTA" "$fasta_staged"
+  gtf_staged=""; if [ -n "$GTF" ]; then gtf_staged="$local_root/src/$(basename "$GTF")"; download_if_url "$GTF" "$gtf_staged"; fi
+
+  # 2) Decompress FASTA to plain for concatenation/indexing
+  fasta_plain="$local_root/src/$(basename "${fasta_staged%.gz}")"
+  decompress_to "$fasta_staged" "$fasta_plain"
+
+  # 3) ERCC augmentation
+  use_ercc="$WITH_ERCC"; [ -n "$ERCC_OVERRIDE" ] && use_ercc="$ERCC_OVERRIDE"
+  ercc_plain=""; if [[ "$use_ercc" =~ ^(true|True)$ ]]; then
+    ercc_plain="$local_root/src/${GID}_with_ERCC.fa"
+    log "ERCC: ${GID} + ERCC92 -> $(basename "$ercc_plain")"
+    cat "$fasta_plain" "$ERCC_FA" > "$ercc_plain"
+  fi
+
+  # 4) Build indices (if requested; default to all tools when empty)
+  tools="$INDICES"; [ -z "$tools" ] && tools="$ALL_INDICES"
+  if [ -n "$tools" ]; then
+    # Split transcriptome tools for nf-core flags
+    aligners=$(echo "$tools" | tr ',' '\n' | grep -Ev '^\s*$' | grep -Evi 'salmon|kallisto' | paste -sd, -)
+    txaln=$(echo "$tools" | tr ',' '\n' | grep -E 'salmon|kallisto' | paste -sd, -)
+
+    # Base genome indices
+    run_nfcore_references "$fasta_plain" "$gtf_staged" "$aligners" "$txaln" "$local_root/indices" "$GID"
+
+    # ERCC indices if we created an augmented FASTA
+    if [ -n "$ercc_plain" ]; then
+      run_nfcore_references "$ercc_plain" "$gtf_staged" "$aligners" "$txaln" "$OUT_ROOT/${GID}_with_ERCC/indices" "${GID}_with_ERCC"
+    fi
+  else
+    log "indices: none requested for $GID"
+  fi
+
+  log "done $GID"
+
+done
+
+log "All tasks completed."

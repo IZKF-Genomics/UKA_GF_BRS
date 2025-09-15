@@ -1,21 +1,78 @@
+# BPM Template Descriptor (template_config.yaml)
+# -----------------------------------------------------------------------------
+# This file describes a single reusable template for BPM. It tells BPM:
+#  - which parameters the template expects,
+#  - where to render files into a project,
+#  - which source files to render/copy,
+#  - what to execute when you run the template,
+#  - and what to publish back into project.yaml after running.
+#
+# Used by commands:
+#  - bpm template render <id> [--param KEY=VALUE ...] [--dir <project_dir>] [--out <adhoc_dir>] [--dry]
+#  - bpm template run    <id> [--dir <project_dir>]
+#  - bpm template publish <id> [--dir <project_dir>]
+#
+# Context available to Jinja templates ({{ ... }}):
+#  - ctx.project.name        -> project name (None in ad-hoc mode)
+#  - ctx.project.project_path-> host-aware path string
+#  - ctx.template.id         -> current template id (e.g., hello_world)
+#  - ctx.params              -> final param map after resolution
+#  - ctx.brs.repo/authors/hosts/settings -> loaded BRS config objects
+#  - ctx.cwd                 -> current working directory (Path) during render
+#  - ctx.now()               -> current time (ISO8601); ctx.hostname() -> short hostname
+# -----------------------------------------------------------------------------
+
+# The template id must match this folder name (templates/<id>/)
 id: hello_world
+
+# A human-friendly description shown by `bpm template list`
 description: "A demo template that prints a greeting and project name."
 
+# ------------------------------- Parameters ----------------------------------
+# Parameters are resolved with precedence: descriptor defaults < stored project
+# values < CLI --param overrides. Types are coerced to int/float/bool/str.
+# Note: The 'cli' key is advisory for docs; today you pass values via
+#       `--param name=Alice` rather than an auto-generated flag.
 params:
   name:
-    type: str
-    cli: "--name"
-    required: true
+    type: str               # accepted: str|int|float|bool
+    cli: "--name"           # for documentation; not auto-wired yet
+    required: true          # if true, render fails if value not provided
     description: "Name to greet"
+    # default: "World"      # uncomment to make it optional
 
+# --------------------------------- Render ------------------------------------
+# Where to place files and which files to render/copy.
+# - 'into' supports ${ctx.*} placeholders, expanded before writing.
+# - entries in 'files' can be:
+#     * "src -> dst" (string form), or
+#     * {src: ..., dst: ...} (object form)
+# - Files ending with .j2 are rendered with Jinja using the 'ctx' described above.
+#   Other files are copied as-is.
 render:
+  # Render into <project_name>/<template_id>/ under the current project directory.
+  # In ad-hoc mode (with --out), BPM renders directly under that directory.
   into: "${ctx.project.name}/${ctx.template.id}/"
   files:
-    - run.sh.j2 -> run.sh
+    - run.sh.j2 -> run.sh   # Jinja render: substitutes {{ ctx.params.name }} etc.
 
+# ---------------------------------- Run --------------------------------------
+# Optional entry to execute with `bpm template run <id>` after rendering.
+# BPM will ensure this file is executable (chmod +x) at render time.
 run:
   entry: "run.sh"
 
+# -------------------------------- Publish ------------------------------------
+# After a successful run, 'publish' entries compute values (via resolvers) and
+# write them back to project.yaml under templates[<id>].published.
+#
+# Resolvers are dotted import paths resolved relative to the active BRS root.
+# Supported forms:
+#   - resolvers.my_pub               -> calls resolvers/my_pub.py:main(ctx)
+#   - resolvers.my_pub:compute       -> calls resolvers/my_pub.py:compute(ctx)
+#   - resolvers.pkg.module.func      -> calls that function with (ctx)
+#
+# The returned value is stored under the given key. Keep it JSON/YAML-serializable.
 publish:
   greeting:
-    resolver: resolvers.hello.resolve_greeting
+    resolver: resolvers.hello.resolve_greeting  # stores result at published.greeting

@@ -1,0 +1,20 @@
+id: ref_genomes
+description: "Reference genomes manager: download FASTA/annotation, optional ERCC augmentation, and optional index builds via nf-core/references. Optimized for ad-hoc usage (--out)."
+
+params: {}
+
+render:
+  # In project mode, this would render under the project. In ad-hoc mode (--out),
+  # BPM overrides 'into' to '.' so files land directly under the provided folder.
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    # Render run script and starter config
+    - run.sh.j2      -> run.sh
+    - genomes.yaml.j2 -> genomes.yaml
+    - README.md.j2   -> README.md
+    # Bundle ERCC92 reference locally to avoid network dependencies
+    - ERCC92/ERCC92.fa  -> ERCC92/ERCC92.fa
+    - ERCC92/ERCC92.gtf -> ERCC92/ERCC92.gtf
+
+run:
+  entry: "run.sh"

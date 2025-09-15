@@ -1,0 +1,19 @@
+# Demo Report
+
+This folder was rendered by the `demo_report` template at {{ ctx.now() }} on {{ ctx.hostname() }}.
+
+Parameters
+- sample_id: `{{ ctx.params.sample_id }}`
+- threads: `{{ ctx.params.threads }}`
+- trim: `{{ ctx.params.trim }}`
+- cutoff: `{{ ctx.params.cutoff }}`
+- contact_email: `{{ ctx.params.get('contact_email', '') }}`
+
+Notes
+- Project dir: `{{ ctx.project_dir }}`
+- Template id: `{{ ctx.template.id }}`
+- BRS repo id/version (if provided): `{{ ctx.brs.get('repo', {}).get('id', '') }}` / `{{ ctx.brs.get('repo', {}).get('version', '') }}`
+
+Outputs
+- results.txt: quick summary of run inputs and environment.
+- metrics.json: machine-readable summary used by the publish resolver.
