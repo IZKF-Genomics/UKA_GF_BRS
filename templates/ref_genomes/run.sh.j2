@@ -6,7 +6,7 @@
 #  1) Read genomes.yaml in the current directory (YAML; JSON also accepted)
 #  2) For each genome: download FASTA/annotation (if URLs), decompress FASTA
 #  3) If ERCC enabled: concatenate ERCC92 to create <id>_with_ERCC.fa
-#  4) If indices requested: run nf-core/references to build them
+#  4) If indices requested: run nf-core/references to build them (via --input datasheet)
 #  5) Write everything under OUTDIR (default: current directory)
 #
 # Requirements: bash, python3, PyYAML (for YAML), nextflow, and a container/conda runtime
@@ -16,6 +16,61 @@ set -euo pipefail
 # Enable bash command tracing if VERBOSE=1
 if [[ "${VERBOSE:-0}" == "1" ]]; then set -x; fi
 
+# ---- CLI arguments ----------------------------------------------------------
+# Usage:
+#   ./run.sh --all                         # iterate all genomes
+#   ./run.sh --only GRCh38,GRCm39          # only selected genomes (comma-separated)
+#
+# If neither flag is provided, defaults to --all for convenience.
+
+ALL=0
+ONLY_LIST=""
+
+usage() {
+  cat <<USAGE
+ref_genomes runner
+
+Options:
+  --all                  Process all genomes listed in genomes.yaml
+  --only ID[,ID2,...]    Process only the specified genome IDs (comma-separated)
+  -h, --help             Show this help
+
+Examples:
+  ./run.sh --all
+  ./run.sh --only GRCh38,GRCm39
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all)
+      ALL=1; shift;;
+    --only)
+      ONLY_LIST="${2:-}"; shift 2;;
+    --only=*)
+      ONLY_LIST="${1#--only=}"; shift;;
+    -h|--help)
+      usage; exit 0;;
+    *)
+      # Unknown argument; stop parsing and continue (allows future extensions)
+      break;;
+  esac
+done
+
+# Default to --all when neither flag is provided
+if [[ $ALL -eq 0 && -z "$ONLY_LIST" ]]; then ALL=1; fi
+
+_in_only() {
+  local gid="$1"
+  # If ONLY_LIST is empty, everything is allowed (covers --all)
+  [[ -z "$ONLY_LIST" ]] && return 0
+  IFS=',' read -r -a _arr <<< "$ONLY_LIST"
+  for x in "${_arr[@]}"; do
+    [[ "$gid" == "$x" ]] && return 0
+  done
+  return 1
+}
+
 # ---- Configuration knobs (override via environment) -------------------------
 OUTDIR="${OUTDIR:-$PWD}"             # Where outputs go (use your --out path)
 CFG_PATH="${CFG_PATH:-$PWD/genomes.yaml}"  # Config file
@@ -23,7 +78,7 @@ THREADS="${THREADS:-16}"
 MEM_GB="${MEM_GB:-64}"
 NXF_PROFILE="${NXF_PROFILE:-docker}" # docker | singularity | conda
 NF_PIPELINE="${NF_PIPELINE:-nf-core/references}"
-NF_REVISION="${NF_REVISION:-stable}"
+NF_REVISION="${NF_REVISION:-dev}"
 NF_EXTRA_ARGS="${NF_EXTRA_ARGS:-}"
 
 # Default set of indices if none specified for a genome
@@ -62,19 +117,16 @@ decompress_to() {
 }
 
 run_nfcore_references() {
-  # $1=fasta  $2=gtf-or-empty  $3=aligners  $4=tx_aligners  $5=outdir  $6=genome_id
-  local fasta="$1" gtf="$2" aligners="$3" txaln="$4" outdir="$5" gid="$6"
+  # $1=datasheet.yml  $2=aligners  $3=tx_aligners  $4=outdir
+  local datasheet="$1" aligners="$2" txaln="$3" outdir="$4"
   mkdir -p "$outdir/work"
-  log "nextflow: $gid (aligners=$aligners tx=$txaln)"
+  log "nextflow: input=$(basename "$datasheet") (aligners=$aligners tx=$txaln)"
   NXF_DEFAULT_HOME="$outdir/.nxf" \
   nextflow run "$NF_PIPELINE" -r "$NF_REVISION" -profile "$NXF_PROFILE" \
-    --fasta "$fasta" \
-    ${gtf:+--gtf "$gtf"} \
+    --input "$datasheet" \
     ${aligners:+--aligners "$aligners"} \
     ${txaln:+--transcriptome_aligners "$txaln"} \
     --outdir "$outdir" \
-    --genome "$gid" \
-    --species "$gid" \
     --max_cpus "$THREADS" \
     --max_memory "${MEM_GB}GB" \
     -work-dir "$outdir/work" \
@@ -134,6 +186,12 @@ for i in "${!GENOMES[@]}"; do
   [ -n "$GID" ] || { log "skip genome with missing id"; continue; }
   [ -n "$FASTA" ] || { log "skip $GID: missing fasta"; continue; }
 
+  # Selection filter: respect --only when provided (takes precedence over --all)
+  if ! _in_only "$GID"; then
+    log "skip $GID: not selected via --only"
+    continue
+  fi
+
   log "=== $GID ==="
   local_root="$OUT_ROOT/$GID"
   mkdir -p "$local_root/src"
@@ -143,7 +201,7 @@ for i in "${!GENOMES[@]}"; do
   download_if_url "$FASTA" "$fasta_staged"
   gtf_staged=""; if [ -n "$GTF" ]; then gtf_staged="$local_root/src/$(basename "$GTF")"; download_if_url "$GTF" "$gtf_staged"; fi
 
-  # 2) Decompress FASTA to plain for concatenation/indexing
+  # 2) Decompress FASTA to plain for concatenation/indexing (the pipeline accepts local paths)
   fasta_plain="$local_root/src/$(basename "${fasta_staged%.gz}")"
   decompress_to "$fasta_staged" "$fasta_plain"
 
@@ -162,12 +220,30 @@ for i in "${!GENOMES[@]}"; do
     aligners=$(echo "$tools" | tr ',' '\n' | grep -Ev '^\s*$' | grep -Evi 'salmon|kallisto' | paste -sd, -)
     txaln=$(echo "$tools" | tr ',' '\n' | grep -E 'salmon|kallisto' | paste -sd, -)
 
-    # Base genome indices
-    run_nfcore_references "$fasta_plain" "$gtf_staged" "$aligners" "$txaln" "$local_root/indices" "$GID"
+    # Prepare a minimal datasheet for the pipeline. It will consume local staged files.
+    species_val="${GID}"
+    # If user provided species in config, prefer it (optional extension in genomes.yaml)
+    # We cannot parse it here reliably without extending the parser; default to GID.
 
-    # ERCC indices if we created an augmented FASTA
+    # Base genome datasheet
+    ds_base="$local_root/datasheet.yml"
+    cat > "$ds_base" <<YAML
+- genome: "$GID"
+  species: "$species_val"
+  fasta: "$fasta_plain"
+$( [ -n "$gtf_staged" ] && printf "  gtf: \"%s\"\n" "$gtf_staged" )YAML
+    run_nfcore_references "$ds_base" "$aligners" "$txaln" "$local_root/indices"
+
+    # ERCC indices if we created an augmented FASTA: add a second entry and run into a separate outdir
     if [ -n "$ercc_plain" ]; then
-      run_nfcore_references "$ercc_plain" "$gtf_staged" "$aligners" "$txaln" "$OUT_ROOT/${GID}_with_ERCC/indices" "${GID}_with_ERCC"
+      ds_ercc="$OUT_ROOT/${GID}_with_ERCC/datasheet.yml"
+      mkdir -p "$(dirname "$ds_ercc")"
+      cat > "$ds_ercc" <<YAML
+- genome: "${GID}_with_ERCC"
+  species: "$species_val"
+  fasta: "$ercc_plain"
+$( [ -n "$gtf_staged" ] && printf "  gtf: \"%s\"\n" "$gtf_staged" )YAML
+      run_nfcore_references "$ds_ercc" "$aligners" "$txaln" "$OUT_ROOT/${GID}_with_ERCC/indices"
     fi
   else
     log "indices: none requested for $GID"
@@ -178,3 +254,9 @@ for i in "${!GENOMES[@]}"; do
 done
 
 log "All tasks completed."
+
+# Notes:
+# - For first-time Nextflow/nf-core users, validate your setup with a quick test profile:
+#     nextflow run nf-core/references -profile test
+# - Provide pipeline parameters via CLI or -params-file as recommended by nf-core docs.
+# - This runner drives nf-core/references via the recommended --input datasheet.
