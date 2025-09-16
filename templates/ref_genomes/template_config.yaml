@@ -10,6 +10,7 @@ render:
   files:
     # Render run script and starter config
     - run.sh.j2      -> run.sh
+    - runner.py      -> runner.py
     - genomes.yaml.j2 -> genomes.yaml
     - README.md.j2   -> README.md
     # Bundle ERCC92 reference locally to avoid network dependencies
