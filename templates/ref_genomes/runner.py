@@ -133,14 +133,30 @@ def cmd_ercc(args: argparse.Namespace) -> int:
     gid = args.gid
     fasta_plain = Path(args.fasta_plain)
     outdir = Path(args.outdir)
-    ercc_fa = Path(__file__).resolve().parent / "ERCC92" / "ERCC92.fa"
+    ercc_dir = Path(__file__).resolve().parent / "ERCC92"
+    ercc_fa = ercc_dir / "ERCC92.fa"
+    ercc_gtf = ercc_dir / "ERCC92.gtf"
     if not ercc_fa.exists():
         raise SystemExit(f"ERCC file missing: {ercc_fa}")
-    out = outdir / "src" / f"{gid}_with_ERCC.fa"
-    with open(out, "wb") as f_out:
+    out_fa = outdir / "src" / f"{gid}_with_ERCC.fa"
+    with open(out_fa, "wb") as f_out:
         f_out.write(fasta_plain.read_bytes())
         f_out.write(ercc_fa.read_bytes())
-    print(f"ERCC_FASTA={out}")
+    print(f"ERCC_FASTA={out_fa}")
+
+    # If base GTF provided and ERCC GTF exists, concatenate to produce combined GTF
+    if args.gtf:
+        base_gtf = Path(args.gtf)
+        if not base_gtf.exists():
+            raise SystemExit(f"Base GTF not found: {base_gtf}")
+        if not ercc_gtf.exists():
+            raise SystemExit(f"ERCC GTF file missing: {ercc_gtf}")
+        out_gtf = outdir / "src" / f"{gid}_with_ERCC.gtf"
+        with open(out_gtf, "wb") as g_out:
+            g_out.write(base_gtf.read_bytes())
+            g_out.write(b"\n")
+            g_out.write(ercc_gtf.read_bytes())
+        print(f"ERCC_GTF={out_gtf}")
     return 0
 
 
@@ -232,6 +248,7 @@ def main(argv: list[str]) -> int:
     p_ercc.add_argument("--gid", required=True)
     p_ercc.add_argument("--fasta-plain", dest="fasta_plain", required=True)
     p_ercc.add_argument("--outdir", required=True)
+    p_ercc.add_argument("--gtf", help="Optional base GTF to merge with ERCC annotations")
     p_ercc.set_defaults(fun=cmd_ercc)
 
     p_tools = sub.add_parser("tools", help="Split indices CSV into aligners/tx")

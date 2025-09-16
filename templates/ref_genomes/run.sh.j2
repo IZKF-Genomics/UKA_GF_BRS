@@ -130,10 +130,15 @@ for i in "${!GENOMES[@]}"; do
 
   # 3) ERCC augmented
   use_ercc="$WITH_ERCC"; [[ -n "$ERCC_OVERRIDE" ]] && use_ercc="$ERCC_OVERRIDE"
-  ercc_plain=""; if [[ "$use_ercc" =~ ^(true|True|1)$ ]]; then
-    ercc_out=$(python3 "$HERE/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$local_root")
-    ERCC_FASTA=""; while IFS='=' read -r k v; do [[ "$k" == "ERCC_FASTA" ]] && ERCC_FASTA="$v"; done <<< "$ercc_out"
-    ercc_plain="$ERCC_FASTA"
+  ercc_plain=""; ercc_gtf_combined=""
+  if [[ "$use_ercc" =~ ^(true|True|1)$ ]]; then
+    ercc_out=$(python3 "$HERE/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$local_root" ${GTF_STAGED:+--gtf "$GTF_STAGED"})
+    while IFS='=' read -r k v; do
+      case "$k" in
+        ERCC_FASTA) ercc_plain="$v";;
+        ERCC_GTF)   ercc_gtf_combined="$v";;
+      esac
+    done <<< "$ercc_out"
   fi
 
   # 4) Tools
@@ -159,7 +164,7 @@ for i in "${!GENOMES[@]}"; do
 
   if [[ -n "$ercc_plain" ]]; then
     ercc_id="${GID}_with_ERCC"; ds_ercc_path="$OUTDIR/$ercc_id/datasheet.yml"; mkdir -p "$(dirname "$ds_ercc_path")"
-    ds_out2=$(python3 "$HERE/runner.py" datasheet --gid "$ercc_id" --fasta "$ercc_plain" ${GTF_STAGED:+--gtf "$GTF_STAGED"} --out "$ds_ercc_path")
+    ds_out2=$(python3 "$HERE/runner.py" datasheet --gid "$ercc_id" --fasta "$ercc_plain" ${ercc_gtf_combined:+--gtf "$ercc_gtf_combined"} --out "$ds_ercc_path")
     DS2=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DS2="$v"; done <<< "$ds_out2"
     cmd_out2=$(THREADS="$THREADS" MEM_GB="$MEM_GB" NXF_PROFILE="$NXF_PROFILE" NF_PIPELINE="$NF_PIPELINE" NF_REVISION="$NF_REVISION" NF_EXTRA_ARGS="$NF_EXTRA_ARGS" RESUME=1 \
       python3 "$HERE/runner.py" nf-cmd --datasheet "$DS2" --outdir "$OUTDIR/$ercc_id/indices" --aligners "$aligners" --tx "$txaln")
