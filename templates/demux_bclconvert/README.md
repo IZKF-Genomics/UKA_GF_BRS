@@ -25,18 +25,22 @@ Demultiplex Illumina BCLs using `bcl-convert`, with optional FastQC, fastq_scree
   - `multiqc/multiqc_report.html`
 
 ## Usage
-Render, then run (from your project directory):
+Render, then run in the desired working directory (e.g., where you want the FASTQ output):
 
 ```
-cd /path/to/projects/PROJECT
+cd /data/fastq/
 
 # Render with required parameter
-bpm template render --param "bcl_dir=/path/to/BCL_RUN" demux_bclconvert
+bpm template render demux_bclconvert \
+--bcl /data/raw/novaseq_A01742/250915_A01742_0505_AH2NNKDRX7/ \
+--out 250915_A01742_0505_AH2NNKDRX7
 
 # Run entry script
+cd 250915_A01742_0505_AH2NNKDRX7
+# this run command will include publish step as well
 bpm template run demux_bclconvert
 
-# Publish resolvers (records paths into project.yaml)
+# Publish resolvers if you didn't use bpm template run
 bpm template publish demux_bclconvert
 ```
 
