@@ -14,7 +14,7 @@ THREADS_FRACTION="{{ ctx.params.threads_fraction }}"
 NO_LANE_SPLITTING="{{ 'true' if ctx.params.no_lane_splitting else 'false' }}"
 SAMPLEPROJECT_SUBDIRS="{{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
 EXTRA_BCLCONVERT_ARGS="{{ ctx.params.extra_bclconvert_args or '' }}"
-FLOWCELL_ID="{{ ctx.params.flowcell_id or '' }}"
+FLOWCELL_ID="{{ ctx.params.get('flowcell_id','') }}"
 
 # ——— Helper: command existence ———
 have() { command -v "$1" >/dev/null 2>&1; }

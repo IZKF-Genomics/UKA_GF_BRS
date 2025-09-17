@@ -10,8 +10,7 @@ Demultiplex Illumina BCLs using `bcl-convert`, with optional FastQC, fastq_scree
 - `no_lane_splitting` (bool, default `true`): Pass `--no-lane-splitting` to bcl-convert.
 - `sampleproject_subdirs` (bool, default `true`): Create per-sample project subdirectories.
 - `extra_bclconvert_args` (str, default empty): Additional arguments appended to `bcl-convert`.
-- `use_api_samplesheet` (bool, default `true`): If true, pre-render hook fetches `samplesheet.csv` from API.
-- `flowcell_id` (str, optional): Override auto-detected flowcell id (derived from `bcl_dir` by default).
+- `use_api_samplesheet` (bool, default `true`): If true, post-render hook fetches `samplesheet.csv` from API.
 - `gf_api_name` / `gf_api_pass` (optional): Credentials for API (env vars also supported; see below).
 
 ## Paths and Outputs

@@ -7,9 +7,6 @@ params:
     required: true
     cli: "--bcl"
     exists: dir
-  flowcell_id:
-    type: str
-    cli: "--flowcell-id"
   use_api_samplesheet:
     type: bool
     default: true
