@@ -43,14 +43,14 @@ params:
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
   files:
-    - samplesheet.stub.csv -> samplesheet.stub.csv
+    - samplesheet.csv -> samplesheet.csv
     - run.sh.j2 -> run.sh
 
 run:
   entry: "run.sh"
 
 hooks:
-  pre_render:
+  post_render:
     - hooks.get_api_samplesheet:main
 
 publish:

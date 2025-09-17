@@ -8,10 +8,6 @@ BCL_DIR="{{ ctx.params.bcl_dir }}"
 # - Ad-hoc mode:  the ad-hoc output dir itself
 RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
 SAMPLE_SHEET="./samplesheet.csv"
-# Fallback to stub if API did not provide a samplesheet
-if [[ ! -f "$SAMPLE_SHEET" ]]; then
-  SAMPLE_SHEET="./samplesheet.stub.csv"
-fi
 RUN_FASTQ_SCREEN="{{ '1' if ctx.params.run_fastq_screen else '0' }}"
 RESERVE_CORES="{{ ctx.params.reserve_cores }}"
 THREADS_FRACTION="{{ ctx.params.threads_fraction }}"
