@@ -32,7 +32,7 @@ params:
     default: true
   sampleproject_subdirs:
     type: bool
-    default: true
+    default: false
   extra_bclconvert_args:
     type: str
     default: ""
