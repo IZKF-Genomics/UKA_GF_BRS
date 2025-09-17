@@ -8,12 +8,17 @@ BCL_DIR="{{ ctx.params.bcl_dir }}"
 # - Ad-hoc mode:  the ad-hoc output dir itself
 RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
 SAMPLE_SHEET="./samplesheet.csv"
+# Fallback to stub if API did not provide a samplesheet
+if [[ ! -f "$SAMPLE_SHEET" ]]; then
+  SAMPLE_SHEET="./samplesheet.stub.csv"
+fi
 RUN_FASTQ_SCREEN="{{ '1' if ctx.params.run_fastq_screen else '0' }}"
 RESERVE_CORES="{{ ctx.params.reserve_cores }}"
 THREADS_FRACTION="{{ ctx.params.threads_fraction }}"
 NO_LANE_SPLITTING="{{ 'true' if ctx.params.no_lane_splitting else 'false' }}"
 SAMPLEPROJECT_SUBDIRS="{{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
 EXTRA_BCLCONVERT_ARGS="{{ ctx.params.extra_bclconvert_args or '' }}"
+FLOWCELL_ID="{{ ctx.params.flowcell_id or '' }}"
 
 # ——— Helper: command existence ———
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -51,6 +56,9 @@ echo "Usable cores        : $USABLE_CORES (total - $RESERVE_CORES)"
 echo "Idle %              : $IDLE_PCT"
 echo "Estimated idle CPUs : $IDLE_CPUS"
 echo "bcl-convert threads : $THIRDJOBS each (render/compress/decompress)"
+if [[ -n "$FLOWCELL_ID" ]]; then
+  echo "Flowcell ID         : $FLOWCELL_ID"
+fi
 
 # ——— Tool checks ———
 MISSING=()
