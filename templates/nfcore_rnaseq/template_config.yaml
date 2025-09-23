@@ -6,17 +6,24 @@ params:
     required: true
     cli: "--genome"
     description: "iGenomes identifier (e.g. GRCh38, GRCm39)"
+  agendo_id:
+    type: int
+    required: true
+    cli: "--agendo-id"
+    description: "Agendo request id to fetch metadata"
 render:
-  into: "${ctx.project.name}/${ctx.template.id}/"
+  into: "${ctx.project_dir}/analysis/${ctx.template.id}/"
   files:
     - run.sh.j2 -> run.sh
     - nextflow.config.j2 -> nextflow.config
 run:
   entry: run.sh
 hooks:
+  pre_render:
+    - hooks.agendo:fetch
   pre_run:
     - hooks.nfcore_rnaseq_samplesheet_reverse:main
 
 tools:
-  required: [nextflow, docker]
+  required: []
   optional: []

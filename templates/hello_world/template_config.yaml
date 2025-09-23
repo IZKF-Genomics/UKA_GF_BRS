@@ -52,7 +52,7 @@ params:
 render:
   # Render into <project_name>/<template_id>/ under the current project directory.
   # In ad-hoc mode (with --out), BPM renders directly under that directory.
-  into: "${ctx.project.name}/${ctx.template.id}/"
+  into: "${ctx.template.id}/"
   files:
     - run.sh.j2 -> run.sh   # Jinja render: substitutes {{ ctx.params.name }} etc.
 
