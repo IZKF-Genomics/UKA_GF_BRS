@@ -29,9 +29,17 @@ def _split_host(path_str: str, default_host: str) -> tuple[str, str]:
 
 def _hostify(ctx, abs_local_path: Path) -> str:
     """
-    Convert an absolute local path to a host-aware string based on the project's
-    host-aware project_path; fall back to current host if outside the project root.
+    Convert an absolute local path to a host-aware string.
+
+    - Project mode: try to express the path relative to project.project_path's host/rest.
+    - Ad-hoc mode (ctx.project is None): return hostname:/abs/local/path directly.
     """
+    if not getattr(ctx, "project", None):
+        ap = abs_local_path.as_posix()
+        if not ap.startswith("/"):
+            ap = "/" + ap
+        return f"{ctx.hostname()}:{ap}"
+
     proj_host, proj_rest = _split_host(str(ctx.project.project_path), ctx.hostname())
     proj_local_root = Path(ctx.materialize(ctx.project.project_path)).resolve()
 

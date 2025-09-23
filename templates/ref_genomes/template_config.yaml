@@ -19,3 +19,7 @@ render:
 
 run:
   entry: "run.sh"
+
+tools:
+  required: [python3, nextflow]
+  optional: [docker, singularity, apptainer, curl, wget, gzip]
