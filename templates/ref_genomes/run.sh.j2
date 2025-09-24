@@ -60,7 +60,9 @@ NF_EXTRA_ARGS="${NF_EXTRA_ARGS:-}"
 RESUME_FLAG=""; if [[ "${RESUME:-1}" != "0" ]]; then RESUME_FLAG="-resume"; fi
 
 # Default set of indices if none specified for a genome
-ALL_INDICES="star,bwa,bwamem2,bowtie2,hisat2,minimap2,salmon,kallisto"
+# Default tools for nf-core/references when none specified
+# Can be overridden via TOOLS env
+TOOLS="${TOOLS:-bowtie1,bowtie2,bwamem1,bwamem2,createsequencedictionary,dragmap,faidx,gffread,hisat2,hisat2_extractsplicesites,intervals,kallisto,msisensorpro,rsem,rsem_make_transcript_fasta,salmon,sizes,star}"
 
 # ERCC bundle lives next to this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -141,36 +143,49 @@ for i in "${!GENOMES[@]}"; do
     done <<< "$ercc_out"
   fi
 
-  # 4) Tools
-  tools="$INDICES"; [[ -z "$tools" ]] && tools="$ALL_INDICES"
-  tools_out=$(python3 "$HERE/runner.py" tools --indices "$tools")
-  aligners=""; txaln=""
-  while IFS='=' read -r k v; do
-    case "$k" in
-      ALIGNERS) aligners="$v";;
-      TX) txaln="$v";;
-    esac
-  done <<< "$tools_out"
-
-  # 5) Datasheets and Nextflow commands
+  # 4) Datasheets and Nextflow command
   ds_out=$(python3 "$HERE/runner.py" datasheet --gid "$GID" --fasta "$FASTA_PLAIN" ${GTF_STAGED:+--gtf "$GTF_STAGED"} --out "$local_root/datasheet.yml")
   DATASHEET=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DATASHEET="$v"; done <<< "$ds_out"
-  # Show the exact Nextflow command and then run it via runner
-  cmd_out=$(THREADS="$THREADS" MEM_GB="$MEM_GB" NXF_PROFILE="$NXF_PROFILE" NF_PIPELINE="$NF_PIPELINE" NF_REVISION="$NF_REVISION" NF_EXTRA_ARGS="$NF_EXTRA_ARGS" RESUME=1 \
-    python3 "$HERE/runner.py" nf-cmd --datasheet "$DATASHEET" --outdir "$local_root/indices" --aligners "$aligners" --tx "$txaln")
-  echo "$cmd_out" | sed 's/^CMD=//'
-  THREADS="$THREADS" MEM_GB="$MEM_GB" NXF_PROFILE="$NXF_PROFILE" NF_PIPELINE="$NF_PIPELINE" NF_REVISION="$NF_REVISION" NF_EXTRA_ARGS="$NF_EXTRA_ARGS" RESUME=1 \
-    python3 "$HERE/runner.py" nf-run --datasheet "$DATASHEET" --outdir "$local_root/indices" --aligners "$aligners" --tx "$txaln"
+  # Build the explicit Nextflow command (requested format)
+  NXF_CMD=( nextflow run "$NF_PIPELINE" \
+            -r "$NF_REVISION" \
+            -profile "$NXF_PROFILE" \
+            --input "$DATASHEET" \
+            --outdir "$local_root/indices" \
+            --max_cpus "$THREADS" \
+            --max_memory "${MEM_GB}GB" \
+            -work-dir "$local_root/indices/work" \
+            --tools "$TOOLS" )
+  if [[ -n "$NF_EXTRA_ARGS" ]]; then
+    # shellcheck disable=SC2206
+    EXTRA_ARR=(${NF_EXTRA_ARGS})
+    NXF_CMD+=("${EXTRA_ARR[@]}")
+  fi
+  printf 'Running:'; printf ' %q' "${NXF_CMD[@]}"; echo
+  printf '%q ' "${NXF_CMD[@]}" > "$local_root/.bpm_cmd.log"
+  "${NXF_CMD[@]}"
 
   if [[ -n "$ercc_plain" ]]; then
     ercc_id="${GID}_with_ERCC"; ds_ercc_path="$OUTDIR/$ercc_id/datasheet.yml"; mkdir -p "$(dirname "$ds_ercc_path")"
     ds_out2=$(python3 "$HERE/runner.py" datasheet --gid "$ercc_id" --fasta "$ercc_plain" ${ercc_gtf_combined:+--gtf "$ercc_gtf_combined"} --out "$ds_ercc_path")
     DS2=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DS2="$v"; done <<< "$ds_out2"
-    cmd_out2=$(THREADS="$THREADS" MEM_GB="$MEM_GB" NXF_PROFILE="$NXF_PROFILE" NF_PIPELINE="$NF_PIPELINE" NF_REVISION="$NF_REVISION" NF_EXTRA_ARGS="$NF_EXTRA_ARGS" RESUME=1 \
-      python3 "$HERE/runner.py" nf-cmd --datasheet "$DS2" --outdir "$OUTDIR/$ercc_id/indices" --aligners "$aligners" --tx "$txaln")
-    echo "$cmd_out2" | sed 's/^CMD=//'
-    THREADS="$THREADS" MEM_GB="$MEM_GB" NXF_PROFILE="$NXF_PROFILE" NF_PIPELINE="$NF_PIPELINE" NF_REVISION="$NF_REVISION" NF_EXTRA_ARGS="$NF_EXTRA_ARGS" RESUME=1 \
-      python3 "$HERE/runner.py" nf-run --datasheet "$DS2" --outdir "$OUTDIR/$ercc_id/indices" --aligners "$aligners" --tx "$txaln"
+    NXF_CMD2=( nextflow run "$NF_PIPELINE" \
+               -r "$NF_REVISION" \
+               -profile "$NXF_PROFILE" \
+               --input "$DS2" \
+               --outdir "$OUTDIR/$ercc_id/indices" \
+               --max_cpus "$THREADS" \
+               --max_memory "${MEM_GB}GB" \
+               -work-dir "$OUTDIR/$ercc_id/indices/work" \
+               --tools "$TOOLS" )
+    if [[ -n "$NF_EXTRA_ARGS" ]]; then
+      # shellcheck disable=SC2206
+      EXTRA_ARR=(${NF_EXTRA_ARGS})
+      NXF_CMD2+=("${EXTRA_ARR[@]}")
+    fi
+    printf 'Running:'; printf ' %q' "${NXF_CMD2[@]}"; echo
+    printf '%q ' "${NXF_CMD2[@]}" > "$OUTDIR/$ercc_id/.bpm_cmd.log"
+    "${NXF_CMD2[@]}"
   fi
 
   log "done $GID"
