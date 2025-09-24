@@ -51,8 +51,8 @@ _in_only() {
 # ---- Configuration knobs (override via environment) -------------------------
 OUTDIR="${OUTDIR:-$PWD}"             # Where outputs go (use your --out path)
 CFG_PATH="${CFG_PATH:-$PWD/genomes.yaml}"  # Config file
-THREADS="${THREADS:-16}"
-MEM_GB="${MEM_GB:-64}"
+THREADS="${THREADS:-40}"
+MEM_GB="${MEM_GB:-200}"
 NXF_PROFILE="${NXF_PROFILE:-docker}" # docker | singularity | conda
 NF_PIPELINE="${NF_PIPELINE:-nf-core/references}"
 NF_REVISION="${NF_REVISION:-dev}"
