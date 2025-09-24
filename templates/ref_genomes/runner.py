@@ -57,6 +57,10 @@ def _conf_from_cfg(cfg: Dict[str, Any]) -> Dict[str, str]:
 
 def _download_or_copy(src: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
+    force = str(os.environ.get("FORCE", "0")).lower() not in ("0", "false", "no")
+    if dest.exists() and dest.stat().st_size > 0 and not force:
+        _log(f"exists: {dest} (skip download)")
+        return dest
     if src.startswith("http://") or src.startswith("https://"):
         _log(f"download: {src} -> {dest}")
         if _have("curl"):
@@ -74,6 +78,10 @@ def _download_or_copy(src: str, dest: Path) -> Path:
 
 def _decompress_to(src: Path, dst: Path) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
+    force = str(os.environ.get("FORCE", "0")).lower() not in ("0", "false", "no")
+    if dst.exists() and dst.stat().st_size > 0 and not force:
+        _log(f"exists: {dst} (skip decompress)")
+        return dst
     if str(src).endswith(".gz"):
         _log(f"decompress: {src.name} -> {dst.name}")
         import gzip
