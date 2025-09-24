@@ -153,6 +153,11 @@ for i in "${!GENOMES[@]}"; do
   # 4) Datasheets and Nextflow command
   ds_out=$(python3 "$HERE/runner.py" datasheet --gid "$GID" --fasta "$FASTA_PLAIN" ${GTF_STAGED:+--gtf "$GTF_STAGED"} --out "$local_root/datasheet.yml")
   DATASHEET=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DATASHEET="$v"; done <<< "$ds_out"
+  # Determine tools for this genome: prefer per-genome 'indices' from config; fallback to global nfcore.tools
+  TOOLS_GENOME="$INDICES"
+  if [[ -z "$TOOLS_GENOME" ]]; then
+    TOOLS_GENOME="${TOOLS-}"
+  fi
   # Build the explicit Nextflow command (requested format)
   NXF_CMD=( nextflow run "$NF_PIPELINE" \
             -r "$NF_REVISION" \
@@ -162,8 +167,8 @@ for i in "${!GENOMES[@]}"; do
             --max_cpus "$THREADS" \
             --max_memory "${MEM_GB}GB" \
             -work-dir "$local_root/indices/work" )
-  if [[ -n "${TOOLS-}" ]]; then
-    NXF_CMD+=( --tools "$TOOLS" )
+  if [[ -n "$TOOLS_GENOME" ]]; then
+    NXF_CMD+=( --tools "$TOOLS_GENOME" )
   fi
   if [[ -n "$NF_EXTRA_ARGS" ]]; then
     # shellcheck disable=SC2206
@@ -186,8 +191,8 @@ for i in "${!GENOMES[@]}"; do
                --max_cpus "$THREADS" \
                --max_memory "${MEM_GB}GB" \
                -work-dir "$OUTDIR/$ercc_id/indices/work" )
-    if [[ -n "${TOOLS-}" ]]; then
-      NXF_CMD2+=( --tools "$TOOLS" )
+    if [[ -n "$TOOLS_GENOME" ]]; then
+      NXF_CMD2+=( --tools "$TOOLS_GENOME" )
     fi
     if [[ -n "$NF_EXTRA_ARGS" ]]; then
       # shellcheck disable=SC2206
