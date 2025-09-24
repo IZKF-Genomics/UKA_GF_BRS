@@ -44,6 +44,17 @@ def _load_config(path: Path) -> Dict[str, Any]:
         raise SystemExit(f"Failed to parse config at {path}: {e}. Install PyYAML or provide JSON.")
 
 
+def _conf_from_cfg(cfg: Dict[str, Any]) -> Dict[str, str]:
+    nf = cfg.get("nfcore") or {}
+    return {
+        "NF_PIPELINE": str(nf.get("pipeline") or "nf-core/references"),
+        "NF_REVISION": str(nf.get("revision") or "dev"),
+        "NXF_PROFILE": str(nf.get("profile") or "docker"),
+        "NF_EXTRA_ARGS": str(nf.get("extra_args") or ""),
+        "TOOLS": str(nf.get("tools") or ""),
+    }
+
+
 def _download_or_copy(src: str, dest: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if src.startswith("http://") or src.startswith("https://"):
@@ -110,6 +121,17 @@ def cmd_list(args: argparse.Namespace) -> int:
         ercc = g.get("ercc")
         ercc_s = "" if ercc is None else ("true" if ercc else "false")
         print(f"GENOME\t{gid}\t{fasta}\t{gtf}\t{indices}\t{ercc_s}")
+    return 0
+
+
+def cmd_conf(args: argparse.Namespace) -> int:
+    cfg_path = Path(args.config or os.environ.get("CFG_PATH", "genomes.yaml"))
+    if not cfg_path.exists():
+        raise SystemExit(f"Config not found: {cfg_path}")
+    cfg = _load_config(cfg_path)
+    conf = _conf_from_cfg(cfg)
+    for k, v in conf.items():
+        print(f"{k}={v}")
     return 0
 
 
@@ -283,3 +305,6 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+    p_conf = sub.add_parser("conf", help="Print nf-core configuration derived from config file")
+    p_conf.add_argument("--config", help="Path to genomes.yaml/json")
+    p_conf.set_defaults(fun=cmd_conf)
