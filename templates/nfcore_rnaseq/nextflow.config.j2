@@ -1,10 +1,29 @@
 // Minimal site config for nf-core/rnaseq
 // Customize executor/queue/resources here as needed
 
-// Example (uncomment and edit for your site):
-// process {
-//   executor = 'local'
-//   cpus = 4
-//   memory = '8 GB'
-// }
+# Example (uncomment and edit for your site):
+process {
+  executor = 'local'
+  cpus = 4
+  memory = '8 GB'
+}
 
+params {
+    genomes {
+        'GRCh38' {
+            fasta              = '/data/genomes/GRCh38/sequence/GRCh38.fa'
+            gtf                = '/data/genomes/GRCh38/annotation/genes.gtf'
+
+            // Common indices
+            star_index         = '/data/genomes/GRCh38/indices/star/'
+            hisat2_index       = '/data/genomes/GRCh38/indices/hisat2/genome'
+            bwa_index          = '/data/genomes/GRCh38/indices/bwa/GRCh38.fa'
+            salmon_index       = '/data/genomes/GRCh38/indices/salmon/'
+            kallisto_index     = '/data/genomes/GRCh38/indices/kallisto.idx'
+
+            // Optional extras
+            known_indels       = '/data/genomes/GRCh38/known_indels.vcf.gz'
+            dbsnp              = '/data/genomes/GRCh38/dbsnp.vcf.gz'
+        }
+    }
+}

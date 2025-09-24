@@ -6,7 +6,7 @@ params: {}
 render:
   # In project mode, this would render under the project. In ad-hoc mode (--out),
   # BPM overrides 'into' to '.' so files land directly under the provided folder.
-  into: "${ctx.project_dir}/${ctx.template.id}/"
+  into: "/data/ref_genomes/"
   files:
     # Render run script and starter config
     - run.sh.j2      -> run.sh
