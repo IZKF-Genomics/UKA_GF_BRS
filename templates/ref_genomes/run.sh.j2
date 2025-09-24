@@ -105,7 +105,7 @@ while IFS='=' read -r k v; do
     NF_REVISION) [[ -z "$NF_REVISION" ]] && NF_REVISION="$v";;
     NXF_PROFILE) [[ -z "$NXF_PROFILE" ]] && NXF_PROFILE="$v";;
     NF_EXTRA_ARGS) [[ -z "$NF_EXTRA_ARGS" ]] && NF_EXTRA_ARGS="$v";;
-    TOOLS) [[ -z "$TOOLS" ]] && TOOLS="$v";;
+    TOOLS) [[ -z "${TOOLS-}" ]] && TOOLS="$v";;
   esac
 done < <(python3 "$HERE/runner.py" conf --config "$CFG_PATH")
 
@@ -161,8 +161,10 @@ for i in "${!GENOMES[@]}"; do
             --outdir "$local_root/indices" \
             --max_cpus "$THREADS" \
             --max_memory "${MEM_GB}GB" \
-            -work-dir "$local_root/indices/work" \
-            --tools "$TOOLS" )
+            -work-dir "$local_root/indices/work" )
+  if [[ -n "${TOOLS-}" ]]; then
+    NXF_CMD+=( --tools "$TOOLS" )
+  fi
   if [[ -n "$NF_EXTRA_ARGS" ]]; then
     # shellcheck disable=SC2206
     EXTRA_ARR=(${NF_EXTRA_ARGS})
@@ -183,8 +185,10 @@ for i in "${!GENOMES[@]}"; do
                --outdir "$OUTDIR/$ercc_id/indices" \
                --max_cpus "$THREADS" \
                --max_memory "${MEM_GB}GB" \
-               -work-dir "$OUTDIR/$ercc_id/indices/work" \
-               --tools "$TOOLS" )
+               -work-dir "$OUTDIR/$ercc_id/indices/work" )
+    if [[ -n "${TOOLS-}" ]]; then
+      NXF_CMD2+=( --tools "$TOOLS" )
+    fi
     if [[ -n "$NF_EXTRA_ARGS" ]]; then
       # shellcheck disable=SC2206
       EXTRA_ARR=(${NF_EXTRA_ARGS})
