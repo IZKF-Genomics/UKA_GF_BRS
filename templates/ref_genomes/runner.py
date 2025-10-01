@@ -149,12 +149,36 @@ def cmd_stage(args: argparse.Namespace) -> int:
     src_dir = outdir / "src"
     src_dir.mkdir(parents=True, exist_ok=True)
     fasta_staged = _download_or_copy(args.fasta, src_dir / Path(args.fasta).name)
+    fasta_plain = _decompress_to(
+        fasta_staged,
+        src_dir
+        / (
+            fasta_staged.stem
+            if fasta_staged.suffix == ".gz"
+            else fasta_staged.name
+        ),
+    )
+
     gtf_staged = ""
+    gtf_plain = ""
     if args.gtf:
-        gtf_staged = str(_download_or_copy(args.gtf, src_dir / Path(args.gtf).name))
-    fasta_plain = _decompress_to(fasta_staged, src_dir / (fasta_staged.stem if fasta_staged.suffix == ".gz" else fasta_staged.name))
+        gtf_staged_path = _download_or_copy(args.gtf, src_dir / Path(args.gtf).name)
+        gtf_staged = str(gtf_staged_path)
+        gtf_plain_path = _decompress_to(
+            gtf_staged_path,
+            src_dir
+            / (
+                gtf_staged_path.stem
+                if gtf_staged_path.suffix == ".gz"
+                else gtf_staged_path.name
+            ),
+        )
+        gtf_plain = str(gtf_plain_path)
+
     print(f"FASTA_STAGED={fasta_staged}")
     print(f"GTF_STAGED={gtf_staged}")
+    if gtf_plain:
+        print(f"GTF_PLAIN={gtf_plain}")
     print(f"FASTA_PLAIN={fasta_plain}")
     return 0
 

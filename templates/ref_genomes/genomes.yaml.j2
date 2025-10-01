@@ -8,7 +8,7 @@
 with_ercc: true               # append ERCC92 sequences to each genome
 nfcore:
   pipeline: nf-core/references
-  revision: stable            # or a tag like "2.3.0"
+  revision: dev            # or a tag like "2.3.0"
   profile: docker             # docker | singularity | conda
   extra_args: ""              # extra flags passed through to nextflow run
   tools: "bowtie1,bowtie2,bwamem1,bwamem2,createsequencedictionary,dragmap,faidx,gffread,hisat2,hisat2_extractsplicesites,intervals,kallisto,msisensorpro,rsem,rsem_make_transcript_fasta,salmon,sizes,star"

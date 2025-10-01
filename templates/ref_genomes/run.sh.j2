@@ -128,11 +128,12 @@ for i in "${!GENOMES[@]}"; do
   # 1) Stage inputs (delegate to runner)
   stage_out=$(python3 "$HERE/runner.py" stage --gid "$GID" --fasta "$FASTA" ${GTF:+--gtf "$GTF"} --outdir "$local_root")
   # Parse key=value lines
-  FASTA_STAGED=""; GTF_STAGED=""; FASTA_PLAIN=""
+  FASTA_STAGED=""; GTF_STAGED=""; GTF_PLAIN=""; FASTA_PLAIN=""
   while IFS='=' read -r k v; do
     case "$k" in
       FASTA_STAGED) FASTA_STAGED="$v";;
       GTF_STAGED) GTF_STAGED="$v";;
+      GTF_PLAIN) GTF_PLAIN="$v";;
       FASTA_PLAIN) FASTA_PLAIN="$v";;
     esac
   done <<< "$stage_out"
@@ -141,7 +142,7 @@ for i in "${!GENOMES[@]}"; do
   use_ercc="$WITH_ERCC"; [[ -n "$ERCC_OVERRIDE" ]] && use_ercc="$ERCC_OVERRIDE"
   ercc_plain=""; ercc_gtf_combined=""
   if [[ "$use_ercc" =~ ^(true|True|1)$ ]]; then
-    ercc_out=$(python3 "$HERE/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$local_root" ${GTF_STAGED:+--gtf "$GTF_STAGED"})
+    ercc_out=$(python3 "$HERE/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$local_root" ${GTF_PLAIN:+--gtf "$GTF_PLAIN"})
     while IFS='=' read -r k v; do
       case "$k" in
         ERCC_FASTA) ercc_plain="$v";;
