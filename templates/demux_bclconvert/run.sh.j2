@@ -117,4 +117,6 @@ multiqc -f . -o ./multiqc
 
 # ——— Cleanup intermediates (leave results + multiqc) ———
 rm -rf ./fastqc
-[[ -d ./fastq_screen ]] && rm -rf ./fastq_screen
+if [[ -d ./fastq_screen ]]; then
+  rm -rf ./fastq_screen
+fi

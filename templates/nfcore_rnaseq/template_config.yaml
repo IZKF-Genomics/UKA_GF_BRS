@@ -11,6 +11,18 @@ params:
     required: true
     cli: "--agendo-id"
     description: "Agendo request id to fetch metadata"
+  umi:
+    type: bool
+    required: false
+    cli: "--umi"
+    description: "Whether the data contains UMI barcodes"
+    default: false
+  ercc:
+    type: bool
+    required: false
+    cli: "--ercc"
+    description: "Whether the data contains ERCC spike-ins"
+    default: false
 render:
   into: "${ctx.project_dir}/analysis/${ctx.template.id}/"
   files:
