@@ -46,7 +46,11 @@ def _load_fastq_dir(ctx) -> Path:
             fastq_dir = (tpl.get("published") or {}).get(PUBLISHED_KEY)
             if not fastq_dir:
                 raise RuntimeError(f"Published key missing: {DEMUX_ID}.{PUBLISHED_KEY}")
-            p = Path(fastq_dir)
+            if isinstance(fastq_dir, str) and ":" in fastq_dir:
+                local_path = ctx.materialize(fastq_dir)
+            else:
+                local_path = fastq_dir
+            p = Path(str(local_path))
             if not p.exists():
                 raise RuntimeError(f"FASTQ dir does not exist: {p}")
             return p
@@ -75,7 +79,12 @@ def generate(ctx, strandedness: str) -> str:
         strandedness = "unstranded"
 
     fqdir = _load_fastq_dir(ctx)
-    out = Path(ctx.cwd) / "samplesheet.csv"
+    if ctx.project:
+        out_dir = Path(ctx.project_dir) / "analysis" / ctx.template.id
+    else:
+        out_dir = Path(ctx.cwd)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / "samplesheet.csv"
 
     r1s: List[str] = sorted(glob.glob(str(fqdir / f"*{READ1_EXTENSION}")))
     if not r1s:
@@ -99,7 +108,6 @@ def generate(ctx, strandedness: str) -> str:
     if not reads:
         raise RuntimeError("No usable FASTQ files found (all Undetermined?)")
 
-    out.parent.mkdir(parents=True, exist_ok=True)
     header = ["sample", "fastq_1", "fastq_2", "strandedness"]
     rows: List[List[str]] = []
     for sample, rr in sorted(reads.items()):
@@ -114,4 +122,3 @@ def generate(ctx, strandedness: str) -> str:
 
     print(f"[samplesheet] {len(rows)} rows from {len(reads)} sample(s) -> {out}")
     return str(out)
-

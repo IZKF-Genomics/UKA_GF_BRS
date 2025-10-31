@@ -34,7 +34,7 @@ hooks:
   pre_render:
     - hooks.agendo:fetch
     - hooks.genome_from_organism:set_from_organism
-  pre_run:
+  post_render:
     - hooks.nfcore_rnaseq_samplesheet_reverse:main
 
 tools:

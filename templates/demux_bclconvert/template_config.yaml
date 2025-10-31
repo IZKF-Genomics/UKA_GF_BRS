@@ -26,14 +26,11 @@ params:
     default: false
     cli: "--fastq-screen"
     description: "Run fastq_screen after demultiplexing"
-  reserve_cores:
-    type: int
-    default: 10
-    description: "Cores to reserve for the system (not used by bcl-convert)"
-  threads_fraction:
+  thread_ratio:
     type: float
-    default: 0.33
-    description: "Fraction of available cores to give to bcl-convert"
+    default: 0.8
+    cli: "--thread-ratio"
+    description: "Fraction of idle CPUs to assign per bcl-convert thread pool (0-1)"
   no_lane_splitting:
     type: bool
     default: true
@@ -42,10 +39,6 @@ params:
     type: bool
     default: false
     description: "Organize FASTQs under SampleProject/ subdirectories"
-  extra_bclconvert_args:
-    type: str
-    default: ""
-    description: "Extra arguments passed directly to bcl-convert"
 
 
 tools:
@@ -57,6 +50,7 @@ render:
   files:
     - samplesheet.csv -> samplesheet.csv
     - run.sh.j2 -> run.sh
+    - get_threads.sh.j2 -> get_threads.sh
 
 run:
   entry: "run.sh"

@@ -1,122 +1,56 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ——— Parameters from BPM (expanded by Jinja) ———
-BCL_DIR="{{ ctx.params.bcl_dir }}"
-# Determine run directory:
-# - Project mode: <project_path>/<template_id> (materialized)
-# - Ad-hoc mode:  the ad-hoc output dir itself
+{% if ctx.params.get("flowcell_id") %}
+echo "Flowcell ID         : {{ ctx.params.flowcell_id }}"
+{% endif %}
+echo "Thread ratio        : {{ ctx.params.thread_ratio }}"
+echo "FASTQ subdirs       : {{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
+echo "fastq_screen        : {{ 'enabled' if ctx.params.run_fastq_screen else 'disabled' }}"
+
+# Derive per-stage threads from the current host using the bundled helper.
+THREADS=$(bash "$(dirname "${BASH_SOURCE[0]}")/get_threads.sh" "{{ ctx.params.thread_ratio }}")
+# Split the pool roughly 1/3–1/3–remainder, never dropping below 1.
+sub_threads=$(( THREADS / 3 ))
+(( sub_threads < 1 )) && sub_threads=1
+
+# Switch to the render target (project mode or ad-hoc output).
 RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
-SAMPLE_SHEET="./samplesheet.csv"
-RUN_FASTQ_SCREEN="{{ '1' if ctx.params.run_fastq_screen else '0' }}"
-RESERVE_CORES="{{ ctx.params.reserve_cores }}"
-THREADS_FRACTION="{{ ctx.params.threads_fraction }}"
-NO_LANE_SPLITTING="{{ 'true' if ctx.params.no_lane_splitting else 'false' }}"
-SAMPLEPROJECT_SUBDIRS="{{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
-EXTRA_BCLCONVERT_ARGS="{{ ctx.params.extra_bclconvert_args or '' }}"
-FLOWCELL_ID="{{ ctx.params.get('flowcell_id','') }}"
-
-# ——— Helper: command existence ———
-have() { command -v "$1" >/dev/null 2>&1; }
-
-# ——— Detect cores and (optionally) idle CPUs ———
-detect_cores() {
-  if have nproc; then
-    nproc
-  elif have getconf; then
-    getconf _NPROCESSORS_ONLN
-  else
-    echo 1
-  fi
-}
-
-TOTAL_CORES="$(detect_cores)"
-USABLE_CORES=$(( TOTAL_CORES - RESERVE_CORES ))
-if (( USABLE_CORES < 1 )); then USABLE_CORES=1; fi
-
-IDLE_PCT=100
-if have mpstat; then
-  # Average idle over 1s
-  IDLE_PCT="$(mpstat 1 1 | awk '/Average:/ && $12 ~ /[0-9.]+/ { print $12 }' || echo 100)"
-fi
-
-# Estimate idle CPUs out of USABLE_CORES
-IDLE_CPUS="$(awk -v idle_pct="$IDLE_PCT" -v cores="$USABLE_CORES" 'BEGIN { print int(idle_pct * cores / 100) }')"
-if (( IDLE_CPUS < 1 )); then IDLE_CPUS=1; fi
-
-# Assign bcl-convert threads as a fraction of idle CPUs (≥1)
-THIRDJOBS="$(awk -v f="$THREADS_FRACTION" -v n="$IDLE_CPUS" 'BEGIN { v=int(f*n); if (v<1) v=1; print v }')"
-
-echo "Total cores         : $TOTAL_CORES"
-echo "Usable cores        : $USABLE_CORES (total - $RESERVE_CORES)"
-echo "Idle %              : $IDLE_PCT"
-echo "Estimated idle CPUs : $IDLE_CPUS"
-echo "bcl-convert threads : $THIRDJOBS each (render/compress/decompress)"
-if [[ -n "$FLOWCELL_ID" ]]; then
-  echo "Flowcell ID         : $FLOWCELL_ID"
-fi
-
-# ——— Tool checks ———
-MISSING=()
-for tool in bcl-convert parallel fastqc multiqc; do
-  have "$tool" || MISSING+=("$tool")
-done
-{% raw %}if (( ${#MISSING[@]} > 0 )); then{% endraw %}
-  echo "ERROR: missing tools: ${MISSING[*]}" >&2
-  exit 1
-fi
-if [[ "$RUN_FASTQ_SCREEN" == "1" ]] && ! have fastq_screen; then
-  echo "WARN: fastq_screen not found. Disabling fastq_screen." >&2
-  RUN_FASTQ_SCREEN="0"
-fi
-
-# ——— Resolve paths and enter run directory ———
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 
-# Decide FASTQ output folder: if sampleproject_subdirs=false -> ./output, else -> .
-if [[ "$SAMPLEPROJECT_SUBDIRS" == "true" ]]; then
-  DEST_DIR="."
-else
-  DEST_DIR="./output"
-fi
+DEST_DIR="{{ '.' if ctx.params.sampleproject_subdirs else './output' }}"
 
-# ——— Run bcl-convert ———
-set -x
+# Primary demultiplexing step.
 bcl-convert \
-  --bcl-input-directory "$BCL_DIR" \
+  --bcl-input-directory "{{ ctx.params.bcl_dir }}" \
   --output-directory "$DEST_DIR" \
-  --sample-sheet "$SAMPLE_SHEET" \
-  --bcl-sampleproject-subdirectories "$SAMPLEPROJECT_SUBDIRS" \
-  --no-lane-splitting "$NO_LANE_SPLITTING" \
-  --bcl-num-conversion-threads "$THIRDJOBS" \
-  --bcl-num-compression-threads "$THIRDJOBS" \
-  --bcl-num-decompression-threads "$THIRDJOBS" \
-  $EXTRA_BCLCONVERT_ARGS
-set +x
+  --sample-sheet "./samplesheet.csv" \
+  --bcl-sampleproject-subdirectories "{{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}" \
+  --no-lane-splitting "{{ 'true' if ctx.params.no_lane_splitting else 'false' }}" \
+  --bcl-num-conversion-threads "$sub_threads" \
+  --bcl-num-compression-threads "$sub_threads" \
+  --bcl-num-decompression-threads "$sub_threads"
 
-# ——— FastQC ———
-mkdir -p ./fastqc
-# find all FASTQs (project subdirs or not), run in parallel
+# Run FastQC in parallel across the generated FASTQs.
+mkdir -p fastqc
 find . -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
-  parallel -0 -j "$IDLE_CPUS" "fastqc {} -o ./fastqc"
+ parallel -0 -j "$IDLE_CPUS" "fastqc {} -o fastqc"
 
-# ——— fastq_screen (optional) ———
-if [[ "$RUN_FASTQ_SCREEN" == "1" ]]; then
-  echo "Running fastq_screen..."
-  mkdir -p ./fastq_screen
-  find . -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
-    parallel -0 -j "$IDLE_CPUS" "fastq_screen --outdir ./fastq_screen {}"
-else
-  echo "Skipping fastq_screen."
-fi
+{% if ctx.params.run_fastq_screen %}
+# Optional contamination screen.
+echo "Running fastq_screen..."
+mkdir -p fastq_screen
+find . -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
+  parallel -0 -j "$IDLE_CPUS" "fastq_screen --outdir fastq_screen {}"
+{% endif %}
 
-# ——— MultiQC ———
-mkdir -p ./multiqc
-multiqc -f . -o ./multiqc
+# Summarise everything with MultiQC once fastqs are ready.
+mkdir -p multiqc
+multiqc -f . -o multiqc
 
-# ——— Cleanup intermediates (leave results + multiqc) ———
-rm -rf ./fastqc
-if [[ -d ./fastq_screen ]]; then
-  rm -rf ./fastq_screen
-fi
+# Clean up intermediate directories
+[[ -d fastqc ]] && rm -rf fastqc
+{% if ctx.params.run_fastq_screen %}
+[[ -d fastq_screen ]] && rm -rf fastq_screen
+{% endif %}
