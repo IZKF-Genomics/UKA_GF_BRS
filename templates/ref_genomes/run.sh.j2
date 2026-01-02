@@ -1,197 +1,55 @@
 #!/usr/bin/env bash
-# ----------------------------------------------------------------------------
-# ref_genomes runner (transparent Bash)
-#
-# Shows the main logic explicitly:
-#  - parses genomes.yaml (via a tiny Python snippet)
-#  - resolves --all/--only selection
-#  - stages FASTA/annotation and optional ERCC append
-#  - prints and executes the exact Nextflow command for each genome
-# ----------------------------------------------------------------------------
 set -euo pipefail
-
-# Enable bash command tracing if VERBOSE=1
-if [[ "${VERBOSE:-0}" == "1" ]]; then set -x; fi
-
-# ---- CLI arguments ----------------------------------------------------------
-ALL=0
-ONLY_LIST=""
-usage() {
-  cat <<USAGE
-ref_genomes runner
-
-Options:
-  --all                  Process all genomes listed in genomes.yaml
-  --only ID[,ID2,...]    Process only the specified genome IDs (comma-separated)
-  -h, --help             Show this help
-
-Examples:
-  ./run.sh --all
-  ./run.sh --only GRCh38,GRCm39
-USAGE
-}
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --all) ALL=1; shift;;
-    --only) ONLY_LIST="${2:-}"; shift 2;;
-    --only=*) ONLY_LIST="${1#--only=}"; shift;;
-    -h|--help) usage; exit 0;;
-    *) break;;
-  esac
-done
-[[ $ALL -eq 0 && -z "$ONLY_LIST" ]] && ALL=1
-
-_in_only() {
-  local gid="$1"; [[ -z "$ONLY_LIST" ]] && return 0
-  IFS=',' read -r -a _arr <<< "$ONLY_LIST"
-  for x in "${_arr[@]}"; do [[ "$gid" == "$x" ]] && return 0; done
-  return 1
-}
-
-# ---- Configuration knobs (override via environment) -------------------------
-OUTDIR="${OUTDIR:-$PWD}"             # Where outputs go (use your --out path)
-CFG_PATH="${CFG_PATH:-$PWD/genomes.yaml}"  # Config file
-THREADS="${THREADS:-40}"
-MEM_GB="${MEM_GB:-200}"
-NXF_PROFILE="${NXF_PROFILE:-docker}" # docker | singularity | conda
-NF_PIPELINE="${NF_PIPELINE:-nf-core/references}"
-NF_REVISION="${NF_REVISION:-dev}"
-NF_EXTRA_ARGS="${NF_EXTRA_ARGS:-}"
-RESUME_FLAG=""; if [[ "${RESUME:-1}" != "0" ]]; then RESUME_FLAG="-resume"; fi
-
-# ERCC bundle lives next to this script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ERCC_FA="$SCRIPT_DIR/ERCC92/ERCC92.fa"
+source "$SCRIPT_DIR/genomes.sh"
 
-# ---- Small helpers ----------------------------------------------------------
-log()  { printf "[%s] %s\n" "$(date -u +%FT%TZ)" "$*"; }
-
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-runner_list() {
-  CFG_PATH="$CFG_PATH" python3 "$HERE/runner.py" list --config "$CFG_PATH"
-}
-runner_conf() {
-  python3 "$HERE/runner.py" conf --config "$CFG_PATH"
-}
-# ---- Read config via runner (TSV output) ------------------------------------
-if ! mapfile -t GENOMES < <(runner_list); then
-  log "Failed to parse $CFG_PATH (install PyYAML or use a JSON config)."
-  exit 1
-fi
-# Load nf-core config (pipeline/profile/revision/extra_args/tools) from genomes.yaml
-while IFS='=' read -r k v; do
-  case "$k" in
-    NF_PIPELINE) [[ -z "$NF_PIPELINE" ]] && NF_PIPELINE="$v";;
-    NF_REVISION) [[ -z "$NF_REVISION" ]] && NF_REVISION="$v";;
-    NXF_PROFILE) [[ -z "$NXF_PROFILE" ]] && NXF_PROFILE="$v";;
-    NF_EXTRA_ARGS) [[ -z "$NF_EXTRA_ARGS" ]] && NF_EXTRA_ARGS="$v";;
-    TOOLS) [[ -z "${TOOLS-}" ]] && TOOLS="$v";;
-  esac
-done < <(runner_conf)
-
-IFS=$'\t' read -r _ WITH_ERCC_LINE <<< "${GENOMES[0]}"
-WITH_ERCC="${WITH_ERCC_LINE##*\t}"
-log "Output root: $OUTDIR"
+OUTDIR="${OUTDIR:-$PWD}"
 mkdir -p "$OUTDIR"
 
-for i in "${!GENOMES[@]}"; do
-  [[ "$i" -eq 0 ]] && continue
-  IFS=$'\t' read -r _ GID FASTA GTF INDICES ERCC_OVERRIDE <<< "${GENOMES[$i]}"
-  [[ -n "$GID" ]] || { log "skip genome with missing id"; continue; }
-  [[ -n "$FASTA" ]] || { log "skip $GID: missing fasta"; continue; }
-  _in_only "$GID" || { log "skip $GID: not selected via --only"; continue; }
+for entry in "${GENOMES[@]}"; do
+  IFS='|' read -r GID FASTA GTF <<< "$entry"
 
-  log "=== $GID ==="
-  local_root="$OUTDIR/$GID"
-  mkdir -p "$local_root/src"
+  echo "=== $GID ==="
+  ROOT="$OUTDIR/$GID"
+  mkdir -p "$ROOT/src"
 
-  # 1) Stage inputs (delegate to runner)
-  stage_out=$(python3 "$HERE/runner.py" stage --gid "$GID" --fasta "$FASTA" ${GTF:+--gtf "$GTF"} --outdir "$local_root")
-  # Parse key=value lines
-  FASTA_STAGED=""; GTF_STAGED=""; GTF_PLAIN=""; FASTA_PLAIN=""
-  while IFS='=' read -r k v; do
-    case "$k" in
-      FASTA_STAGED) FASTA_STAGED="$v";;
-      GTF_STAGED) GTF_STAGED="$v";;
-      GTF_PLAIN) GTF_PLAIN="$v";;
-      FASTA_PLAIN) FASTA_PLAIN="$v";;
-    esac
-  done <<< "$stage_out"
+  python3 "$SCRIPT_DIR/runner.py" stage --gid "$GID" --fasta "$FASTA" --gtf "$GTF" --outdir "$ROOT" > "$ROOT/stage.txt"
+  source <(sed 's/^/export /' "$ROOT/stage.txt")
 
-  # 3) ERCC augmented
-  use_ercc="$WITH_ERCC"; [[ -n "$ERCC_OVERRIDE" ]] && use_ercc="$ERCC_OVERRIDE"
-  ercc_plain=""; ercc_gtf_combined=""
-  if [[ "$use_ercc" =~ ^(true|True|1)$ ]]; then
-    ercc_out=$(python3 "$HERE/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$local_root" ${GTF_PLAIN:+--gtf "$GTF_PLAIN"})
-    while IFS='=' read -r k v; do
-      case "$k" in
-        ERCC_FASTA) ercc_plain="$v";;
-        ERCC_GTF)   ercc_gtf_combined="$v";;
-      esac
-    done <<< "$ercc_out"
+  ERCC_FASTA=""
+  python3 "$SCRIPT_DIR/runner.py" ercc --gid "$GID" --fasta-plain "$FASTA_PLAIN" --outdir "$ROOT" --gtf "$GTF_PLAIN" > "$ROOT/ercc.txt"
+  source <(sed 's/^/export /' "$ROOT/ercc.txt")
+
+  cat > "$ROOT/datasheet.yml" <<EOF
+- genome: "$GID"
+  species: "$GID"
+  fasta: "$FASTA_PLAIN"
+EOF
+  if [[ -n "${GTF_STAGED:-}" ]]; then
+    echo "  gtf: \"$GTF_STAGED\"" >> "$ROOT/datasheet.yml"
   fi
 
-  # 4) Datasheets and Nextflow command
-  ds_out=$(python3 "$HERE/runner.py" datasheet --gid "$GID" --fasta "$FASTA_PLAIN" ${GTF_STAGED:+--gtf "$GTF_STAGED"} --out "$local_root/datasheet.yml")
-  DATASHEET=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DATASHEET="$v"; done <<< "$ds_out"
-  # Determine tools for this genome: prefer per-genome 'indices' from config; fallback to global nfcore.tools
-  TOOLS_GENOME="$INDICES"
-  if [[ -z "$TOOLS_GENOME" ]]; then
-    TOOLS_GENOME="${TOOLS-}"
-  fi
-  # Build the explicit Nextflow command (requested format)
-  NXF_CMD=( nextflow run "$NF_PIPELINE" \
-            -r "$NF_REVISION" \
-            -profile "$NXF_PROFILE" \
-            --input "$DATASHEET" \
-            --outdir "$local_root/indices" \
-            --max_cpus "$THREADS" \
-            --max_memory "${MEM_GB}GB" \
-            -work-dir "$local_root/indices/work" )
-  if [[ -n "$RESUME_FLAG" ]]; then
-    NXF_CMD+=( "$RESUME_FLAG" )
-  fi
-  if [[ -n "$TOOLS_GENOME" ]]; then
-    NXF_CMD+=( --tools "$TOOLS_GENOME" )
-  fi
-  if [[ -n "$NF_EXTRA_ARGS" ]]; then
-    # shellcheck disable=SC2206
-    EXTRA_ARR=(${NF_EXTRA_ARGS})
-    NXF_CMD+=("${EXTRA_ARR[@]}")
-  fi
-  printf 'Running:'; printf ' %q' "${NXF_CMD[@]}"; echo
-  printf '%q ' "${NXF_CMD[@]}" > "$local_root/.bpm_cmd.log"
-  "${NXF_CMD[@]}"
+  nextflow run "$NF_PIPELINE" -r "$NF_REVISION" -profile "$NXF_PROFILE" \
+    --input "$ROOT/datasheet.yml" --outdir "$ROOT/indices" \
+    --max_cpus 40 --max_memory 200GB -work-dir "$ROOT/indices/work" \
+    --tools "$TOOLS"
 
-  if [[ -n "$ercc_plain" ]]; then
-    ercc_id="${GID}_with_ERCC"; ds_ercc_path="$OUTDIR/$ercc_id/datasheet.yml"; mkdir -p "$(dirname "$ds_ercc_path")"
-    ds_out2=$(python3 "$HERE/runner.py" datasheet --gid "$ercc_id" --fasta "$ercc_plain" ${ercc_gtf_combined:+--gtf "$ercc_gtf_combined"} --out "$ds_ercc_path")
-    DS2=""; while IFS='=' read -r k v; do [[ "$k" == "DATASHEET" ]] && DS2="$v"; done <<< "$ds_out2"
-    NXF_CMD2=( nextflow run "$NF_PIPELINE" \
-               -r "$NF_REVISION" \
-               -profile "$NXF_PROFILE" \
-               --input "$DS2" \
-               --outdir "$OUTDIR/$ercc_id/indices" \
-               --max_cpus "$THREADS" \
-               --max_memory "${MEM_GB}GB" \
-               -work-dir "$OUTDIR/$ercc_id/indices/work" )
-    if [[ -n "$RESUME_FLAG" ]]; then
-      NXF_CMD2+=( "$RESUME_FLAG" )
+  if [[ -n "$ERCC_FASTA" ]]; then
+    ERCC_ID="${GID}_with_ERCC"
+    ERCC_ROOT="$OUTDIR/$ERCC_ID"
+    mkdir -p "$ERCC_ROOT"
+    cat > "$ERCC_ROOT/datasheet.yml" <<EOF
+- genome: "$ERCC_ID"
+  species: "$ERCC_ID"
+  fasta: "$ERCC_FASTA"
+EOF
+    if [[ -n "${ERCC_GTF:-}" ]]; then
+      echo "  gtf: \"$ERCC_GTF\"" >> "$ERCC_ROOT/datasheet.yml"
     fi
-    if [[ -n "$TOOLS_GENOME" ]]; then
-      NXF_CMD2+=( --tools "$TOOLS_GENOME" )
-    fi
-    if [[ -n "$NF_EXTRA_ARGS" ]]; then
-      # shellcheck disable=SC2206
-      EXTRA_ARR=(${NF_EXTRA_ARGS})
-      NXF_CMD2+=("${EXTRA_ARR[@]}")
-    fi
-    printf 'Running:'; printf ' %q' "${NXF_CMD2[@]}"; echo
-    printf '%q ' "${NXF_CMD2[@]}" > "$OUTDIR/$ercc_id/.bpm_cmd.log"
-    "${NXF_CMD2[@]}"
-  fi
 
-  log "done $GID"
+    nextflow run "$NF_PIPELINE" -r "$NF_REVISION" -profile "$NXF_PROFILE" \
+      --input "$ERCC_ROOT/datasheet.yml" --outdir "$ERCC_ROOT/indices" \
+      --max_cpus 40 --max_memory 200GB -work-dir "$ERCC_ROOT/indices/work" \
+      --tools "$TOOLS"
+  fi
 done
-
-log "All tasks completed."
