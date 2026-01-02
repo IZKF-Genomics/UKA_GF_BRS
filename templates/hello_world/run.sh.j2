@@ -9,11 +9,19 @@
 #     * ctx.project.name -> project name (may be empty in ad-hoc mode)
 #     * ctx.now()        -> current time (ISO 8601)
 #     * ctx.hostname()   -> short hostname
+# - Jinja control flow is available:
+#     * {% if ctx.params.get("include_time") %} ... {% endif %}
 # - Anything starting with '#' is a bash comment (safe in the rendered script).
 # ----------------------------------------------------------------------------
 set -euo pipefail
 
 echo "Hello {{ ctx.params.name }}!"
+{% if ctx.project %}
 echo "This project is {{ ctx.project.name }}"
-# Example of using other ctx helpers if needed:
-# echo "Rendered at: {{ ctx.now() }} on {{ ctx.hostname() }}"
+{% else %}
+echo "This project is (ad-hoc)"
+{% endif %}
+
+{% if ctx.params.get("include_time") %}
+echo "Rendered at: {{ ctx.now() }} on {{ ctx.hostname() }}"
+{% endif %}

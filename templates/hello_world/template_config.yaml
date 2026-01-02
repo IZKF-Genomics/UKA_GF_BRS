@@ -40,6 +40,18 @@ params:
     required: true          # if true, render fails if value not provided
     description: "Name to greet"
     # default: "World"      # uncomment to make it optional
+  include_time:
+    type: bool
+    cli: "--include-time"
+    required: false
+    default: false
+    description: "If true, print the render time (ctx.now())"
+  items:
+    type: str
+    cli: "--items"
+    required: false
+    default: ""
+    description: "Comma-separated list of items to loop over (e.g., apple,banana)"
 
 # --------------------------------- Render ------------------------------------
 # Where to place files and which files to render/copy.
@@ -76,3 +88,13 @@ run:
 publish:
   greeting:
     resolver: resolvers.hello.resolve_greeting  # stores result at published.greeting
+
+# -------------------------------- Use cases ----------------------------------
+# 1) Basic greeting:
+#    bpm template render hello_world --param name=Alice --dir ./my_project
+#
+# 2) Include time:
+#    bpm template render hello_world --param name=Alice --param include_time=true --dir ./my_project
+#
+# 3) Loop over items:
+#    bpm template render hello_world --param name=Alice --param items=apple,banana --dir ./my_project
