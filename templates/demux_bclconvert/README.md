@@ -5,9 +5,9 @@ Demultiplex Illumina BCLs using `bcl-convert`, with optional FastQC, fastq_scree
 ## Parameters
 - `bcl_dir` (required, str, exists: dir): Path to the BCL run folder.
 - `run_fastq_screen` (bool, default `false`): Run `fastq_screen` on FASTQs.
-- `thread_ratio` (float, default `0.33`): Fraction of idle CPUs to allocate to each bcl-convert thread pool (0-1).
+- `thread_ratio` (float, default `0.8`): Fraction of idle CPUs to allocate to each bcl-convert thread pool (0-1).
 - `no_lane_splitting` (bool, default `true`): Pass `--no-lane-splitting` to bcl-convert.
-- `sampleproject_subdirs` (bool, default `true`): Create per-sample project subdirectories.
+- `sampleproject_subdirs` (bool, default `false`): Create per-sample project subdirectories.
 - `use_api_samplesheet` (bool, default `true`): If true, post-render hook fetches `samplesheet.csv` from API.
 - `gf_api_name` / `gf_api_pass` (optional): Credentials for API (env vars also supported; see below).
 

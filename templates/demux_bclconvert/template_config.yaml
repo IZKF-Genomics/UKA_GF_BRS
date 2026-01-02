@@ -43,7 +43,7 @@ params:
 
 tools:
   required: [bcl-convert]
-  optional: [fastqc, fastq_screen, multiqc]
+  optional: [fastqc, fastq_screen, multiqc, parallel]
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
