@@ -4,7 +4,7 @@ description: "Reference genomes manager: download FASTA/annotation, optional ERC
 params: {}
 
 render:
-  # In project mode, this would render under the project. In ad-hoc mode (--out),
+  # In project mode, this renders under the project root. In ad-hoc mode (--out),
   # BPM overrides 'into' to '.' so files land directly under the provided folder.
   into: "/data/ref_genomes/"
   files:
@@ -12,7 +12,7 @@ render:
     - run.sh.j2      -> run.sh
     - runner.py      -> runner.py
     - genomes.yaml.j2 -> genomes.yaml
-    - README.md.j2   -> README.md
+    - README.md   -> README.md
     # Bundle ERCC92 reference locally to avoid network dependencies
     - ERCC92/ERCC92.fa  -> ERCC92/ERCC92.fa
     - ERCC92/ERCC92.gtf -> ERCC92/ERCC92.gtf

@@ -234,7 +234,7 @@ def cmd_datasheet(args: argparse.Namespace) -> int:
     return 0
 
 
-def _build_nf_cmd(datasheet: Path, outdir: Path, aligners: str, tx: str, env: Dict[str, str]) -> str:
+def _build_nf_cmd(datasheet: Path, outdir: Path, tools: str, env: Dict[str, str]) -> str:
     cmd = [
         "nextflow",
         "run",
@@ -254,10 +254,8 @@ def _build_nf_cmd(datasheet: Path, outdir: Path, aligners: str, tx: str, env: Di
         "-work-dir",
         str(outdir / "work"),
     ]
-    if aligners:
-        cmd += ["--aligners", aligners]
-    if tx:
-        cmd += ["--transcriptome_aligners", tx]
+    if tools:
+        cmd += ["--tools", tools]
     if env.get("RESUME") and str(env["RESUME"]).lower() not in ("0", "false", "no"):
         cmd += ["-resume"]
     extra = env.get("NF_EXTRA_ARGS", "").strip()
@@ -268,14 +266,14 @@ def _build_nf_cmd(datasheet: Path, outdir: Path, aligners: str, tx: str, env: Di
 
 def cmd_nf_cmd(args: argparse.Namespace) -> int:
     env = _env_defaults()
-    cmd = _build_nf_cmd(Path(args.datasheet), Path(args.outdir), args.aligners or "", args.tx or "", env)
+    cmd = _build_nf_cmd(Path(args.datasheet), Path(args.outdir), args.tools or "", env)
     print(f"CMD={cmd}")
     return 0
 
 
 def cmd_nf_run(args: argparse.Namespace) -> int:
     env = _env_defaults()
-    cmd = _build_nf_cmd(Path(args.datasheet), Path(args.outdir), args.aligners or "", args.tx or "", env)
+    cmd = _build_nf_cmd(Path(args.datasheet), Path(args.outdir), args.tools or "", env)
     print(f"CMD: {cmd}")
     rc = subprocess.call(cmd, shell=True, env={**os.environ, **env})
     if rc != 0:
@@ -320,16 +318,18 @@ def main(argv: list[str]) -> int:
     p_cmd = sub.add_parser("nf-cmd", help="Print Nextflow command")
     p_cmd.add_argument("--datasheet", required=True)
     p_cmd.add_argument("--outdir", required=True)
-    p_cmd.add_argument("--aligners")
-    p_cmd.add_argument("--tx")
+    p_cmd.add_argument("--tools")
     p_cmd.set_defaults(fun=cmd_nf_cmd)
 
     p_run = sub.add_parser("nf-run", help="Run Nextflow with streaming logs")
     p_run.add_argument("--datasheet", required=True)
     p_run.add_argument("--outdir", required=True)
-    p_run.add_argument("--aligners")
-    p_run.add_argument("--tx")
+    p_run.add_argument("--tools")
     p_run.set_defaults(fun=cmd_nf_run)
+
+    p_conf = sub.add_parser("conf", help="Print nf-core configuration derived from config file")
+    p_conf.add_argument("--config", help="Path to genomes.yaml/json")
+    p_conf.set_defaults(fun=cmd_conf)
 
     args = ap.parse_args(argv)
     return args.fun(args)
@@ -337,6 +337,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-    p_conf = sub.add_parser("conf", help="Print nf-core configuration derived from config file")
-    p_conf.add_argument("--config", help="Path to genomes.yaml/json")
-    p_conf.set_defaults(fun=cmd_conf)
