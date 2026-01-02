@@ -1,0 +1,17 @@
+[project]
+name = "ref_genomes"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.10"
+pyyaml = "*"
+star = "*"
+bowtie2 = "*"
+bwa = "*"
+hisat2 = "*"
+salmon = "*"
+kallisto = "*"
+
+[tasks]
+build = "python build_ref_genomes.py --config genomes.yaml --outdir ."

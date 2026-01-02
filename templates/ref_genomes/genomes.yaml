@@ -1,0 +1,21 @@
+with_ercc: true
+
+ercc:
+  fasta: "ERCC92/ERCC92.fa"
+  gtf: "ERCC92/ERCC92.gtf"
+
+defaults:
+  threads: 16
+  memory_gb: 64
+  tools: [star, bowtie2, bwa, hisat2, salmon, kallisto]
+
+genomes:
+  - id: GRCh38
+    fasta: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_49/GRCh38.primary_assembly.genome.fa.gz
+    gtf:   https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_49/gencode.v49.primary_assembly.annotation.gtf.gz
+  - id: GRCm39
+    fasta: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/GRCm39.primary_assembly.genome.fa.gz
+    gtf:   https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/gencode.vM38.primary_assembly.annotation.gtf.gz
+  - id: mRatBN7.2
+    fasta: https://ftp.ensembl.org/pub/release-115/fasta/rattus_norvegicus/dna/Rattus_norvegicus.GRCr8.dna.toplevel.fa.gz
+    gtf:   https://ftp.ensembl.org/pub/release-115/gtf/rattus_norvegicus/Rattus_norvegicus.GRCr8.115.gtf.gz

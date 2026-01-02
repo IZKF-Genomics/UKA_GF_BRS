@@ -1,5 +1,5 @@
 id: ref_genomes
-description: "Reference genomes manager: download FASTA/annotation, optional ERCC augmentation, and optional index builds via nf-core/references. Optimized for ad-hoc usage (--out)."
+description: "Reference genomes manager: download FASTA/annotation, build indices with local tools, and create ERCC-augmented indices. Optimized for ad-hoc usage (--out)."
 
 params: {}
 
@@ -9,10 +9,11 @@ render:
   into: "/data/ref_genomes/"
   files:
     # Render run script and starter config
-    - run.sh.j2      -> run.sh
-    - runner.py      -> runner.py
-    - genomes.sh     -> genomes.sh
-    - README.md   -> README.md
+    - run.sh               -> run.sh
+    - build_ref_genomes.py -> build_ref_genomes.py
+    - genomes.yaml         -> genomes.yaml
+    - pixi.toml            -> pixi.toml
+    - README.md            -> README.md
     # Bundle ERCC92 reference locally to avoid network dependencies
     - ERCC92/ERCC92.fa  -> ERCC92/ERCC92.fa
     - ERCC92/ERCC92.gtf -> ERCC92/ERCC92.gtf
@@ -21,5 +22,5 @@ run:
   entry: "run.sh"
 
 tools:
-  required: [python3, nextflow]
-  optional: [docker, singularity, apptainer, curl, wget, gzip]
+  required: [python3]
+  optional: [pixi]
