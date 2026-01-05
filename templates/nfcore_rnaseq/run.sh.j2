@@ -4,26 +4,29 @@ set -euo pipefail
 {% if ctx.params.umi %}
 # Using UMI arguments tuned for Takara Bio SMARTer® Stranded Total RNA-Seq Kit v3.
 {% endif %}
+{% set genome_val = ctx.params.genome %}
 {% if ctx.params.ercc %}
-# Update PATH_TO_ERCC below to the ERCC spike-in FASTA available on your system.
+{% set genome_val = genome_val + "_with_ERCC" %}
 {% endif %}
-
-echo "[info] $(date) nf-core/rnaseq profile=docker genome={{ ctx.params.genome }}"
+echo "[info] $(date) nf-core/rnaseq profile=docker genome={{ genome_val }}"
 nextflow -version || true
 mkdir -p "results"
 
 nextflow run nf-core/rnaseq \
-  -r "3.21.0" \
+  -r "3.22.2" \
   -profile "docker" \
   -c nextflow.config \
   --input "samplesheet.csv" \
   --outdir "results" \
+{% if ctx.params.max_cpus %}
+  --max_cpus "{{ ctx.params.max_cpus }}" \
+{% endif %}
+{% if ctx.params.max_memory %}
+  --max_memory "{{ ctx.params.max_memory }}" \
+{% endif %}
 {% if ctx.params.umi %}
   --with_umi \
   --umitools_extract_method "regex" \
   --umitools_bc_pattern2 "^(?P<umi_1>.{8})(?P<discard_1>.{6}).*" \
 {% endif %}
-{% if ctx.params.ercc %}
-  --additional_fasta /data/genomes/ERCC/ \
-{% endif %}
-  --genome "{{ ctx.params.genome }}"
+  --genome "{{ genome_val }}"
