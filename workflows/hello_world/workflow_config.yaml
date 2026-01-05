@@ -1,0 +1,59 @@
+# BPM Workflow Descriptor (workflow_config.yaml)
+# -----------------------------------------------------------------------------
+# This file describes a single reusable workflow for BPM. It tells BPM:
+#  - which parameters the workflow expects,
+#  - which entry script to execute,
+#  - and which tools should be present (optional diagnostics).
+#
+# Intended usage:
+#  - bpm workflow run hello_world --name Alice
+#  - bpm workflow run hello_world --project ./project.yaml --name Alice
+#
+# When --project is provided, BPM loads project.yaml and exposes ctx to the entry
+# script via BPM_CTX_PATH (JSON file).
+#
+# Context placeholders available in strings ("${ctx...}") for run.args/run.env:
+#  - ctx.project.name        -> project name (None in ad-hoc mode)
+#  - ctx.project.project_path-> host-aware path string
+#  - ctx.template.id         -> current workflow id (e.g., hello_world)
+#  - ctx.params              -> final param map after resolution
+#  - ctx.brs.repo/authors/hosts/settings -> loaded BRS config objects
+#  - ctx.cwd                 -> current working directory (Path) during run
+#  - ctx.project_dir          -> local project directory (if project provided)
+#  - ctx.now()               -> current time (ISO8601); ctx.hostname() -> short hostname
+# -----------------------------------------------------------------------------
+
+# The workflow id must match this folder name (workflows/<id>/)
+id: hello_world
+
+# A human-friendly description shown by `bpm workflow list`
+description: "A demo workflow that prints a greeting and optional project name."
+
+# ------------------------------- Parameters ----------------------------------
+# Parameters are resolved with precedence: descriptor defaults < stored project
+# values < CLI --param overrides. Types are coerced to int/float/bool/str.
+params:
+  name:
+    type: str
+    cli: "--name"
+    required: true
+    description: "Name to greet"
+  include_time:
+    type: bool
+    cli: "--include-time"
+    required: false
+    default: false
+    description: "If true, print the current time"
+
+# ---------------------------------- Run --------------------------------------
+# Entry script is executed from this workflow folder.
+run:
+  entry: "run.sh"
+  args:
+    - "${ctx.params.name}"
+    - "${ctx.params.include_time}"
+
+# -------------------------------- Tools --------------------------------------
+# Optional tool checks for early diagnostics.
+tools:
+  - python
