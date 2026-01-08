@@ -34,7 +34,7 @@ params:
     cli: "--max-memory"
     description: "Maximum memory for nf-core/rnaseq, (default: 80% of host)"
 render:
-  into: "${ctx.project_dir}/analysis/${ctx.template.id}/"
+  into: "${ctx.project_dir}/${ctx.template.id}/"
   files:
     - run.sh.j2 -> run.sh
     - nextflow.config -> nextflow.config

@@ -79,8 +79,9 @@ def generate(ctx, strandedness: str) -> str:
         strandedness = "unstranded"
 
     fqdir = _load_fastq_dir(ctx)
+    # In project mode, write next to the template render folder; otherwise use cwd.
     if ctx.project:
-        out_dir = Path(ctx.project_dir) / "analysis" / ctx.template.id
+        out_dir = Path(ctx.project_dir) / ctx.template.id
     else:
         out_dir = Path(ctx.cwd)
     out_dir.mkdir(parents=True, exist_ok=True)

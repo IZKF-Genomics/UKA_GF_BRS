@@ -29,5 +29,5 @@ nextflow run nf-core/rnaseq \
   --umitools_extract_method "regex" \
   --umitools_bc_pattern2 "^(?P<umi_1>.{8})(?P<discard_1>.{6}).*" \
 {% endif %}
-  --genome "{{ genome_val }}" \
+  --genome "{{ genome_val }}" --igenomes_ignore true --igenomes_base "/data/shared/igenomes/" \
   --gencode --featurecounts_group_type gene_type
