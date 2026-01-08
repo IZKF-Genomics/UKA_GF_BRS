@@ -29,7 +29,6 @@ def main() -> None:
         "username",
         "password",
         "authors",
-        "job_id",
         "expiry_days",
     }
     missing = required_keys - payload.keys()
@@ -54,7 +53,9 @@ def main() -> None:
     if not isinstance(api_url, str) or not api_url.strip():
         raise SystemExit("export_engine_api_url not set in export template params")
 
-    endpoint = api_url.rstrip("/") + "/export"
+    # Accept either base (http://host:port) or full endpoint (.../export) to avoid double suffix.
+    api_clean = api_url.rstrip("/")
+    endpoint = api_clean if api_clean.endswith("/export") else f"{api_clean}/export"
     req = Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -76,20 +77,19 @@ def main() -> None:
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Export API returned non-JSON response: {exc}") from exc
 
+    # Show raw API response for visibility/debugging
+    print(f"[export] API response: {resp_body}")
+
     job_id = response_json.get("job_id")
     if not isinstance(job_id, str) or not job_id:
         raise SystemExit("Export API response missing job_id")
-
-    payload["job_id"] = job_id
-    spec.write_text(json.dumps(payload, indent=2))
 
     published = export_entry.get("published") or {}
     published["export_job_id"] = job_id
     export_entry["published"] = published
     safe_dump_yaml(project_path, project_data)
 
-    print(f"[export] export_job_spec.json updated with job_id {job_id}.")
-    print("[export] project.yaml updated with published export_job_id.")
+    print(f"[export] project.yaml updated with published export_job_id={job_id}.")
 
 
 if __name__ == "__main__":

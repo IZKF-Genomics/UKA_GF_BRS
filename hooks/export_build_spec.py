@@ -188,9 +188,11 @@ def main(ctx: Any) -> Dict[str, Any]:
         "username": str(ctx.params.get("export_username", "")),
         "password": str(ctx.params.get("export_password", "")),
         "authors": project_authors,
-        "job_id": export_job_id,
         "expiry_days": int(ctx.params.get("export_expiry_days", 0) or 0),
     }
+    # Only include job_id if already present in the project (e.g., re-run)
+    if export_job_id:
+        job_spec["job_id"] = export_job_id
 
     out_dir = project_dir / ctx.template.id if ctx.project else Path(ctx.cwd)
     out_dir.mkdir(parents=True, exist_ok=True)

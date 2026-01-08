@@ -24,8 +24,8 @@ mappings:
   - template_id: demux_bclconvert
     src: demux_bclconvert
     src_published_key: multiqc_report
-    dest: "3_Reports/analysis"
-    report_section: reports
+    dest: "1_Raw_data/demultiplexing_multiqc_report.html"
+    report_section: raw
     description: "MultiQC report from demux_bclconvert"
 
   - template_id: nfcore_rnaseq
