@@ -1,30 +1,25 @@
-# export template
+# export
 
-This template builds a JSON export job spec from a simple mapping table and the
-current project state.
-
-## What it does
-- Post-render hook reads the mapping table and filters it to templates used in
-  the current project, then writes `export_job_spec.json`.
-- Render writes `run.py` into the template folder.
-- Run submits `export_job_spec.json` to the export engine and writes the
-  returned `job_id` into `project.yaml` under this template’s `published` map.
-
-## Files
-- `export_mapping.table.yaml`: Default mapping table for all templates.
-- `export_job_spec.json`: Rendered export-engine job spec for this project.
-- `run.py`: submits the job spec JSON and records `export_job_id`.
+Build and submit an export engine job spec from a template mapping table and the current project state.
 
 ## Usage
 1) Render into a project:
    `bpm template render export --dir /path/to/project`
 2) Inspect `export_job_spec.json` and confirm fields/paths.
-3) Run to submit:
+3) Submit to the export engine:
    `bpm template run export --dir /path/to/project`
 4) Check `project.yaml` for `templates[].published.export_job_id`.
 
-## Mapping format
-The mapping table uses JSON-aligned keys:
+## Parameters
+- `export_engine_api_url` (str): Base URL for the export engine API (no trailing `/export`).
+- `export_engine_backends` (str): Comma-separated backends for the job spec.
+- `export_expiry_days` (int): Expiry days for the job spec.
+
+## Outputs
+- `export_job_spec.json`: JSON payload sent to the export engine.
+
+## Mapping Table
+`export_mapping.table.yaml` uses JSON-aligned keys:
 ```
 template_id: <template id>
 src: <relative or absolute source path>
@@ -39,4 +34,5 @@ description: <optional text>
 - If the project already published `FASTQ_dir` or `multiqc_report` for
   `demux_bclconvert`, those paths are used as sources.
 - Authors are taken from `project.yaml` (formatted as `Name, Affiliation`).
+- `src` is absolute in JSON by combining the project root with relative paths.
 - The table supports `{template_id}` placeholders in `dest`.

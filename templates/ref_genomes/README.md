@@ -1,18 +1,22 @@
-# ref_genomes (custom index builder)
+# ref_genomes
 
-This template downloads reference genomes, builds indices, and also builds
-ERCC-augmented indices for each genome.
+Download reference genomes, build indices, and create ERCC-augmented indices.
 
-Quick start
+## Usage
 1) Render into your references root (e.g., /data/genomes):
-   bpm template render ref_genomes --out /data/genomes
+   `bpm template render ref_genomes --out /data/genomes`
 2) Install tools with Pixi:
-   cd /data/genomes
-   pixi install
-3) Edit genomes.yaml to add/remove genomes or tools.
+   `cd /data/genomes && pixi install`
+3) Edit `genomes.yaml` to add/remove genomes or tools.
 4) Build:
-   ./run.sh
+   `./run.sh`
 
-Notes
-- The script always builds both the base genome and a *_with_ERCC genome.
-- Use FORCE=1 to re-download and rebuild indices.
+## Parameters
+- None. Configure inputs in `genomes.yaml`.
+
+## Outputs
+- Reference genome downloads and indices under the output directory.
+- ERCC-augmented indices for each genome.
+
+## Notes
+- Use `FORCE=1` to re-download and rebuild indices.
