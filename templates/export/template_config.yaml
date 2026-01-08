@@ -12,21 +12,11 @@ params:
     required: false
     default: "apache, owncloud, sftp"
     description: "Comma-separated list of export backends"
-  export_job_id:
-    type: str
-    required: false
-    default: ""
-    description: "Optional job id for export engine job spec"
   export_expiry_days:
     type: int
     required: false
-    default: 0
+    default: 30
     description: "Optional expiry_days for export engine job spec"
-  export_include_in_report:
-    type: bool
-    required: false
-    default: false
-    description: "Default include_in_report value for export_list entries"
 
 tools:
   required: [python]

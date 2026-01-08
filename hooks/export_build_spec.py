@@ -54,6 +54,20 @@ def _load_project_authors(project_dir: Path) -> List[str]:
     return []
 
 
+def _load_export_job_id(project_dir: Path) -> str:
+    project_path = project_dir / "project.yaml"
+    if not project_path.exists():
+        return ""
+    data = safe_load_yaml(project_path)
+    for entry in data.get("templates") or []:
+        if entry.get("id") == "export":
+            published = entry.get("published") or {}
+            job_id = published.get("export_job_id")
+            if isinstance(job_id, str):
+                return job_id
+    return ""
+
+
 def _split_host(path_str: str, default_host: str) -> Tuple[str, str]:
     if ":" in path_str:
         host, rest = path_str.split(":", 1)
@@ -95,8 +109,9 @@ def main(ctx: Any) -> Dict[str, Any]:
     used_templates = _load_project_templates(project_dir) if ctx.project else []
     published = _load_published_outputs(project_dir) if ctx.project else {}
     project_authors = _load_project_authors(project_dir) if ctx.project else []
+    export_job_id = _load_export_job_id(project_dir) if ctx.project else ""
 
-    include_in_report = bool(ctx.params.get("export_include_in_report", False))
+    include_in_report = True
 
     export_list: List[Dict[str, Any]] = []
 
@@ -112,6 +127,8 @@ def main(ctx: Any) -> Dict[str, Any]:
         source_path = entry.get("src")
         published_key = entry.get("src_published_key")
         host = entry.get("host") or ctx.hostname()
+        project_host, _ = _split_host(ctx.project.project_path, host) if ctx.project else (host, "")
+        project_root = Path(ctx.materialize(ctx.project.project_path)) if ctx.project else None
 
         if isinstance(published_key, str) and ctx.project:
             pub_map = published.get(tpl_id) or {}
@@ -125,7 +142,10 @@ def main(ctx: Any) -> Dict[str, Any]:
         if os.path.isabs(source_path):
             src = source_path
         else:
-            src = str((project_dir / source_path).resolve())
+            if project_root is None:
+                continue
+            src = str((project_root / source_path).resolve())
+            host = project_host
 
         dest = entry.get("dest")
         if not isinstance(dest, str):
@@ -168,7 +188,7 @@ def main(ctx: Any) -> Dict[str, Any]:
         "username": str(ctx.params.get("export_username", "")),
         "password": str(ctx.params.get("export_password", "")),
         "authors": project_authors,
-        "job_id": str(ctx.params.get("export_job_id", "")),
+        "job_id": export_job_id,
         "expiry_days": int(ctx.params.get("export_expiry_days", 0) or 0),
     }
 
