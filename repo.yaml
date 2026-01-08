@@ -3,12 +3,12 @@
 ########################################################
 id: "UKA_GF_BRS"
 name: "UKA IZKF Genomics Facility BRS"
-version: "0.1.1"
+version: "0.1.2"
 description: >
   Bioinformatics Resource Store for the Genomics Facility
   at University Hospital Aachen. Contains standard
   templates, workflows, resolvers, and hooks for facility pipelines.
-last_updated: "2025-08-20"
+last_updated: "2026-01-08"
 maintainer: 
   - "Chao-Chung Kuo <chao-chung.kuo@rwth-aachen.de>"
 institution: "Genomics Facility, Interdisciplinary Center for Clinical Research (IZKF) University Hospital RWTH Aachen Aachen Germany"
