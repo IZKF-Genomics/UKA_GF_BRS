@@ -1,0 +1,44 @@
+id: export
+description: "Generate and manage an export mapping for API export jobs."
+
+params:
+  export_engine_api_url:
+    type: str
+    required: false
+    default: "http://genomics.rwth-aachen.de:9500"
+    description: "Base URL for the export engine API"
+  export_engine_backends:
+    type: str
+    required: false
+    default: "apache, owncloud, sftp"
+    description: "Comma-separated list of export backends"
+  export_job_id:
+    type: str
+    required: false
+    default: ""
+    description: "Optional job id for export engine job spec"
+  export_expiry_days:
+    type: int
+    required: false
+    default: 0
+    description: "Optional expiry_days for export engine job spec"
+  export_include_in_report:
+    type: bool
+    required: false
+    default: false
+    description: "Default include_in_report value for export_list entries"
+
+tools:
+  required: [python]
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - run.py -> run.py
+
+run:
+  entry: "run.py"
+
+hooks:
+  post_render:
+    - hooks.export_build_spec:main

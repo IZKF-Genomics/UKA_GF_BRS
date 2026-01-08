@@ -1,0 +1,36 @@
+# Default export mappings for templates in this BRS.
+# This file is a simple table (no Jinja). A post-render hook filters entries
+# to only those templates listed in project.yaml for the current project and
+# writes export_job_spec.json.
+# Dest paths are treated as relative paths in the export engine JSON.
+# Field meanings:
+# - template_id: template folder name in the BRS.
+# - src: source path (relative to project root or absolute).
+# - src_published_key: optional; if present in project.yaml, overrides src.
+# - dest: destination path (supports {template_id}).
+# - report_section: explicit report section (raw/processed/reports/general).
+# - description: optional text for the export entry.
+# Optional fields (per entry): mode, include_in_report, host, project.
+# Note: if src is a folder, the export engine copies the folder into dest.
+
+mappings:
+  - template_id: demux_bclconvert
+    src: demux_bclconvert
+    src_published_key: FASTQ_dir
+    dest: "1_Raw_data/FASTQ"
+    report_section: raw
+    description: "FASTQ output from demux_bclconvert"
+
+  - template_id: demux_bclconvert
+    src: demux_bclconvert
+    src_published_key: multiqc_report
+    dest: "3_Reports/analysis"
+    report_section: reports
+    description: "MultiQC report from demux_bclconvert"
+
+  - template_id: nfcore_rnaseq
+    src: nfcore_rnaseq
+    dest: "2_Processed_data/nfcore_rnaseq"
+    report_section: processed
+    description: "nfcore_rnaseq outputs"
+    
