@@ -33,3 +33,5 @@ nextflow run nf-core/rnaseq \
   --extra_star_align_args="--alignIntronMax 1000000 --alignIntronMin 20 --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --outFilterMismatchNmax 999 --outFilterMultimapNmax 20 --outFilterType BySJout --outFilterMismatchNoverLmax 0.1 --clip3pAdapterSeq AAAAAAAA" \
   --genome "{{ genome_val }}" --igenomes_ignore true --igenomes_base "/data/shared/igenomes/" \
   --gencode --featurecounts_group_type gene_type
+
+nextflow clean "$(grep -oP 'Run name:\s+\K\S+' .nextflow.log | tail -n 1)" -f

@@ -12,6 +12,7 @@ Edit constants below if your bclconvert naming differs.
 """
 
 import os
+import re
 import glob
 import csv
 from pathlib import Path
@@ -69,6 +70,14 @@ def _base_no_ext(p: str, ext: str) -> str:
     return b[:-len(ext)] if b.endswith(ext) else b
 
 
+def _strip_sample_suffix(name: str) -> str:
+    """
+    Remove trailing Illumina-style suffixes like '_S1', '_S23' that are not part of the
+    biological sample identifier.
+    """
+    return re.sub(r"_S\d+$", "", name)
+
+
 def generate(ctx, strandedness: str) -> str:
     """
     Create samplesheet.csv in ctx.cwd and return its absolute path.
@@ -95,6 +104,7 @@ def generate(ctx, strandedness: str) -> str:
     reads: Dict[str, Dict[str, List[str]]] = {}
     for p in r1s:
         sample = _sanitize(_base_no_ext(p, READ1_EXTENSION))
+        sample = _strip_sample_suffix(sample)
         if sample.startswith("Undetermined"):
             continue
         reads.setdefault(sample, {"R1": [], "R2": []})["R1"].append(p)
@@ -102,6 +112,7 @@ def generate(ctx, strandedness: str) -> str:
     if not SINGLE_END:
         for p in r2s:
             sample = _sanitize(_base_no_ext(p, READ2_EXTENSION))
+            sample = _strip_sample_suffix(sample)
             if sample.startswith("Undetermined"):
                 continue
             reads.setdefault(sample, {"R1": [], "R2": []})["R2"].append(p)

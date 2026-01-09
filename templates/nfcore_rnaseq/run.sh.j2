@@ -31,3 +31,5 @@ nextflow run nf-core/rnaseq \
 {% endif %}
   --genome "{{ genome_val }}" --igenomes_ignore true --igenomes_base "/data/shared/igenomes/" \
   --gencode --featurecounts_group_type gene_type
+
+nextflow clean "$(grep -oP 'Run name:\s+\K\S+' .nextflow.log | tail -n 1)" -f
