@@ -54,12 +54,16 @@ def _find_salmon_dir(base: Path) -> Path:
     """
     Return the salmon directory under base.
     """
-    preferred = base / "results" / "salmon"
-    if preferred.is_dir():
-        return preferred.resolve()
+    # Prefer explicit results*/salmon directories (handles results or results_<id>)
+    for cand in list(base.glob("results*/salmon")):
+        if cand.is_dir():
+            return cand.resolve()
 
     # Fallback: search for quant.sf and return its grandparent
     for dirpath, _, files in os.walk(base):
+        # Skip transient work dirs
+        if "/work/" in dirpath or dirpath.rstrip("/").endswith("/work"):
+            continue
         if "quant.sf" in files:
             p = Path(dirpath)
             # quant.sf lives in .../salmon/<sample>/quant.sf; grandparent is salmon root
