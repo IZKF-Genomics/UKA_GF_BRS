@@ -48,6 +48,12 @@ hooks:
   post_render:
     - hooks.nfcore_rnaseq_samplesheet_reverse:main
 
+publish:
+  salmon_dir:
+    resolver: "resolvers.get_salmon_dir"
+  nfcore_multiqc:
+    resolver: "resolvers.get_multiqc_report"
+
 tools:
   required: []
   optional: []
