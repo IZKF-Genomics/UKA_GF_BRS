@@ -47,6 +47,7 @@ tools:
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
+  adhoc_out_resolver: "resolvers.demux_out_from_bcl"
   files:
     - samplesheet.csv -> samplesheet.csv
     - run.sh.j2 -> run.sh
