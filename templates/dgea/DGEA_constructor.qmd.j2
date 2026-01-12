@@ -1,0 +1,131 @@
+---
+title: "DGEA Constructor"
+format: html
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+####################################################################
+#  DGEA_constructor.qmd
+#  Single control point for running DGEA reports
+#  Style mirrors the legacy constructor: inherit a global config,
+#  override per report, render explicitly. No hidden RData.
+####################################################################
+
+# 0) Inputs from ctx (resolved by pre_render hook; override here if needed)
+salmon_dir <- "{{ ctx.materialize(ctx.params.salmon_dir) }}"
+samplesheet_path <- "{{ ctx.materialize(ctx.params.nfcore_samplesheet) }}"
+organism <- "{{ ctx.params.organism }}"
+ercc <- {{ "TRUE" if ctx.params.ercc else "FALSE" }}
+application <- "{{ ctx.params.application }}"
+project_name <- "{{ ctx.params.name }}"
+authors <- "{{ ctx.params.authors }}"
+tx2gene_file <- file.path(salmon_dir, "tx2gene.tsv")
+
+####################################################################
+# 1) Libraries and helpers
+####################################################################
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(knitr)
+library(DT)
+source("DGEA_functions.R")
+
+check_missing_dirs(c(salmon_dir))
+```
+
+```{r samplesheet, echo=TRUE, warning=FALSE, message=FALSE}
+####################################################################
+# 2) Load samplesheet (master sheet used by all reports)
+####################################################################
+samplesheet <- read.csv(samplesheet_path) %>%
+  dplyr::select(-2, -3, -4) %>% # dropping unneeded columns
+  separate(sample, into = c("group", "id"), sep = "_", remove = FALSE) %>% # split sample names into 2 columns
+  dplyr::mutate(sample_copy = sample) %>% # Create a copy of the sample column
+  tibble::column_to_rownames(var = "sample_copy") # Make sample_copy as rownames
+
+
+datatable(samplesheet, caption = "Parsed samplesheet (master)", options = list(pageLength = 5))
+```
+
+```{r config, echo=TRUE, warning=FALSE, message=FALSE}
+####################################################################
+# 3) Global config (inherits to each report; override per report)
+####################################################################
+# Global configuration list containing project paths and parameters
+global_config <- list(
+  # Add samplesheet to the global configuration
+  samplesheet = samplesheet,
+  # Project Paths
+  salmon_dir = salmon_dir,
+  tx2gene_file = tx2gene_file,
+
+  # Run Specifications
+  paired = FALSE, # Pairwise comparison or not
+  design_formula = ~group, # simple comparison by group column
+  # design_formula = ~ id + group # pairwise by id and compare by group column
+  # design_formula = ~ id + group * treatment # Captures whether the effect of treatment depends on the group
+  norm_spikein_ercc = FALSE,
+  organism = organism, # Define organism for GO/GSEA e.g., "hsapiens", "mmusculus", "rnorvegicus"
+  highlighted_genes = NA, # e.g., c("Gene1", "Gene2") for highlighting genes in all figures
+  go = TRUE,
+  gsea = TRUE,
+
+  # Cutoffs
+  cutoff_adj_p = 0.05,
+  cutoff_log2fc = 1,
+  pvalueCutoff_GO = 0.05,
+  pvalueCutoff_GSEA = 0.05
+)
+####################################################################
+#   Define Analysis Settings Based on Processing Method (no need to be changed)
+####################################################################
+
+if (application == "RNAseq") {
+  global_config$counts_from_abundance <- "lengthScaledTPM"
+  global_config$length_correction <- TRUE
+} else if (application == "3mRNAseq") {
+  global_config$counts_from_abundance <- "no"
+  global_config$length_correction <- FALSE
+}
+```
+
+```{r reports, echo=TRUE, warning=FALSE, message=FALSE}
+####################################################################
+# 4) Render reports (explicit, per-report overrides)
+####################################################################
+
+####################################################################
+# Render DGEA for all samples
+# This report is used for an overview of all data without any comparison
+# No Rmd file is generated.
+
+render_DGEA_all_sample(global_config)
+
+####################################################################
+# Render DGEA report
+# `report_config` inherits `global_config` and enables flexible customization.
+# The generated Rmd aims to be a stand-alone Rmd without dependency to this constructor.
+report_config <- global_config
+report_config$base_group <- "WT"
+report_config$target_group <- "KO"
+######## You can further customize and overwrite any items ########
+# report_config$paired <- FALSE
+# report_config$additional_tag <- "Treated"
+# report_config$samplesheet <- samplesheet %>%
+#   filter(cell %in% c("human"))
+# report_config$design_formula <- ~ batch + group * treatment
+# report_config$organism <- "hsapiens"
+# report_config$go <- FALSE
+# report_config$gsea <- FALSE
+render_DGEA_report(report_config)
+
+####################################################################
+# Simple Comparison without DGEA
+# This report is used only for comparing two samples
+# report_config <- global_config
+# report_config$samplesheet <- samplesheet
+# report_config$sample1 <- "0h_NK"
+# report_config$sample2 <- "6h_NK"
+# render_simple_report(report_config)
+```

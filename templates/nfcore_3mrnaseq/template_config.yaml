@@ -53,6 +53,8 @@ publish:
     resolver: "resolvers.get_salmon_dir"
   nfcore_multiqc:
     resolver: "resolvers.get_multiqc_report"
+  nfcore_samplesheet:
+    resolver: "resolvers.get_samplesheet"
 
 tools:
   required: []

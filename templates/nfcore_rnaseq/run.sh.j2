@@ -33,3 +33,13 @@ nextflow run nf-core/rnaseq \
   --gencode --featurecounts_group_type gene_type
 
 nextflow clean "$(grep -oP 'Run name:\s+\K\S+' .nextflow.log | tail -n 1)" -f
+
+# Available genome in nextflow.config
+# - 'GRCh38'
+# - 'GRCh38_with_ERCC'
+# - 'GRCm39'
+# - 'GRCm39_with_ERCC'
+# - 'mRatBN7.2' 
+# - 'mRatBN7.2_with_ERCC'
+# If you need other genomes, please build them by template ref_genomes or using igenomes:
+# https://emea.support.illumina.com/sequencing/sequencing_software/igenome.html

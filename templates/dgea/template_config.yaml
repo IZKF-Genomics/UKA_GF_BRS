@@ -1,0 +1,60 @@
+id: dgea
+description: "Differential gene expression analysis (DGEA)."
+params:
+  salmon_dir:
+    type: str
+    cli: "--salmon-dir"
+    required: false
+    description: "Path to salmon quant directory (published from nfcore_rnaseq or nfcore_3mrnaseq)."
+  nfcore_samplesheet:
+    type: str
+    cli: "--samplesheet"
+    required: false
+    description: "Path to nf-core samplesheet CSV containing sample/group columns."
+  organism:
+    type: str
+    cli: "--organism"
+    required: false
+    description: "Organism identifier (hsapiens, mmusculus, rnorvegicus)."
+  ercc:
+    type: bool
+    cli: "--ercc"
+    required: false
+    description: "Whether ERCC spike-ins are present (used to drop ERCCs)."
+  application:
+    type: str
+    cli: "--application"
+    required: false
+    description: "Processing method (nfcore_RNAseq or nfcore_3mrnaseq) to pick counts_from_abundance."
+  name:
+    type: str
+    cli: "--name"
+    required: false
+    description: "Project name for reporting."
+  authors:
+    type: str
+    cli: "--authors"
+    required: false
+    description: "Author list for the report header."
+
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - DGEA_constructor.qmd.j2 -> DGEA_constructor.qmd
+    - DGEA_template.qmd -> DGEA_template.qmd
+    - DGEA_all.qmd -> DGEA_all.qmd
+    - DGEA_functions.R -> DGEA_functions.R
+    - references.bib -> references.bib
+    - thermofisher_LSG_manuals_cms_095046.txt -> thermofisher_LSG_manuals_cms_095046.txt
+    - pixi.toml -> pixi.toml
+    - pixi.lock -> pixi.lock
+    - .vscode/settings.json.j2 -> .vscode/settings.json
+    - run.sh.j2 -> run.sh
+
+run:
+  entry: "run.sh"
+
+hooks:
+  pre_render:
+    - hooks.dgea_defaults:populate
