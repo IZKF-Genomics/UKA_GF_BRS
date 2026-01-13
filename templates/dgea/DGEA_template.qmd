@@ -19,14 +19,15 @@ bibliography: references.bib
 params:
   salmon_dir: ""
   samplesheet: NULL
+  samplesheet_path: ""
   organism: ""
   ercc: false
-  application: "nfcore_3mRNAseq"
-  name: "project"
-  authors: "PROJECT_AUTHORS"
+  application: ""
+  name: ""
+  authors: ""
   base_group: ""
   target_group: ""
-  additional_tag: !r NA
+  additional_tag: null
   design_formula: "~ group"
   paired: false
   go: true
@@ -35,7 +36,7 @@ params:
   cutoff_log2fc: 1
   pvalueCutoff_GO: 0.05
   pvalueCutoff_GSEA: 0.05
-  highlighted_genes: !r NA
+  highlighted_genes: null
   tx2gene_file: ""
   filetag: ""
 ---
@@ -62,16 +63,27 @@ library(enrichplot)
 
 `%||%` <- function(x, y) if (is.null(x) || (is.character(x) && identical(x, ""))) y else x
 
+samplesheet <- read.csv(params$samplesheet_path, stringsAsFactors = FALSE)
+rownames(samplesheet) <- samplesheet$sample
+
 filetag <- if (nzchar(params$filetag)) params$filetag else paste0(params$target_group, "_vs_", params$base_group)
 
-samplesheet <- params$samplesheet
 stopifnot(is.data.frame(samplesheet))
+if (!"group" %in% names(samplesheet)) {
+  stop("Samplesheet must include a 'group' column (case-sensitive).")
+}
+if (!nzchar(params$base_group) || !nzchar(params$target_group)) {
+  stop("Params 'base_group' and 'target_group' must be set.")
+}
 
 samplesheet$group <- factor(
   samplesheet$group,
   levels = c(params$base_group, params$target_group)
 )
 samplesheet <- samplesheet[complete.cases(samplesheet$group), ]
+if (nrow(samplesheet) == 0) {
+  stop("No samples match base_group/target_group after filtering samplesheet.")
+}
 go <- isTRUE(params$go)
 gsea <- isTRUE(params$gsea)
 
@@ -981,9 +993,10 @@ cnetplot(
 `r if(gsea){"The gseaplot2 function in clusterProfiler [@wu2021clusterprofiler] provides a detailed visualization of the enrichment results for a specific gene set in Gene Set Enrichment Analysis (GSEA). This plot illustrates the enrichment score (ES) curve, which indicates the running sum of the ranked gene list as the genes in the gene set are encountered. The peak of the curve represents the maximum enrichment score, and the location of this peak suggests whether the gene set is enriched at the top (upregulated) or bottom (downregulated) of the ranked list. Additionally, the gseaplot2 displays a ranked list of genes with markings to show where the genes in the set are located. This helps visualize the distribution of genes within the ranked list and the strength of the enrichment signal."}`
 
 ```{r gseaplot, echo=gsea, results="asis", warning=FALSE, message=FALSE, eval=gsea}
-for (i in 1:5) {
-  if (i <= nrow(gsea_results)) {
-    plot_title <- gsea_results$Description[i]
+gsea_df <- as.data.frame(gsea_results)
+if (nrow(gsea_df) > 0) {
+  for (i in seq_len(min(5, nrow(gsea_df)))) {
+    plot_title <- gsea_df$Description[i]
 
     cat("\n### ", plot_title, " \n")
     p <- gseaplot2(gsea_results, geneSetID = i, title = plot_title)

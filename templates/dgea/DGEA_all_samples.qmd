@@ -18,12 +18,12 @@ format:
 bibliography: references.bib
 params:
   salmon_dir: ""
-  samplesheet: NULL
+  samplesheet_path: ""
   organism: ""
   ercc: false
-  application: "nfcore_3mRNAseq"
-  name: "project"
-  authors: "PROJECT_AUTHORS"
+  application: ""
+  name: ""
+  authors: ""
 ---
 
 ```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
@@ -40,7 +40,8 @@ library(ggrepel)
 library(tibble)
 
 salmon_dir <- params$salmon_dir
-samplesheet <- params$samplesheet
+samplesheet <- read.csv(params$samplesheet_path, stringsAsFactors = FALSE)
+rownames(samplesheet) <- samplesheet$sample
 application <- params$application
 organism <- params$organism
 norm_spikein_ercc <- isTRUE(params$ercc)
@@ -72,9 +73,9 @@ if (organism == "hsapiens") {
 }
 ```
 
-### [Back to front page](../Analysis_Report_RNAseq.html)
-
 # DESeq2
+
+This section estimates size factors and dispersions with DESeq2 and reports results from a model with intercept only (design `~ 1`), which is suitable for exploratory summaries rather than group contrasts [@love2014moderated].
 
 ```{r DESeq2, echo=TRUE, warning=FALSE, message=FALSE}
 tx2gene <- fread(
@@ -83,6 +84,14 @@ tx2gene <- fread(
 )
 files <- file.path(salmon_dir, samplesheet$sample, "quant.sf")
 names(files) <- samplesheet$sample
+if (!all(file.exists(files))) {
+  stop(
+    "Missing salmon quant files. ",
+    "salmon_dir='", salmon_dir, "', ",
+    "samplesheet_path='", samplesheet_path, "'.",
+    call. = FALSE
+  )
+}
 txi <- tximport(
   files,
   type = "salmon",
@@ -94,10 +103,10 @@ if (length_correction) {
   dds <- DESeqDataSetFromTximport(
     txi,
     colData = samplesheet,
-    design = ~group
+    design = ~1
   )
 } else {
-  dds <- DESeqDataSetFromMatrix(round(txi$counts), samplesheet, ~group)
+  dds <- DESeqDataSetFromMatrix(round(txi$counts), samplesheet, ~1)
 }
 
 dds <- DESeq(dds)
@@ -139,9 +148,12 @@ top_geneids <- names(sort(gene_variances, decreasing = TRUE))[1:20]
 top_genes <- tx2gene$gene_name[match(top_geneids, tx2gene$gene_id)]
 top_gene_counts <- normalized_counts[top_geneids, ]
 rownames(top_gene_counts) <- top_genes
+group_label <- if ("group" %in% names(samplesheet)) samplesheet$group else "All"
 ```
 
-# Interactive figures 
+# Interactive figures
+
+Use the PCA and heatmap panels below to inspect sample relationships and the highest-variance genes after normalization.
 ::: {.panel-tabset}
 
 ## 3D PCA
@@ -152,7 +164,7 @@ explained_variance_text <- paste0("PC", 1:3, " (", explained_variance[1:3], "%)"
 
 pca_data <- as.data.frame(pca$x[, 1:3])
 pca_data$sample <- rownames(pca_data)
-pca_data$group <- samplesheet$group
+pca_data$group <- group_label
 
 plot_ly(
   data = pca_data,
@@ -185,7 +197,7 @@ explained_variance_text <- paste0("PC", 1:2, " (", explained_variance[1:2], "%)"
 
 pca_data <- as.data.frame(pca$x[, 1:2])
 pca_data$sample <- rownames(pca_data)
-pca_data$group <- samplesheet$group
+pca_data$group <- group_label
 
 plot_ly(
   data = pca_data,
@@ -232,6 +244,8 @@ plot_ly(
 :::
 
 # Static figures
+
+Static versions of the PCA and heatmap are provided for reports that are exported to non-interactive formats.
 
 ::: {.panel-tabset}
 
@@ -307,9 +321,12 @@ addWorksheet(wb, "Samplesheets")
 writeData(wb, "Samplesheets", samplesheet)
 addWorksheet(wb, "Norm. counts")
 writeData(wb, "Norm. counts", out_norm)
-saveWorkbook(wb, "DGEA_All_samples_export.xlsx", overwrite = TRUE)
-write.csv(out_norm, "DGEA_All_samples_norm_counts.csv", row.names = FALSE)
+saveWorkbook(wb, "DGEA_all_samples_export.xlsx", overwrite = TRUE)
+write.csv(out_norm, "DGEA_all_samples_norm_counts.csv", row.names = FALSE)
 ```
+
+- Download [DGEA_all_samples_export.xlsx](DGEA_all_samples_export.xlsx).
+- Download [DGEA_all_samples_norm_counts.csv](DGEA_all_samples_norm_counts.csv).
 
 # Samplesheet
 

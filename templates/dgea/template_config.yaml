@@ -41,9 +41,9 @@ params:
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
   files:
-    - DGEA_constructor.qmd.j2 -> DGEA_constructor.qmd
+    - DGEA_constructor.R.j2 -> DGEA_constructor.R
     - DGEA_template.qmd -> DGEA_template.qmd
-    - DGEA_all.qmd -> DGEA_all.qmd
+    - DGEA_all_samples.qmd -> DGEA_all_samples.qmd
     - DGEA_functions.R -> DGEA_functions.R
     - references.bib -> references.bib
     - thermofisher_LSG_manuals_cms_095046.txt -> thermofisher_LSG_manuals_cms_095046.txt

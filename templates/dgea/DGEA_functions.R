@@ -1,4 +1,13 @@
 `%||%` <- function(x, y) if (is.null(x) || (is.character(x) && identical(x, ""))) y else x
+null_if_na <- function(x) {
+  if (is.null(x)) {
+    return(NULL)
+  }
+  if (length(x) == 1 && is.na(x)) {
+    return(NULL)
+  }
+  x
+}
 
 ####################################################################
 # Render DGEA reports (no hidden RData; pass params explicitly)
@@ -14,9 +23,13 @@ render_DGEA_report <- function(config) {
     paste0(config$target_group, "_vs_", config$base_group)
   }
 
+  csv_path <- file.path(getwd(), paste0("DGEA_", filetag, "_samplesheet.csv"))
+  config$samplesheet <- config$samplesheet[config$samplesheet$group %in% c(config$base_group, config$target_group),]
+  utils::write.csv(config$samplesheet, csv_path, row.names = FALSE)
+      
   execute_params <- list(
     salmon_dir = config$salmon_dir,
-    samplesheet = config$samplesheet,
+    samplesheet_path = csv_path,
     organism = config$organism,
     ercc = isTRUE(config$ercc),
     application = config$application,
@@ -24,8 +37,8 @@ render_DGEA_report <- function(config) {
     authors = config$authors %||% "PROJECT_AUTHORS",
     base_group = config$base_group,
     target_group = config$target_group,
-    additional_tag = config$additional_tag %||% NA,
-    design_formula = config$design_formula %||% ~ group,
+    additional_tag = null_if_na(config$additional_tag),
+    design_formula = config$design_formula,
     paired = isTRUE(config$paired),
     go = isTRUE(config$go),
     gsea = isTRUE(config$gsea),
@@ -33,23 +46,29 @@ render_DGEA_report <- function(config) {
     cutoff_log2fc = config$cutoff_log2fc %||% 1,
     pvalueCutoff_GO = config$pvalueCutoff_GO %||% 0.05,
     pvalueCutoff_GSEA = config$pvalueCutoff_GSEA %||% 0.05,
-    highlighted_genes = config$highlighted_genes %||% NA,
+    highlighted_genes = null_if_na(config$highlighted_genes),
     tx2gene_file = config$tx2gene_file %||% file.path(config$salmon_dir, "tx2gene.tsv"),
     filetag = filetag
   )
 
+  output_file <- paste0("DGEA_", filetag, ".html")
+  message("Rendering DGEA report to: ", normalizePath(file.path(getwd(), output_file), winslash = "/", mustWork = FALSE))
   quarto::quarto_render(
     input = "DGEA_template.qmd",
-    output_file = paste0("DGEA_", filetag, ".html"),
+    output_file = output_file,
     execute_params = execute_params,
-    quiet = TRUE
+    quiet = FALSE
   )
+  invisible(output_file)
 }
 
 render_DGEA_all_sample <- function(config) {
+  csv_path <- file.path(getwd(), paste0("DGEA_all_samplesheet.csv"))
+  utils::write.csv(config$samplesheet, csv_path, row.names = FALSE)
+
   execute_params <- list(
     salmon_dir = config$salmon_dir,
-    samplesheet = config$samplesheet,
+    samplesheet_path = csv_path,
     organism = config$organism,
     ercc = isTRUE(config$ercc),
     application = config$application,
@@ -57,12 +76,15 @@ render_DGEA_all_sample <- function(config) {
     authors = config$authors %||% "PROJECT_AUTHORS"
   )
 
+  output_file <- "DGEA_all_samples.html"
+  message("Rendering DGEA all-samples report to: ", normalizePath(file.path(getwd(), output_file), winslash = "/", mustWork = FALSE))
   quarto::quarto_render(
-    input = "DGEA_all.qmd",
-    output_file = "DGEA_All_samples.html",
+    input = "DGEA_all_samples.qmd",
+    output_file = output_file,
     execute_params = execute_params,
-    quiet = TRUE
+    quiet = FALSE
   )
+  invisible(output_file)
 }
 
 ####################################################################
@@ -86,12 +108,15 @@ render_simple_report <- function(config) {
     filetag = filetag
   )
 
+  output_file <- paste0("SimpleComparison_", filetag, ".html")
+  message("Rendering simple comparison report to: ", normalizePath(file.path(getwd(), output_file), winslash = "/", mustWork = FALSE))
   quarto::quarto_render(
     input = "SimpleComparison_template.qmd",
-    output_file = paste0("SimpleComparison_", filetag, ".html"),
+    output_file = output_file,
     execute_params = execute_params,
     quiet = TRUE
   )
+  invisible(output_file)
 }
 
 ####################################################################
