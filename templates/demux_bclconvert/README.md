@@ -8,9 +8,7 @@ Render, then run in the desired working directory (where you want outputs):
 ```
 cd /data/fastq/
 
-bpm template render demux_bclconvert \
-  --bcl /data/raw/novaseq_A01742/250915_A01742_0505_AH2NNKDRX7/ \
-  --out 250915_A01742_0505_AH2NNKDRX7
+bpm template render demux_bclconvert --adhoc --bcl /data/raw/nextseq500_NB501289/251209_NB501289_0978_AHKWC7AFX7/ 
 
 cd 250915_A01742_0505_AH2NNKDRX7
 bpm template run demux_bclconvert

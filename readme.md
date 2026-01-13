@@ -6,85 +6,54 @@ BPM CLI.
 
 - BPM project: https://github.com/chaochungkuo/BPM
 - BRS concept: organize your lab/facility templates in a single repo; render them into
-  projects or in ad‑hoc output folders without changing your pipelines.
+  projects or in ad-hoc output folders without changing your pipelines.
 
-## Template: ref_genomes (ad‑hoc friendly)
-
-Build reference genomes and indices (STAR, BWA, HISAT2, Salmon, etc.) using
-`nf-core/references`. The template is optimized for ad‑hoc usage so you can maintain a
-central reference tree such as `/data/genomes`.
-
-### Requirements
-- Nextflow installed and working with your preferred runtime (Docker/Singularity/Conda)
-- Network access to download source FASTA/GTF files (or provide local paths)
-- Optional: PyYAML for editing/rendering YAML (runner supports JSON as alternative)
-
-Validate your setup once:
+## Simple usage
+1) Add the BRS and activate it
 ```
-nextflow run nf-core/references -profile test
-```
-
-### Quick Start
-1) Activate this BRS in BPM (optional if running purely ad‑hoc)
-```
-# Local path or Git URL
-bpm resource add /path/to/UKA_GF_BRS --activate
-# or
 bpm resource add https://github.com/IZKF-Genomics/UKA_GF_BRS --activate
 ```
 
-2) Render the template into your references root
+2) Discover templates and docs
 ```
-bpm template render ref_genomes --out /data/genomes
-```
-This writes:
-- `/data/genomes/run.sh` and `runner.py` (orchestration + helpers)
-- `/data/genomes/genomes.yaml` (starter config)
-- `/data/genomes/ERCC92/ERCC92.fa` and `ERCC92.gtf` (bundled)
-
-3) Configure genomes in `genomes.yaml`
-- Define `id`, `fasta` (URL or local path), optional `gtf`, optional `indices` (tools)
-- Global `with_ercc: true` creates an additional `<id>_with_ERCC` genome using bundled ERCC
-
-Example snippet:
-```yaml
-with_ercc: true
-
-genomes:
-  - id: GRCh38
-    fasta: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_49/GRCh38.primary_assembly.genome.fa.gz
-    gtf:   https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_human/release_49/gencode.v49.primary_assembly.annotation.gtf.gz
-    # omit indices to build all supported by default
-  - id: GRCm39
-    fasta: https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/GRCm39.primary_assembly.genome.fa.gz
-    gtf:   https://ftp.ebi.ac.uk/pub/databases/gencode/Gencode_mouse/release_M38/gencode.vM38.primary_assembly.annotation.gtf.gz
+bpm template list
+bpm template readme <template_id>
 ```
 
-4) Run
+3) Render a template
 ```
-cd /data/genomes
-# All genomes
-./run.sh --all
-# Or select specific genomes
-./run.sh --only GRCh38,GRCm39
-```
-The script prints the exact Nextflow command before running each build.
-
-Environment overrides:
-```
-NXF_PROFILE=docker THREADS=32 MEM_GB=128 NF_REVISION=dev \
-  NF_EXTRA_ARGS='-with-report -with-timeline' ./run.sh --only GRCh38
+bpm template render <template_id> --dir /path/to/project
+# or ad-hoc
+bpm template render <template_id> --out /path/to/output
 ```
 
-### Outputs
-- Base genomes: `/data/genomes/<id>/indices/…`
-- ERCC genomes: `/data/genomes/<id>_with_ERCC/indices/…`
-- Staged sources under `/data/genomes/<id>/src/`
-- The ERCC variant uses concatenated FASTA and a combined GTF (base + ERCC)
+4) Run the rendered output (template-specific)
+```
+cd /path/to/output
+./run.sh
+```
 
-### Notes
-- The top‑level `run.sh` keeps orchestration transparent (selection, datasheet creation,
-  and printed commands). The heavy‑duty helpers live in `runner.py` and are invoked per
-  step to keep the code readable and maintainable.
-- You can also call `runner.py` subcommands directly for debugging (see `runner.py --help`).
+## Templates
+- demux_bclconvert: [templates/demux_bclconvert/README.md](templates/demux_bclconvert/README.md)
+- dgea: [templates/dgea/README.md](templates/dgea/README.md)
+- export: [templates/export/README.md](templates/export/README.md)
+- hello_world: [templates/hello_world/README.md](templates/hello_world/README.md)
+- nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)
+- nfcore_rnaseq: [templates/nfcore_rnaseq/README.md](templates/nfcore_rnaseq/README.md)
+- ref_genomes: [templates/ref_genomes/README.md](templates/ref_genomes/README.md)
 
+## Workflows
+- export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md)
+- export_status: [workflows/export_status/README.md](workflows/export_status/README.md)
+- hello_world: [workflows/hello_world/README.md](workflows/hello_world/README.md)
+
+## Docs
+- Install BPM: [docs/install_bpm.md](docs/install_bpm.md)
+- Add this BRS: [docs/add_brs.md](docs/add_brs.md)
+- Update this BRS: [docs/update_brs.md](docs/update_brs.md)
+- Demultiplexing: [docs/demultiplexing.md](docs/demultiplexing.md)
+- Basic analysis: [docs/basic_analysis.md](docs/basic_analysis.md)
+
+## Conventions
+- Project mode renders into `<project_dir>/<template_id>/` and updates `project.yaml`.
+- Ad-hoc mode renders into the provided `--out` directory and writes `bpm.meta.yaml`.
