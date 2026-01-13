@@ -1,23 +1,34 @@
 # Basic analysis
 
-Common analysis entry points in this BRS:
+This workflow starts after demultiplexing and does not use `export_demux`.
 
-## RNA-seq processing (nf-core)
+## Project init (adopt a demux run)
 ```
-bpm template render nfcore_rnaseq --dir /path/to/project --param genome=GRCh38 --param agendo_id=12345
-bpm template run nfcore_rnaseq --dir /path/to/project
+cd /data/projects
+bpm project init --author ckuo --adopt /data/fastq/251209_NB501289_0978_AHKWC7AFX7/ 251209_UserName_PIName_Institute_3mRNAseq
 ```
 
-For 3' mRNA-seq, use:
+## RNA-seq processing (nf-core 3'mRNA-seq)
 ```
-bpm template render nfcore_3mrnaseq --dir /path/to/project --param genome=GRCh38 --param agendo_id=12345
-bpm template run nfcore_3mrnaseq --dir /path/to/project
+cd 251209_UserName_PIName_Institute_3mRNAseq
+bpm template render nfcore_3mrnaseq --genome GRCh38 --agendo-id 4622
+# check nfcore_3mrnaseq/run.sh
+bpm template run nfcore_3mrnaseq
 ```
 
 ## Differential expression (DGEA)
 ```
-bpm template render dgea --dir /path/to/project --param salmon_dir=/path/to/quant --param organism=hsapiens
-bpm template run dgea --dir /path/to/project
+bpm template render dgea
+# check dgea/DGEA_constructor.R to generate all reports manually
+# or, do this command:
+# bpm template run dgea
+```
+
+## Export
+```
+bpm template render export
+# check or edit export/export_job_spec.json
+bpm template run export
 ```
 
 ## Notes
