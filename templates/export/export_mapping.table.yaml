@@ -18,6 +18,9 @@
 # - {template_id} in dest
 # - {template_root} in src
 # - {basename}, {stem}, {relpath} in dest for glob rules
+#   - {basename}: matched file name with extension (e.g. "multiqc_report.html")
+#   - {stem}: matched file name without extension (e.g. "multiqc_report")
+#   - {relpath}: matched path relative to {template_root}
 
 mappings:
   ##############################################################################
@@ -59,7 +62,7 @@ mappings:
   - template_id: nfcore_rnaseq
     rule: glob
     src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
-    dest: "2_Processed_data/nfcore_rnaseq/results/multiqc/star_salmon/multiqc_report.html"
+    dest: "2_Processed_data/nfcore_rnaseq/results/{relpath}"
     report_section: processed
     include_in_report: true
     description: "MultiQC report of nfcore_rnaseq"
@@ -80,7 +83,7 @@ mappings:
   - template_id: nfcore_3mrnaseq
     rule: glob
     src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
-    dest: "2_Processed_data/nfcore_3mrnaseq/results/multiqc/star_salmon/multiqc_report.html"
+    dest: "2_Processed_data/nfcore_3mrnaseq/results/{relpath}"
     report_section: processed
     include_in_report: true
     description: "MultiQC report of nfcore_3mrnaseq"
@@ -99,7 +102,7 @@ mappings:
   - template_id: dgea
     rule: glob
     src: "{template_root}/*.html"
-    dest: "3_Reports/dgea/results/"
+    dest: "3_Reports/dgea/results/{basename}"
     report_section: reports
     include_in_report: true
     description: "DGEA reports"

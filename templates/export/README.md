@@ -62,9 +62,9 @@ description: <free text>
 ### Placeholders
 - `{template_id}`: the template id from the mapping entry.
 - `{template_root}`: the resolved template folder path in the project.
-- `{basename}`: file name with extension (glob only).
-- `{stem}`: file name without extension (glob only).
-- `{relpath}`: relative path from `{template_root}` (glob only).
+- `{basename}`: matched file name with extension, e.g. `multiqc_report.html` (glob only).
+- `{stem}`: matched file name without extension, e.g. `multiqc_report` (glob only).
+- `{relpath}`: matched path relative to `{template_root}` (glob only).
 
 ### src_project_key Path Syntax
 `src_project_key` points into `project.yaml` using dot + selector syntax.
