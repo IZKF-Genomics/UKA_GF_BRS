@@ -1,0 +1,46 @@
+# Workflow: export_demux
+# Build and submit an export job for an ad-hoc demux_bclconvert run directory.
+
+id: export_demux
+description: "Export FASTQs and MultiQC from an ad-hoc demux_bclconvert run."
+
+params:
+  run_dir:
+    type: str
+    cli: "--run-dir"
+    required: true
+    description: "Path to the demux_bclconvert run directory (contains output/ and multiqc/)."
+  project_name:
+    type: str
+    cli: "--project-name"
+    required: false
+    description: "Project name to record in the export spec (defaults to basename of run_dir)."
+  export_engine_api_url:
+    type: str
+    required: false
+    default: "http://genomics.rwth-aachen.de:9500/export"
+    description: "Base URL for the export engine API"
+  export_engine_backends:
+    type: str
+    required: false
+    default: "apache, owncloud, sftp"
+    description: "Comma-separated list of export backends"
+  export_expiry_days:
+    type: int
+    required: false
+    default: 30
+    description: "Optional expiry_days for export engine job spec"
+  export_username:
+    type: str
+    required: false
+    description: "Username for the export engine; defaults to derived from project_name"
+  export_password:
+    type: str
+    required: false
+    description: "Password/token for the export engine; auto-generated if not provided"
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python]
