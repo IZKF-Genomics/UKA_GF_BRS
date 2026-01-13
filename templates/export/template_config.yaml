@@ -1,5 +1,5 @@
 id: export
-description: "Generate and manage an export mapping for API export jobs."
+description: "Generate and submit export job specs from a rule-based mapping table."
 
 params:
   export_engine_api_url:

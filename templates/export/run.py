@@ -9,10 +9,13 @@ from urllib.request import Request, urlopen
 
 from bpm.io.yamlio import safe_dump_yaml, safe_load_yaml
 
+
 def main() -> None:
     spec = Path("export_job_spec.json")
     if not spec.exists():
-        raise SystemExit("export_job_spec.json not found; render the template first")
+        raise SystemExit(
+            "export_job_spec.json not found; render the export template to generate it"
+        )
 
     data = spec.read_text().strip()
     if not data:

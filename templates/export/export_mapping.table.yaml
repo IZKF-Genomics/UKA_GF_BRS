@@ -1,36 +1,105 @@
-# Default export mappings for templates in this BRS.
-# This file is a simple table (no Jinja). A post-render hook filters entries
-# to only those templates listed in project.yaml for the current project and
-# writes export_job_spec.json.
-# Dest paths are treated as relative paths in the export engine JSON.
-# Field meanings:
+# Export mapping table
+# Each entry becomes one or many export_job_spec.json entries.
+# Only entries whose template_id exists in project.yaml are considered.
+#
+# Core keys:
 # - template_id: template folder name in the BRS.
+# - rule: tree | folder | file | glob
 # - src: source path (relative to project root or absolute).
-# - src_published_key: optional; if present in project.yaml, overrides src.
-# - dest: destination path (supports {template_id}).
-# - report_section: explicit report section (raw/processed/reports/general).
+# - src_project_key: optional; project.yaml path that resolves to a source path.
+# - src_published_key: optional; templates[].published key (legacy shortcut).
+# - dest: destination path (required for tree/folder/file/glob).
+# - report_section: raw | processed | reports | general (default: general).
 # - description: optional text for the export entry.
-# Optional fields (per entry): mode, include_in_report, host, project.
-# Note: if src is a folder, the export engine copies the folder into dest.
+# - include_in_report: optional boolean (default: true; controls report visibility).
+# - mode: optional export mode (default: symlink).
+#
+# Placeholders:
+# - {template_id} in dest
+# - {template_root} in src
+# - {basename}, {stem}, {relpath} in dest for glob rules
 
 mappings:
+  ##############################################################################
+  # demux_bclconvert
+  ##############################################################################
+  # Export FASTQ directory using project.yaml key if present.
   - template_id: demux_bclconvert
-    src: demux_bclconvert
-    src_published_key: FASTQ_dir
+    rule: folder
+    src_project_key: "templates[id=demux_bclconvert].published.FASTQ_dir"
+    src: demux_bclconvert/output
     dest: "1_Raw_data/FASTQ"
     report_section: raw
+    include_in_report: true
     description: "FASTQ output from demux_bclconvert"
 
+  # Export MultiQC report file using project.yaml key if present.
   - template_id: demux_bclconvert
-    src: demux_bclconvert
-    src_published_key: multiqc_report
+    rule: file
+    src_project_key: "templates[id=demux_bclconvert].published.multiqc_report"
+    src: demux_bclconvert/multiqc/multiqc_report.html
     dest: "1_Raw_data/demultiplexing_multiqc_report.html"
     report_section: raw
+    include_in_report: true
     description: "MultiQC report from demux_bclconvert"
 
+  ##############################################################################
+  # nfcore_rnaseq
+  ##############################################################################
+  # Export entire nfcore_rnaseq output folder.
   - template_id: nfcore_rnaseq
-    src: nfcore_rnaseq
+    rule: tree
+    src: "{template_root}"
     dest: "2_Processed_data/nfcore_rnaseq"
     report_section: processed
+    include_in_report: false
     description: "nfcore_rnaseq outputs"
-    
+
+  # Example: export MultiQC report individually (one entry per match).
+  - template_id: nfcore_rnaseq
+    rule: glob
+    src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
+    dest: "2_Processed_data/nfcore_rnaseq/results/multiqc/star_salmon/multiqc_report.html"
+    report_section: processed
+    include_in_report: true
+    description: "MultiQC report of nfcore_rnaseq"
+
+  ##############################################################################
+  # nfcore_3mrnaseq
+  ##############################################################################
+  # Export entire nfcore_3mrnaseq output folder.
+  - template_id: nfcore_3mrnaseq
+    rule: tree
+    src: "{template_root}"
+    dest: "2_Processed_data/nfcore_3mrnaseq"
+    report_section: processed
+    include_in_report: false
+    description: "nfcore_3mrnaseq outputs"
+
+  # Example: export MultiQC report individually (one entry per match).
+  - template_id: nfcore_3mrnaseq
+    rule: glob
+    src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
+    dest: "2_Processed_data/nfcore_3mrnaseq/results/multiqc/star_salmon/multiqc_report.html"
+    report_section: processed
+    include_in_report: true
+    description: "MultiQC report of nfcore_3mrnaseq"
+
+  ##############################################################################
+  # DGEA
+  ##############################################################################
+  # Export entire dgea folder.
+  - template_id: dgea
+    rule: tree
+    src: "{template_root}"
+    dest: "3_Reports/dgea"
+    report_section: reports
+    include_in_report: false
+    description: "DGEA results"
+  - template_id: dgea
+    rule: glob
+    src: "{template_root}/*.html"
+    dest: "3_Reports/dgea/results/"
+    report_section: reports
+    include_in_report: true
+    description: "DGEA reports"

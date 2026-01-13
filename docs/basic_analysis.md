@@ -16,6 +16,15 @@ bpm template render nfcore_3mrnaseq --genome GRCh38 --agendo-id 4622
 bpm template run nfcore_3mrnaseq
 ```
 
+If the project is not 3' mRNA-seq, use `nfcore_rnaseq`:
+```
+bpm template render nfcore_rnaseq --genome GRCh38 --agendo-id 4622
+# check nfcore_rnaseq/run.sh
+bpm template run nfcore_rnaseq
+```
+
+More options will be implemented.
+
 ## Differential expression (DGEA)
 ```
 bpm template render dgea

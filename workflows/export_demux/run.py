@@ -37,6 +37,22 @@ def _derive_username(project_name: str) -> str:
     return project_name or "user"
 
 
+def _parse_bool(value, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "y", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "n", "off"}:
+            return False
+    return default
+
+
 def _materialize_hostpath(raw: str) -> str:
     """
     Convert a host:abs/path string to a local absolute path string.
@@ -99,6 +115,9 @@ def main() -> None:
     expiry_days = int(params.get("export_expiry_days") or 0)
     username = str(params.get("export_username") or "").strip() or _derive_username(project_name)
     password = str(params.get("export_password") or "").strip() or secrets.token_urlsafe(16)
+    include_default = _parse_bool(params.get("include_in_report"), True)
+    include_fastq = _parse_bool(params.get("include_in_report_fastq"), include_default)
+    include_multiqc = _parse_bool(params.get("include_in_report_multiqc"), include_default)
 
     host = os.uname().nodename.split(".")[0]
 
@@ -109,7 +128,7 @@ def main() -> None:
             "host": host,
             "project": project_name,
             "mode": "symlink",
-            "include_in_report": True,
+            "include_in_report": include_fastq,
             "report_section": "raw",
             "description": "FASTQ output from demux_bclconvert",
         },
@@ -119,7 +138,7 @@ def main() -> None:
             "host": host,
             "project": project_name,
             "mode": "copy",
-            "include_in_report": True,
+            "include_in_report": include_multiqc,
             "report_section": "raw",
             "description": "MultiQC report from demux_bclconvert",
         },
