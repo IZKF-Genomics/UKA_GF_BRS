@@ -67,17 +67,6 @@ global_config <- list(
   pvalueCutoff_GO = 0.05,
   pvalueCutoff_GSEA = 0.05
 )
-####################################################################
-#   Define Analysis Settings Based on Processing Method (no need to be changed)
-####################################################################
-
-if (application == "RNAseq") {
-  global_config$counts_from_abundance <- "lengthScaledTPM"
-  global_config$length_correction <- TRUE
-} else if (application == "3mRNAseq") {
-  global_config$counts_from_abundance <- "no"
-  global_config$length_correction <- FALSE
-}
 
 ####################################################################
 # 4) Render reports (explicit, per-report overrides)
@@ -94,6 +83,7 @@ render_DGEA_all_sample(global_config)
 # `report_config` inherits `global_config` and enables flexible customization.
 # The generated Rmd aims to be a stand-alone Rmd without dependency to this constructor.
 report_config <- global_config
+# unique(report_config$samplesheet$group)
 report_config$base_group <- "WT"
 report_config$target_group <- "KO"
 ######## You can further customize and overwrite any items ########
@@ -108,3 +98,19 @@ report_config$target_group <- "KO"
 # report_config$gsea <- FALSE
 render_DGEA_report(report_config)
 
+####################################################################
+# Render DGEA correlation analysis (optional; uncomment to enable)
+# Expects DGEA_<tag>_genes_stats.csv files from prior DGEA runs.
+# correlation_params <- list(
+#   authors = report_config$authors %||% "PROJECT_AUTHORS",
+#   comparisons = list(
+#     list(title = "Correlation of IL10 and LPS (WT)", x = "IL10_vs_Control_in_WT", y = "LPS_vs_Control_in_WT"),
+#     list(title = "Correlation of IL10 and LPS (KO)", x = "IL10_vs_Control_in_KO", y = "LPS_vs_Control_in_KO")
+#   )
+# )
+# quarto::quarto_render(
+#   input = "DGEA_correlation_analysis.qmd",
+#   output_file = "DGEA_correlation_analysis.html",
+#   execute_params = correlation_params,
+#   quiet = FALSE
+# )
