@@ -1,0 +1,48 @@
+id: scrnaseq_pipeline
+description: "Single-cell RNA-seq notebook pipeline (monolithic)."
+params:
+  dir_samples:
+    type: str
+    cli: "--dir-samples"
+    required: false
+    description: "Input Cell Ranger count directory (default: <project>/nfcore_scrnaseq/results/cellranger/count/)."
+  technology:
+    type: str
+    cli: "--technology"
+    required: false
+    description: "Technology (10x, ParseBio, Singleron)."
+    default: "10x"
+  organism:
+    type: str
+    cli: "--organism"
+    required: false
+    description: "Organism (human, mouse)."
+    default: "human"
+  auto_find:
+    type: bool
+    cli: "--auto-find"
+    required: false
+    description: "Automatically find samples in dir_samples."
+    default: true
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - annotation -> annotation
+    - cell-cell-communication -> cell-cell-communication
+    - differential_expression -> differential_expression
+    - preprocessing -> preprocessing
+    - resources -> resources
+    - shared -> shared
+    - template -> template
+    - readme.md -> readme.md
+    - chnagelog.md -> chnagelog.md
+    - config.toml.j2 -> config.toml
+    - run.sh.j2 -> run.sh
+
+run:
+  entry: "run.sh"
+
+tools:
+  required: [pixi, quarto, jupyter]
+  optional: []

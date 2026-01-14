@@ -1,0 +1,27 @@
+[basic]
+{% set project_path = ctx.materialize(ctx.project.project_path) if ctx.project else ctx.cwd %}
+{% set dir_samples = ctx.params.dir_samples or (project_path + "/nfcore_scrnaseq/results/cellranger/count/") %}
+ANALYSIS_DIR = "{{ project_path }}/analysis/scRNAseq_pipeline"
+DIR_SAMPLES = "{{ dir_samples }}"
+RESOURCE_PATH = "{{ project_path }}/analysis/scRNAseq_pipeline/resources"
+DIR_SAVE = "save"
+TECHNOLOGY = "{{ ctx.params.technology }}"
+ORGANISM = "{{ ctx.params.organism }}"
+auto_find = {{ "true" if ctx.params.auto_find else "false" }}
+
+[basic.samples]
+# Sample1="PATH"
+[basic.raw_samples]
+
+[normalization]
+NORMALIZATION_METHOD = "log_norm"
+COUNTS_LAYER = "counts"
+
+[clustering]
+CLUSTERING_COL = ""
+INTEGRATE_SAMPLES = false
+INTEGRATION_METHOD = "harmony"
+
+[annotation]
+ANNOTATION_METHOD = ["scTAB"]
+ANNOTATION_COLUMN = ""
