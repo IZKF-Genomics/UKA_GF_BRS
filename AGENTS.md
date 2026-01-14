@@ -2,7 +2,7 @@
 
 <INSTRUCTIONS>
 ## Scope
-- This file applies to all work under `/data/test_bpm/UKA_GF_BRS/`, including templates, hooks, resolvers, workflows, and supporting scripts.
+- This file applies to all work under `/data/shared/repos/UKA_GF_BRS/`, including templates, hooks, resolvers, workflows, and supporting scripts.
 
 ## Core principles
 - Integrity first: never fabricate facts, file contents, command output, or test results. If you did not verify something, say so and suggest how to verify it.
@@ -23,7 +23,7 @@
 - Avoid destructive commands unless explicitly requested.
 
 ## Documentation
-- Always update `/data/test_bpm/UKA_GF_BRS/readme.md` when adding a new template or workflow, and when making changes that affect existing templates or workflows.
+- Always update `/data/shared/repos/UKA_GF_BRS/readme.md` when adding a new template or workflow, and when making changes that affect existing templates or workflows.
 
 ## Quality bar
 - Keep changes small and reviewable.

@@ -1,0 +1,60 @@
+# Workflow: export_bcl
+# Build and submit an export job for raw BCL data without demultiplexing.
+
+id: export_bcl
+description: "Export raw BCL data from a sequencing run directory."
+
+params:
+  run_dir:
+    type: str
+    cli: "--run-dir"
+    required: true
+    description: "Path to the sequencing run directory."
+  project_name:
+    type: str
+    cli: "--project-name"
+    required: false
+    description: "Project name to record in the export spec (defaults to basename of run_dir)."
+  bcl_dir:
+    type: str
+    cli: "--bcl-dir"
+    required: false
+    description: "Optional BCL directory override (defaults to Data/Intensities/BaseCalls under run_dir)."
+  include_in_report:
+    type: bool
+    required: false
+    default: true
+    description: "Default include_in_report flag for exported items."
+  include_in_report_bcl:
+    type: bool
+    required: false
+    description: "Override include_in_report for the BCL directory."
+  export_engine_api_url:
+    type: str
+    required: false
+    default: "http://genomics.rwth-aachen.de:9500/export"
+    description: "Base URL for the export engine API"
+  export_engine_backends:
+    type: str
+    required: false
+    default: "apache, owncloud, sftp"
+    description: "Comma-separated list of export backends"
+  export_expiry_days:
+    type: int
+    required: false
+    default: 30
+    description: "Optional expiry_days for export engine job spec"
+  export_username:
+    type: str
+    required: false
+    description: "Username for the export engine; defaults to derived from project_name"
+  export_password:
+    type: str
+    required: false
+    description: "Password/token for the export engine; auto-generated if not provided"
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python]
