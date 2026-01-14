@@ -1,0 +1,19 @@
+id: ref_10xgenomics
+description: "Download and extract 10x Genomics reference indices. Optimized for ad-hoc usage (--out)."
+
+params: {}
+
+render:
+  # In project mode, this renders under the project root. In ad-hoc mode (--out),
+  # BPM overrides 'into' to '.' so files land directly under the provided folder.
+  into: "/data/shared/10xGenomics/"
+  files:
+    - run.sh  -> run.sh
+    - README.md -> README.md
+
+run:
+  entry: "run.sh"
+
+tools:
+  required: [curl, tar]
+  optional: []

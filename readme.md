@@ -38,9 +38,12 @@ cd /path/to/output
 - dgea: [templates/dgea/README.md](templates/dgea/README.md)
 - export: [templates/export/README.md](templates/export/README.md)
 - hello_world: [templates/hello_world/README.md](templates/hello_world/README.md)
+- ercc: [templates/ercc/README.md](templates/ercc/README.md)
 - nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)
 - nfcore_rnaseq: [templates/nfcore_rnaseq/README.md](templates/nfcore_rnaseq/README.md)
+- nfcore_scrnaseq: [templates/nfcore_scrnaseq/README.md](templates/nfcore_scrnaseq/README.md)
 - ref_genomes: [templates/ref_genomes/README.md](templates/ref_genomes/README.md)
+- ref_10xgenomics: [templates/ref_10xgenomics/README.md](templates/ref_10xgenomics/README.md)
 
 ## Workflows
 - export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md)

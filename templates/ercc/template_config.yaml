@@ -1,0 +1,37 @@
+id: ercc
+description: "ERCC spike-in QC report."
+params:
+  salmon_dir:
+    type: str
+    cli: "--salmon-dir"
+    required: false
+    description: "Path to salmon quant directory containing salmon.merged.gene_tpm.tsv."
+  samplesheet:
+    type: str
+    cli: "--samplesheet"
+    required: false
+    description: "Path to samplesheet CSV with a 'sample' column."
+  authors:
+    type: str
+    cli: "--authors"
+    required: false
+    description: "Author list for the report header."
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - ERCC.qmd.j2 -> ERCC.qmd
+    - thermofisher_LSG_manuals_cms_095046.txt -> thermofisher_LSG_manuals_cms_095046.txt
+    - references.bib -> references.bib
+    - run.sh.j2 -> run.sh
+
+run:
+  entry: "run.sh"
+
+hooks:
+  pre_render:
+    - hooks.ercc_defaults:populate
+
+tools:
+  required: [quarto, Rscript]
+  optional: []

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[info] $(date) nf-core/scrnaseq profile=docker"
+nextflow -version || true
+mkdir -p "results"
+
+nextflow run nf-core/scrnaseq \
+  -r "4.1.0" \
+  -profile "docker" \
+  -c nextflow.config \
+  --input "samplesheet.csv" \
+  --outdir "results" \
+  --aligner "{{ ctx.params.aligner }}" \
+  --protocol "{{ ctx.params.protocol }}" \
+{% if ctx.params.max_cpus %}
+  --max_cpus "{{ ctx.params.max_cpus }}" \
+{% endif %}
+{% if ctx.params.max_memory %}
+  --max_memory "{{ ctx.params.max_memory }}" \
+{% endif %}
+{% if ctx.params.skip_cellbender %}
+  --skip_cellbender \
+{% endif %}
+  --cellranger_index "{{ ctx.params.cellranger_index }}" \
+  --genome "{{ ctx.params.genome }}" --igenomes_ignore true --igenomes_base "/data/shared/igenomes/"
+
+# Available 10xGenomics references:
+# /data/shared/10xGenomics/refdata-gex-GRCh38-2024-A
+# /data/shared/10xGenomics/refdata-gex-GRCm39-2024-A
+# /data/shared/10xGenomics/refdata-gex-mRatBN7-2-2024-A
+# /data/shared/10xGenomics/refdata-gex-GRCh38_and_GRCm39-2024-A
+
+nextflow clean "$(grep -oP 'Run name:\\s+\\K\\S+' .nextflow.log | tail -n 1)" -f
