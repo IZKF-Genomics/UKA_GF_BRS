@@ -14,7 +14,10 @@ format:
 bibliography: references.bib
 params:
   authors: ""
-  comparisons: !r list()
+  comparisons: !r list(
+    list(title = "Correlation of IL10 and LPS (WT)", x = "IL10_vs_Control_in_WT", y = "LPS_vs_Control_in_WT"),
+    list(title = "Correlation of IL10 and LPS (KO)", x = "IL10_vs_Control_in_KO", y = "LPS_vs_Control_in_KO")
+  )
 ---
 
 ```{r setup, echo=FALSE, results="hide", warning=FALSE, message=FALSE}
@@ -80,7 +83,9 @@ corr_figure <- function(title, x_tag, y_tag) {
     stat_regline_equation(label.y = statregline_y)
 }
 
-validate_comparisons(params$comparisons)
+if (length(params$comparisons) > 0) {
+  validate_comparisons(params$comparisons)
+}
 ```
 
 ### [Back to the main page](../Analysis_Report_RNAseq.html)
@@ -91,8 +96,12 @@ Each comparison expects input files named `DGEA_<tag>_genes_stats.csv`.
 # Correlation plots
 
 ```{r corr-plots, echo=FALSE, results="asis", warning=FALSE, message=FALSE, dpi=600, fig.width=4, fig.height=4}
-for (cmp in params$comparisons) {
-  print(corr_figure(cmp$title, cmp$x, cmp$y))
+if (length(params$comparisons) == 0) {
+  cat("No comparisons configured. Set params$comparisons to enable plots.")
+} else {
+  for (cmp in params$comparisons) {
+    print(corr_figure(cmp$title, cmp$x, cmp$y))
+  }
 }
 ```
 

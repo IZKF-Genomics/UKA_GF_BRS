@@ -114,3 +114,69 @@ render_DGEA_report(report_config)
 #   execute_params = correlation_params,
 #   quiet = FALSE
 # )
+
+####################################################################
+# Render DGEA geneset comparisons (optional; uncomment to enable)
+# Expects DGEA_*_stat.csv files from prior DGEA runs.
+# geneset_params <- list(
+#   authors = report_config$authors %||% "PROJECT_AUTHORS",
+#   cutoff_adj_p = report_config$cutoff_adj_p %||% 0.05,
+#   cutoff_log2fc = report_config$cutoff_log2fc %||% 1,
+#   gene_sets = list(
+#     list(name = "Generation2", file = "DGEA_Generation2_vs_WT_stat.csv"),
+#     list(name = "Generation3", file = "DGEA_Generation3_vs_WT_stat.csv"),
+#     list(name = "Generation4", file = "DGEA_Generation4_vs_WT_stat.csv"),
+#     list(name = "Gender", file = "DGEA_Female_vs_Male_stat.csv")
+#   )
+# )
+# quarto::quarto_render(
+#   input = "DGEA_Geneset_Comparisons.qmd",
+#   output_file = "DGEA_Geneset_Comparisons.html",
+#   execute_params = geneset_params,
+#   quiet = FALSE
+# )
+
+####################################################################
+# Render DGEA integrated heatmap (optional; uncomment to enable)
+# Expects DGEA_*_stat.csv, DGEA_All_samples_norm_counts.csv, and
+# optional DGEA_*vs*_export.xlsx (GSEA) files from prior DGEA runs.
+# heatmap_params <- list(
+#   authors = report_config$authors %||% "PROJECT_AUTHORS",
+#   padj_threshold = report_config$cutoff_adj_p %||% 0.05,
+#   stat_files_pattern = "DGEA_.*_stat\\.csv$",
+#   stat_files_exclude_regex = "all_samples",
+#   top_n_all = NULL,
+#   top_n_100 = 100,
+#   top_n_10 = 10,
+#   top_n_single = 20,
+#   single_comparison_file = "DGEA_Generation2_vs_WT_stat.csv",
+#   gsea_min_log10_padj = 7
+# )
+# quarto::quarto_render(
+#   input = "DGEA_integrated_heatmap.qmd",
+#   output_file = "DGEA_integrated_heatmap.html",
+#   execute_params = heatmap_params,
+#   quiet = FALSE
+# )
+
+####################################################################
+# Render simple comparison report (optional; uncomment to enable)
+# Requires selecting sample1/sample2 and access to counts in salmon_dir.
+# simple_params <- list(
+#   salmon_dir = report_config$salmon_dir,
+#   samplesheet_path = report_config$samplesheet_path,
+#   organism = report_config$organism,
+#   ercc = isTRUE(report_config$ercc),
+#   application = report_config$application,
+#   name = report_config$name %||% "project",
+#   authors = report_config$authors %||% "PROJECT_AUTHORS",
+#   sample1 = "SampleA",
+#   sample2 = "SampleB",
+#   filetag = ""
+# )
+# quarto::quarto_render(
+#   input = "SimpleComparison_template.qmd",
+#   output_file = paste0("SimpleComparison_", simple_params$sample2, "_vs_", simple_params$sample1, ".html"),
+#   execute_params = simple_params,
+#   quiet = FALSE
+# )

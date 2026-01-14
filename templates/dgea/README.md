@@ -13,7 +13,7 @@ bpm template render dgea --dir /path/to/project \
   --salmon-dir /path/to/quant \
   --samplesheet /path/to/samplesheet.csv \
   --organism hsapiens \
-  --application RNAseq \
+  --application nfcore_RNAseq \
   --name PROJECT_NAME \
   --authors "Author One, Author Two"
 ```
@@ -23,6 +23,14 @@ Edit `DGEA_constructor.R` in the rendered folder and set:
 - `report_config$base_group`
 - `report_config$target_group`
 - Optional `design_formula`, `paired`, `go`, `gsea`, and cutoffs
+
+## Optional reports
+Additional reports are shipped and can be enabled by uncommenting the render
+blocks in `DGEA_constructor.R`:
+- Correlation analysis (`DGEA_correlation_analysis.qmd`)
+- Geneset comparisons (`DGEA_Geneset_Comparisons.qmd`)
+- Integrated heatmap (`DGEA_integrated_heatmap.qmd`)
+- Simple comparison (`SimpleComparison_template.qmd`)
 
 ## Run
 ```

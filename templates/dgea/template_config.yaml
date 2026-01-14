@@ -44,6 +44,10 @@ render:
     - DGEA_constructor.R.j2 -> DGEA_constructor.R
     - DGEA_template.qmd -> DGEA_template.qmd
     - DGEA_all_samples.qmd -> DGEA_all_samples.qmd
+    - DGEA_correlation_analysis.qmd -> DGEA_correlation_analysis.qmd
+    - DGEA_Geneset_Comparisons.qmd -> DGEA_Geneset_Comparisons.qmd
+    - DGEA_integrated_heatmap.qmd -> DGEA_integrated_heatmap.qmd
+    - SimpleComparison_template.qmd -> SimpleComparison_template.qmd
     - DGEA_functions.R -> DGEA_functions.R
     - references.bib -> references.bib
     - thermofisher_LSG_manuals_cms_095046.txt -> thermofisher_LSG_manuals_cms_095046.txt
