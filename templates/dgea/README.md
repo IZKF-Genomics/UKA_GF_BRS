@@ -8,8 +8,9 @@ Differential gene expression analysis (DGEA).
   on `_` into `group` and `id`.
 
 ## Render
+Run from the project directory (where project.yaml lives).
 ```
-bpm template render dgea --dir /path/to/project \
+bpm template render dgea \
   --salmon-dir /path/to/quant \
   --samplesheet /path/to/samplesheet.csv \
   --organism hsapiens \

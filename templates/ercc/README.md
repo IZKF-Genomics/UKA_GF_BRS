@@ -3,13 +3,14 @@
 ERCC spike-in QC report rendered from a Quarto template.
 
 ## Render
+Run from the project directory (where project.yaml lives).
 ```
-bpm template render ercc --dir /path/to/project
+bpm template render ercc
 ```
 
 Override defaults (if needed):
 ```
-bpm template render ercc --dir /path/to/project \
+bpm template render ercc \
   --param salmon_dir=/path/to/salmon \
   --param samplesheet=/path/to/samplesheet.csv \
   --param authors="Author A; Author B"

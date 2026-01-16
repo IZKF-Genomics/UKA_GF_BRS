@@ -3,8 +3,9 @@
 A demo template that prints a greeting and project name.
 
 ## Render
+Run from the project directory (where project.yaml lives).
 ```
-bpm template render hello_world --dir /path/to/project --param name=Alice
+bpm template render hello_world --param name=Alice
 ```
 
 ## Run

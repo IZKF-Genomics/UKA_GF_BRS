@@ -3,8 +3,9 @@
 nf-core/scrnaseq wrapper for single-cell RNA-seq data (default aligner: Cell Ranger).
 
 ## Render
+Run from the project directory (where project.yaml lives).
 ```
-bpm template render nfcore_scrnaseq --dir /path/to/project \
+bpm template render nfcore_scrnaseq \
   --param genome=GRCh38 \
   --param agendo_id=12345 \
   --param cellranger_index=/data/shared_env/10xGenomics/refdata-gex-GRCh38-2020-A

@@ -3,8 +3,9 @@
 Single-cell RNA-seq notebook pipeline (monolithic). This template mirrors the original module layout and runs the preprocessing and annotation notebooks.
 
 ## Render
+Run from the project directory (where project.yaml lives).
 ```
-bpm template render scrnaseq_pipeline --dir /path/to/project
+bpm template render scrnaseq_pipeline
 ```
 
 ## Run

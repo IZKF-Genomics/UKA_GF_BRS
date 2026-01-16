@@ -4,8 +4,8 @@ Build and submit an export engine job spec from a rule-based mapping table and
 project.yaml state.
 
 ## Usage
-1) Render into a project:
-   `bpm template render export --dir /path/to/project`
+1) Render into a project (run from the project directory):
+   `bpm template render export`
 2) Inspect `export_job_spec.json` and confirm fields/paths.
 3) Submit to the export engine:
    `bpm template run export --dir /path/to/project`
