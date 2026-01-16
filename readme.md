@@ -40,9 +40,11 @@ cd /path/to/output
 - hello_world: [templates/hello_world/README.md](templates/hello_world/README.md)
 - ercc: [templates/ercc/README.md](templates/ercc/README.md)
 - nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)
+- nfcore_cutandrun: [templates/nfcore_cutandrun/README.md](templates/nfcore_cutandrun/README.md)
 - nfcore_rnaseq: [templates/nfcore_rnaseq/README.md](templates/nfcore_rnaseq/README.md)
 - nfcore_scrnaseq: [templates/nfcore_scrnaseq/README.md](templates/nfcore_scrnaseq/README.md)
 - ref_genomes: [templates/ref_genomes/README.md](templates/ref_genomes/README.md)
+- ref_genome_blacklists: [templates/ref_genome_blacklists/README.md](templates/ref_genome_blacklists/README.md)
 - ref_10xgenomics: [templates/ref_10xgenomics/README.md](templates/ref_10xgenomics/README.md)
 - scrnaseq_pipeline: [templates/scrnaseq_pipeline/README.md](templates/scrnaseq_pipeline/README.md)
 
