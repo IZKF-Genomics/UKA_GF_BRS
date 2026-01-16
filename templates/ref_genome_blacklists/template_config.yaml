@@ -1,0 +1,19 @@
+id: ref_genome_blacklists
+description: "Download Boyle-Lab blacklist v2 BED files. Optimized for ad-hoc usage (--out)."
+
+params: {}
+
+render:
+  # In project mode, this renders under the project root. In ad-hoc mode (--out),
+  # BPM overrides 'into' to '.' so files land directly under the provided folder.
+  into: "/data/ref_genome_blacklists/"
+  files:
+    - run.sh  -> run.sh
+    - README.md -> README.md
+
+run:
+  entry: "run.sh"
+
+tools:
+  required: [curl]
+  optional: []
