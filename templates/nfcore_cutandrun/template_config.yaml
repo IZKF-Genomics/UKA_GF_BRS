@@ -1,0 +1,79 @@
+id: nfcore_cutandrun
+description: nf-core/cutandrun wrapper; requires genome and a samplesheet.csv in the template directory.
+params:
+  genome:
+    type: str
+    required: true
+    cli: "--genome"
+    description: "iGenomes identifier (e.g. GRCh38, GRCm39)"
+  normalisation_mode:
+    type: str
+    required: false
+    cli: "--norm-mode"
+    default: "None"
+    description: "Target read normalization (Spikein, RPKM, CPM, BPM, None)"
+  peakcaller:
+    type: str
+    required: false
+    cli: "--peakcaller"
+    default: "seacr"
+    description: "Peak caller(s), comma-separated (e.g. seacr,macs2)"
+  use_control:
+    type: bool
+    required: false
+    cli: "--use_control"
+    default: true
+    description: "Use control samples (IgG) for peak normalization"
+  igg_scale_factor:
+    type: float
+    required: false
+    cli: "--igg-scale-factor"
+    default: 0.5
+    description: "Scale factor for IgG control (0-1)"
+  dedup_target_reads:
+    type: bool
+    required: false
+    cli: "--dedup-target-reads"
+    default: false
+    description: "Deduplicate target reads as well as control reads"
+  spikein_fasta:
+    type: str
+    required: false
+    cli: "--spikein-fasta"
+    description: "Spike-in FASTA path (required for Spikein normalization without config entry)"
+  spikein_bowtie2:
+    type: str
+    required: false
+    cli: "--spikein-bowtie2"
+    description: "Spike-in Bowtie2 index path (required for Spikein normalization without config entry)"
+  max_cpus:
+    type: int
+    required: false
+    cli: "--max-cpus"
+    description: "Maximum CPUs for nf-core/cutandrun (default: 80% of host)"
+  max_memory:
+    type: str
+    required: false
+    cli: "--max-memory"
+    description: "Maximum memory for nf-core/cutandrun (default: 80% of host)"
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - run.sh.j2 -> run.sh
+    - nextflow.config -> nextflow.config
+run:
+  entry: run.sh
+hooks:
+  pre_render:
+    - hooks.nfcore_rnaseq_resources_80pct:set_max_resources_80pct
+  post_render:
+    - hooks.nfcore_cutandrun_draft_samplesheet:main
+publish:
+  nfcore_multiqc:
+    resolver: "resolvers.get_multiqc_report"
+  nfcore_samplesheet:
+    resolver: "resolvers.get_samplesheet"
+
+tools:
+  required: []
+  optional: []
