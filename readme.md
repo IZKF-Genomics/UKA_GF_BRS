@@ -50,7 +50,7 @@ cd /path/to/output
 
 ## Workflows
 - export_bcl: [workflows/export_bcl/README.md](workflows/export_bcl/README.md)
-- export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md)
+- export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md) (report_links-based spec)
 - export_status: [workflows/export_status/README.md](workflows/export_status/README.md)
 - hello_world: [workflows/hello_world/README.md](workflows/hello_world/README.md)
 

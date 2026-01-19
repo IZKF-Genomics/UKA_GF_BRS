@@ -53,15 +53,15 @@ def _parse_bool(value, default: bool) -> bool:
     return default
 
 
-def _materialize_hostpath(raw: str) -> str:
+def _split_hostpath(raw: str, default_host: str) -> tuple[str, str]:
     """
-    Convert a host:abs/path string to a local absolute path string.
-    If no host prefix, return the string unchanged.
+    Split host:/abs/path into (host, /abs/path); fall back to default_host.
     """
     if ":" in raw:
-        _, rest = raw.split(":", 1)
-        return rest if rest.startswith("/") else f"/{rest}"
-    return raw
+        host, rest = raw.split(":", 1)
+        if host and rest.startswith("/"):
+            return host, rest
+    return default_host, raw
 
 
 def _load_meta(run_dir: Path) -> dict:
@@ -89,25 +89,26 @@ def main() -> None:
 
     project_name = str(params.get("project_name") or run_dir.name)
 
-    # Resolve FASTQ dir and MultiQC report, preferring published paths in bpm.meta.yaml
-    def _resolve_path(raw: str | Path) -> Path:
+    # Resolve FASTQ dir and MultiQC report, preferring published paths in bpm.meta.yaml.
+    # Host prefixes (e.g., nextgen:/path) are preserved as export hosts.
+    def _resolve_path(raw: str | Path, default_host: str) -> tuple[str, Path]:
         if isinstance(raw, Path):
-            return raw
+            return default_host, raw
         s = str(raw)
-        if ":" in s:
-            s = _materialize_hostpath(s)
+        host, s = _split_hostpath(s, default_host)
         p = Path(s)
-        return p if p.is_absolute() else (run_dir / p)
+        return host, (p if p.is_absolute() else (run_dir / p))
 
     fastq_dir_raw = published.get("FASTQ_dir") or (run_dir / "output")
     multiqc_report_raw = published.get("multiqc_report") or (run_dir / "multiqc" / "multiqc_report.html")
 
-    fastq_dir = _resolve_path(fastq_dir_raw)
-    multiqc_report = _resolve_path(multiqc_report_raw)
+    host_default = os.uname().nodename.split(".")[0]
+    fastq_host, fastq_dir = _resolve_path(fastq_dir_raw, host_default)
+    multiqc_host, multiqc_report = _resolve_path(multiqc_report_raw, host_default)
 
-    if not fastq_dir.exists():
+    if fastq_host == host_default and not fastq_dir.exists():
         raise SystemExit(f"FASTQ dir not found: {fastq_dir}")
-    if not multiqc_report.exists():
+    if multiqc_host == host_default and not multiqc_report.exists():
         raise SystemExit(f"MultiQC report not found: {multiqc_report}")
 
     api_url = str(params.get("export_engine_api_url") or "").strip() or "http://genomics.rwth-aachen.de:9500/export"
@@ -119,29 +120,53 @@ def main() -> None:
     include_fastq = _parse_bool(params.get("include_in_report_fastq"), include_default)
     include_multiqc = _parse_bool(params.get("include_in_report_multiqc"), include_default)
 
-    host = os.uname().nodename.split(".")[0]
+    def _auto_link_name(path: str, dest: str) -> str:
+        name = Path(dest).name if path == "." else Path(path).name
+        return name.replace("_", " ").strip()
+
+    def _export_entry(
+        src_path: Path,
+        dest_path: str,
+        export_host: str,
+        mode: str,
+        include_report: bool,
+        description: str,
+    ) -> dict:
+        entry = {
+            "src": str(src_path.resolve()) if src_path.is_absolute() else str(src_path),
+            "dest": dest_path,
+            "host": export_host,
+            "project": project_name,
+            "mode": mode,
+        }
+        if include_report:
+            entry["report_links"] = [
+                {
+                    "path": ".",
+                    "section": "raw",
+                    "description": description,
+                    "link_name": _auto_link_name(".", dest_path),
+                }
+            ]
+        return entry
 
     export_list = [
-        {
-            "src": str(fastq_dir.resolve()),
-            "dest": "1_Raw_data/FASTQ",
-            "host": host,
-            "project": project_name,
-            "mode": "symlink",
-            "include_in_report": include_fastq,
-            "report_section": "raw",
-            "description": "FASTQ output from demux_bclconvert",
-        },
-        {
-            "src": str(multiqc_report.resolve()),
-            "dest": "1_Raw_data/demultiplexing_multiqc_report.html",
-            "host": host,
-            "project": project_name,
-            "mode": "copy",
-            "include_in_report": include_multiqc,
-            "report_section": "raw",
-            "description": "MultiQC report from demux_bclconvert",
-        },
+        _export_entry(
+            fastq_dir,
+            "1_Raw_data/FASTQ",
+            fastq_host,
+            "symlink",
+            include_fastq,
+            "FASTQ output from demux_bclconvert",
+        ),
+        _export_entry(
+            multiqc_report,
+            "1_Raw_data/demultiplexing_multiqc_report.html",
+            multiqc_host,
+            "copy",
+            include_multiqc,
+            "MultiQC report from demux_bclconvert",
+        ),
     ]
 
     job_spec = {
