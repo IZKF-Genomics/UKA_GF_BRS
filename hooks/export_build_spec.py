@@ -138,6 +138,35 @@ def _resolve_project_key(project_data: Dict[str, Any], path_str: str) -> Any:
     return current
 
 
+def _resolve_report_link_path(
+    item: Dict[str, Any],
+    project_data: Dict[str, Any],
+    src_root: Path,
+) -> str | None:
+    path = item.get("path")
+    if isinstance(path, str) and path.strip():
+        return path.strip()
+    key = item.get("src_project_key")
+    if not isinstance(key, str) or not key.strip():
+        return None
+    resolved = _resolve_project_key(project_data, key)
+    if not isinstance(resolved, str) or not resolved.strip():
+        return None
+    resolved = resolved.strip()
+    # Strip host prefixes like "nextgen:/abs/path" before path resolution.
+    if ":" in resolved:
+        host, rest = resolved.split(":", 1)
+        if host and rest.startswith("/"):
+            resolved = rest
+    resolved_path = Path(resolved)
+    if resolved_path.is_absolute():
+        try:
+            return resolved_path.relative_to(src_root).as_posix()
+        except ValueError:
+            return resolved_path.name
+    return resolved
+
+
 def _split_csv(value: Any) -> List[str]:
     if value is None:
         return []
@@ -147,6 +176,109 @@ def _split_csv(value: Any) -> List[str]:
         parts = [v.strip() for v in value.split(",")]
         return [v for v in parts if v]
     return [str(value)]
+
+
+_GLOB_CHARS = set("*?[")
+
+
+def _has_glob(path: str) -> bool:
+    return any(ch in path for ch in _GLOB_CHARS)
+
+
+def _format_link_name(name: str) -> str:
+    return name.replace("_", " ").strip()
+
+
+def _auto_link_name(path: str, dest: str) -> str:
+    base = Path(dest).name if path == "." else Path(path).name
+    return _format_link_name(base) if base else ""
+
+
+def _build_report_links(
+    entry: Dict[str, Any],
+    src: Path,
+    dest: str,
+    host: str,
+    project_host: str,
+    project_data: Dict[str, Any],
+) -> List[Dict[str, str]]:
+    report_links = entry.get("report_links")
+    if not isinstance(report_links, list) or not report_links:
+        return []
+    remote_source = host != project_host
+
+    src_is_file = src.is_file()
+    src_root = src.parent if src_is_file else src
+    src_anchor = src if src_is_file else src_root
+
+    links: List[Dict[str, str]] = []
+    for item in report_links:
+        if not isinstance(item, dict):
+            continue
+        path = _resolve_report_link_path(item, project_data, src_root)
+        if not isinstance(path, str) or not path.strip():
+            continue
+        path = path.strip()
+        if Path(path).is_absolute():
+            continue
+
+        section = item.get("section")
+        if not isinstance(section, str) or not section.strip():
+            continue
+        description = item.get("description")
+        if not isinstance(description, str):
+            description = ""
+        link_name = item.get("link_name")
+        if not isinstance(link_name, str) or not link_name.strip():
+            link_name = ""
+
+        if _has_glob(path):
+            # Glob expansion requires local filesystem access to enumerate matches.
+            if remote_source:
+                continue
+            matches = sorted(Path(p) for p in glob.glob(str(src_root / path), recursive=True))
+            for match in matches:
+                if not match.exists():
+                    continue
+                try:
+                    rel_path = match.relative_to(src_root)
+                except ValueError:
+                    rel_path = Path(match.name)
+                link_path = rel_path.as_posix()
+                name = link_name or _auto_link_name(match.name, dest)
+                report_link = {
+                    "path": link_path,
+                    "section": section,
+                }
+                if description:
+                    report_link["description"] = description
+                if name:
+                    report_link["link_name"] = name
+                links.append(report_link)
+            continue
+
+        if path == ".":
+            src_target = src_anchor
+            link_path = "."
+        else:
+            src_target = src_root / path
+            link_path = path
+
+        # Skip local existence checks for remote sources; keep links as declared.
+        if not remote_source and not src_target.exists():
+            continue
+        name = link_name or _auto_link_name(link_path, dest)
+        report_link = {
+            "path": link_path,
+            "section": section,
+        }
+        if description:
+            report_link["description"] = description
+        if name:
+            report_link["link_name"] = name
+        links.append(report_link)
+
+    return links
 
 
 def main(ctx: Any) -> Dict[str, Any]:
@@ -168,8 +300,6 @@ def main(ctx: Any) -> Dict[str, Any]:
     project_authors = _load_project_authors(project_dir, project_data) if ctx.project else []
     export_job_id = _load_export_job_id(project_dir, project_data) if ctx.project else ""
 
-    include_in_report = True
-
     export_list: List[Dict[str, Any]] = []
 
     for entry in mappings:
@@ -189,6 +319,11 @@ def main(ctx: Any) -> Dict[str, Any]:
         project_root = Path(ctx.materialize(ctx.project.project_path)) if ctx.project else None
         template_root = (project_root / tpl_id).resolve() if project_root else None
 
+        if not isinstance(source_path, str) or not source_path.strip():
+            if template_root is None:
+                continue
+            source_path = "{template_root}"
+
         if isinstance(project_key, str) and ctx.project:
             project_val = _resolve_project_key(project_data, project_key)
             if isinstance(project_val, str) and project_val:
@@ -199,9 +334,6 @@ def main(ctx: Any) -> Dict[str, Any]:
             pub_val = pub_map.get(published_key)
             if isinstance(pub_val, str) and pub_val:
                 host, source_path = _split_host(pub_val, host)
-
-        if not isinstance(source_path, str):
-            continue
 
         if "{template_root}" in source_path and template_root is not None:
             source_path = source_path.replace("{template_root}", str(template_root))
@@ -220,60 +352,20 @@ def main(ctx: Any) -> Dict[str, Any]:
             continue
         dest = _render_target_dir(tpl_id, dest)
 
-        report_section = entry.get("report_section")
-        if not isinstance(report_section, str) or not report_section:
-            report_section = "general"
+        if host == project_host and not Path(src).exists():
+            continue
 
-        description = entry.get("description")
-        if not isinstance(description, str):
-            description = ""
-
-        rule = entry.get("rule") or "tree"
-        if rule == "glob":
-            if host != project_host:
-                continue
-            matches = sorted(Path(p) for p in glob.glob(src, recursive=True))
-            if not matches:
-                continue
-            for match in matches:
-                if not match.is_file():
-                    continue
-                basename = match.name
-                stem = match.stem
-                relpath = basename
-                if template_root is not None:
-                    try:
-                        relpath = str(match.relative_to(template_root))
-                    except ValueError:
-                        relpath = basename
-                match_dest = dest.replace("{basename}", basename).replace("{stem}", stem).replace("{relpath}", relpath)
-                export_list.append(
-                    {
-                        "src": str(match.resolve()),
-                        "dest": match_dest,
-                        "host": host,
-                        "project": entry.get("project") or (ctx.project.name if ctx.project else ""),
-                        "mode": entry.get("mode") or "symlink",
-                        "include_in_report": entry.get("include_in_report", include_in_report),
-                        "report_section": report_section,
-                        "description": description,
-                    }
-                )
-        else:
-            if host == project_host and not Path(src).exists():
-                continue
-            export_list.append(
-                {
-                    "src": src,
-                    "dest": dest,
-                    "host": host,
-                    "project": entry.get("project") or (ctx.project.name if ctx.project else ""),
-                    "mode": entry.get("mode") or "symlink",
-                    "include_in_report": entry.get("include_in_report", include_in_report),
-                    "report_section": report_section,
-                    "description": description,
-                }
-            )
+        report_links = _build_report_links(entry, Path(src), dest, host, project_host, project_data)
+        export_entry = {
+            "src": src,
+            "dest": dest,
+            "host": host,
+            "project": entry.get("project") or (ctx.project.name if ctx.project else ""),
+            "mode": entry.get("mode") or "symlink",
+        }
+        if report_links:
+            export_entry["report_links"] = report_links
+        export_list.append(export_entry)
 
     project_name = ctx.project.name if ctx.project else ""
     if not ctx.params.get("export_username") and project_name:

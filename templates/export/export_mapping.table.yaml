@@ -1,26 +1,34 @@
 # Export mapping table
-# Each entry becomes one or many export_job_spec.json entries.
+# Each entry becomes one export_job_spec.json entry.
 # Only entries whose template_id exists in project.yaml are considered.
 #
 # Core keys:
 # - template_id: template folder name in the BRS.
-# - rule: tree | folder | file | glob
-# - src: source path (relative to project root or absolute).
-# - src_project_key: optional; project.yaml path that resolves to a source path.
+# - dest: destination path (required).
+# - src: optional source path (relative to project root or absolute; default: {template_root}).
+# - src_project_key: optional; project.yaml path that resolves to a source path (host prefixes allowed).
 # - src_published_key: optional; templates[].published key (legacy shortcut).
-# - dest: destination path (required for tree/folder/file/glob).
-# - report_section: raw | processed | reports | general (default: general).
-# - description: optional text for the export entry.
-# - include_in_report: optional boolean (default: true; controls report visibility).
+# - report_links: optional list of report link dicts (controls what appears in report).
 # - mode: optional export mode (default: symlink).
+# - host: optional export host override.
+# - project: optional project name override.
+#
+# Report link keys:
+# - path: required; relative to export dest (supports glob patterns).
+# - src_project_key: optional; project.yaml path that resolves to a source path.
+# - section: required; raw | processed | analysis | reports | general[/subsection...]
+# - description: optional text for the report link.
+# - link_name: optional report link display name.
+#   - If omitted, uses the basename with underscores replaced by spaces.
+#
+# Report link behavior:
+# - path is validated against the source path (not the export dest).
+# - glob paths expand to one link per match (files and folders).
+# - empty matches are ignored silently.
 #
 # Placeholders:
 # - {template_id} in dest
 # - {template_root} in src
-# - {basename}, {stem}, {relpath} in dest for glob rules
-#   - {basename}: matched file name with extension (e.g. "multiqc_report.html")
-#   - {stem}: matched file name without extension (e.g. "multiqc_report")
-#   - {relpath}: matched path relative to {template_root}
 
 mappings:
   ##############################################################################
@@ -28,81 +36,94 @@ mappings:
   ##############################################################################
   # Export FASTQ directory using project.yaml key if present.
   - template_id: demux_bclconvert
-    rule: folder
     src_project_key: "templates[id=demux_bclconvert].published.FASTQ_dir"
     src: demux_bclconvert/output
     dest: "1_Raw_data/FASTQ"
-    report_section: raw
-    include_in_report: true
-    description: "FASTQ output from demux_bclconvert"
-
+    report_links:
+      - path: "."
+        section: raw
+        description: "FASTQ output from demux_bclconvert"
   # Export MultiQC report file using project.yaml key if present.
   - template_id: demux_bclconvert
-    rule: file
     src_project_key: "templates[id=demux_bclconvert].published.multiqc_report"
     src: demux_bclconvert/multiqc/multiqc_report.html
     dest: "1_Raw_data/demultiplexing_multiqc_report.html"
-    report_section: raw
-    include_in_report: true
-    description: "MultiQC report from demux_bclconvert"
+    report_links:
+      - path: "."
+        section: raw
+        description: "MultiQC report from demux_bclconvert"
 
   ##############################################################################
   # nfcore_rnaseq
   ##############################################################################
   # Export entire nfcore_rnaseq output folder.
   - template_id: nfcore_rnaseq
-    rule: tree
     src: "{template_root}"
     dest: "2_Processed_data/nfcore_rnaseq"
-    report_section: processed
-    include_in_report: false
-    description: "nfcore_rnaseq outputs"
+    report_links:
+      - path: "."
+        section: processed
+        description: "This folder contains all scripts, samplesheet, and results from nfcore_rnaseq pipeline."
+        link_name: "nfcore_rnaseq"
+      - path: "results*/multiqc/star_salmon/multiqc_report.html"
+        section: processed/MultiQC
+        description: "MultiQC report from nfcore_rnaseq"
+        # link_name: Skipping link_name will use the file name as the link_name for each file.
+      - path: "results*/star_salmon/bigwig"
+        section: processed/BigWig
+        description: "BigWig files for loading in IGV"
+        # link_name: Skipping link_name will use the file name as the link_name for each file.
 
-  # Example: export MultiQC report individually (one entry per match).
-  - template_id: nfcore_rnaseq
-    rule: glob
-    src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
-    dest: "2_Processed_data/nfcore_rnaseq/results/{relpath}"
-    report_section: processed
-    include_in_report: true
-    description: "MultiQC report of nfcore_rnaseq"
-
-  ##############################################################################
-  # nfcore_3mrnaseq
   ##############################################################################
   # Export entire nfcore_3mrnaseq output folder.
   - template_id: nfcore_3mrnaseq
-    rule: tree
     src: "{template_root}"
     dest: "2_Processed_data/nfcore_3mrnaseq"
-    report_section: processed
-    include_in_report: false
-    description: "nfcore_3mrnaseq outputs"
+    report_links:
+      - path: "."
+        section: processed
+        description: "This folder contains all scripts, samplesheet, and results from nfcore_3mrnaseq pipeline."
+        link_name: "nfcore_3mrnaseq"
+      - path: "results*/multiqc/star_salmon/multiqc_report.html"
+        section: processed/MultiQC
+        description: "MultiQC report from nfcore_3mrnaseq"
+        # link_name: Skipping link_name will use the file name as the link_name for each file.
+      - path: "results*/star_salmon/bigwig"
+        section: processed/BigWig
+        description: "BigWig files for loading in IGV"
+        # link_name: Skipping link_name will use the file name as the link_name for each file.
 
-  # Example: export MultiQC report individually (one entry per match).
-  - template_id: nfcore_3mrnaseq
-    rule: glob
-    src: "{template_root}/results*/multiqc/star_salmon/multiqc_report.html"
-    dest: "2_Processed_data/nfcore_3mrnaseq/results/{relpath}"
-    report_section: processed
-    include_in_report: true
-    description: "MultiQC report of nfcore_3mrnaseq"
+  ##############################################################################
+  # Export entire nfcore_cutandrun output folder.
+  - template_id: nfcore_cutandrun
+    src: "{template_root}"
+    dest: "2_Processed_data/nfcore_cutandrun"
+    report_links:
+      - path: "."
+        section: processed
+        description: "This folder contains all scripts, samplesheet, and results from nfcore_cutandrun pipeline."
+        link_name: "nfcore_cutandrun"
+      - path: "./results/04_reporting/multiqc/multiqc_report.html"
+        section: processed/MultiQC
+        description: "MultiQC report from nfcore_cutandrun"
+        link_name: "MultiQC report"
+      - path: "./results/04_reporting/deeptools_heatmaps/gene/*.plotHeatmap.pdf"
+        section: processed/plotHeatmap
+        description: "Heatmaps for both genomic features and peaks are generated using deepTools."
+        # link_name: Skipping link_name will use the file name as the link_name for each file.
+      - path: "./results/04_reporting/igv"
+        section: processed/IGV
+        description: "Session and files (bed and BigWig) for loading in IGV"
+        link_name: "IGV browsing"
+      
 
   ##############################################################################
   # DGEA
   ##############################################################################
   # Export entire dgea folder.
   - template_id: dgea
-    rule: tree
-    src: "{template_root}"
     dest: "3_Reports/dgea"
-    report_section: reports
-    include_in_report: false
-    description: "DGEA results"
-  - template_id: dgea
-    rule: glob
-    src: "{template_root}/*.html"
-    dest: "3_Reports/dgea/results/{basename}"
-    report_section: reports
-    include_in_report: true
-    description: "DGEA reports"
+    report_links:
+      - path: "*.html"
+        section: reports
+        description: "DGEA reports"

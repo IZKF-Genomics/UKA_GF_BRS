@@ -31,7 +31,7 @@ nextflow run nf-core/cutandrun \
 {% if ctx.params.max_memory %}
   --max_memory "{{ ctx.params.max_memory }}" \
 {% endif %}
-  --igenomes_ignore true \
+  --igenomes_ignore true --skip_heatmaps "True" \
   --blacklist blacklist_path
 
 # Available blacklist files (v2) for manual use:

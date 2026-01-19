@@ -26,15 +26,7 @@ def main() -> None:
     except json.JSONDecodeError as exc:
         raise SystemExit(f"export_job_spec.json is not valid JSON: {exc}") from exc
 
-    required_keys = {
-        "project_name",
-        "export_list",
-        "backend",
-        "username",
-        "password",
-        "authors",
-        "expiry_days",
-    }
+    required_keys = {"project_name", "export_list", "backend"}
     missing = required_keys - payload.keys()
     if missing:
         raise SystemExit(f"export_job_spec.json missing keys: {sorted(missing)}")

@@ -36,7 +36,7 @@ cd /path/to/output
 ## Templates
 - demux_bclconvert: [templates/demux_bclconvert/README.md](templates/demux_bclconvert/README.md)
 - dgea: [templates/dgea/README.md](templates/dgea/README.md)
-- export: [templates/export/README.md](templates/export/README.md)
+- export: [templates/export/README.md](templates/export/README.md) (report_links-based mapping table; remote links supported, host prefixes allowed)
 - hello_world: [templates/hello_world/README.md](templates/hello_world/README.md)
 - ercc: [templates/ercc/README.md](templates/ercc/README.md)
 - nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)

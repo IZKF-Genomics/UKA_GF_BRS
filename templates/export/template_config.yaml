@@ -5,8 +5,8 @@ params:
   export_engine_api_url:
     type: str
     required: false
-    default: "http://genomics.rwth-aachen.de:9500/export"
-    description: "Base URL for the export engine API"
+    default: "http://genomics.rwth-aachen.de:9500"
+    description: "Base URL for the export engine API (no trailing /export)"
   export_engine_backends:
     type: str
     required: false

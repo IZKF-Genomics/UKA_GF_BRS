@@ -1,7 +1,7 @@
 # export
 
-Build and submit an export engine job spec from a rule-based mapping table and
-project.yaml state.
+Build and submit an export engine job spec from a mapping table and project.yaml
+state.
 
 ## Usage
 1) Render into a project (run from the project directory):
@@ -21,50 +21,42 @@ project.yaml state.
 
 ## Mapping Table
 The mapping table lives at `export_mapping.table.yaml`. Each entry becomes one
-or many export spec entries depending on its rule. Report visibility is always
-controlled by `include_in_report`.
-
-### Rule Summary
-- `tree`: export a whole folder as a single export entry.
-- `folder`: export a specific subfolder as a single entry.
-- `file`: export a specific file as a single entry.
-- `glob`: expand a pattern into multiple file entries.
+export spec entry. Report links are emitted into `export_list[].report_links`.
 
 ### Required Keys
 ```
 template_id: <template id>
-rule: tree|folder|file|glob
+dest: <relative destination path>
 ```
 
 ### Source Keys (pick one)
 ```
-src: <relative or absolute source path>
+src: <relative or absolute source path>        # default: {template_root}
 src_project_key: <path in project.yaml>
 src_published_key: <key under templates[].published>  # legacy shortcut
 ```
 Precedence: `src_project_key` -> `src_published_key` -> `src`.
 
-### Destination Keys
+### Report Links
 ```
-dest: <relative destination path>  # required for tree/folder/file/glob
+report_links:
+  - path: <relative path in export dest>       # required; supports glob patterns
+    src_project_key: <path in project.yaml>    # optional; resolves to a source path
+    section: raw|processed|analysis|reports|general[/subsection...]
+    description: <report link description>
+    link_name: <report link display name>
 ```
 
 ### Optional Keys
 ```
-report_section: raw|processed|reports|general  # default: general
-include_in_report: true|false                  # default: true
 mode: symlink|copy|...                          # default: symlink
 project: <override project name>
 host: <override host>
-description: <free text>
 ```
 
 ### Placeholders
 - `{template_id}`: the template id from the mapping entry.
 - `{template_root}`: the resolved template folder path in the project.
-- `{basename}`: matched file name with extension, e.g. `multiqc_report.html` (glob only).
-- `{stem}`: matched file name without extension, e.g. `multiqc_report` (glob only).
-- `{relpath}`: matched path relative to `{template_root}` (glob only).
 
 ### src_project_key Path Syntax
 `src_project_key` points into `project.yaml` using dot + selector syntax.
@@ -80,45 +72,39 @@ The resolved value must be a string path. If it includes a host prefix
 
 ### Behavior Notes
 - Only entries whose `template_id` exists in `project.yaml` are processed.
-- `glob` expands to one entry per matched file.
 - Missing sources are skipped silently.
+- `src` defaults to `{template_root}` when omitted.
+- Report links are validated against the source path (not the export dest).
+- Report links can use src_project_key; resolved absolute paths are made relative
+  to the export source when possible.
+- src_project_key values may include a host prefix (e.g., nextgen:/path); the
+  host prefix is stripped before resolving a relative path.
+- For remote sources (host != project host), report links are emitted as-is
+  without local existence checks; glob patterns are ignored.
+- Report links are emitted only for local sources (host == project host).
+- Glob patterns expand to one link per matched file or folder.
+- If `link_name` is omitted, it defaults to the basename with underscores
+  replaced by spaces.
+- Empty glob matches are ignored.
 
 ## Example Mapping
 ```
 mappings:
   - template_id: nfcore_rnaseq
-    rule: tree
-    src: "{template_root}"
     dest: "2_Processed_data/nfcore_rnaseq"
-    report_section: processed
-    include_in_report: true
-    description: "All nfcore_rnaseq outputs"
+    report_links:
+      - path: "results*/multiqc/star_salmon/multiqc_report.html"
+        section: processed
+        description: "MultiQC report of nfcore_rnaseq"
 
   - template_id: demux_bclconvert
-    rule: file
     src_project_key: "templates[id=demux_bclconvert].published.multiqc_report"
     src: demux_bclconvert/multiqc/multiqc_report.html
     dest: "1_Raw_data/demultiplexing_multiqc_report.html"
-    report_section: raw
-    include_in_report: true
-    description: "MultiQC report"
-
-  - template_id: nfcore_3mrnaseq
-    rule: glob
-    src: "{template_root}/results/**/*.{csv,tsv}"
-    dest: "2_Processed_data/nfcore_3mrnaseq/results/{relpath}"
-    report_section: processed
-    include_in_report: true
-    description: "Result tables"
-
-  - template_id: nfcore_3mrnaseq
-    rule: file
-    src: "{template_root}/results/qc/summary.txt"
-    dest: "2_Processed_data/nfcore_3mrnaseq/qc/summary.txt"
-    report_section: reports
-    include_in_report: false
-    description: "QC summary (exported, not shown in report)"
-
+    report_links:
+      - path: "."
+        section: raw
+        description: "MultiQC report"
 ```
 
 ## Notes
