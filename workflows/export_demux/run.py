@@ -163,7 +163,7 @@ def main() -> None:
             multiqc_report,
             "1_Raw_data/demultiplexing_multiqc_report.html",
             multiqc_host,
-            "copy",
+            "symlink",
             include_multiqc,
             "MultiQC report from demux_bclconvert",
         ),
