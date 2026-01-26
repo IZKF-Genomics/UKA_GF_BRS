@@ -52,20 +52,17 @@ def main(ctx) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     out_csv = run_dir / "samplesheet.csv"
 
-    # Resolve flowcell id from bcl_dir or fallback to agendo_id
-    flowcell = _parse_flowcell_id(bcl_dir) or "" if bcl_dir else ""
-    if flowcell:
-        try:
-            ctx.params["flowcell_id"] = flowcell
-        except Exception:
-            pass
-        url = f"{API_BASE_FLOWCELL}{flowcell}"
-        source_label = f"flowcell {flowcell}"
-    elif agendo_id:
-        url = f"{API_BASE_REQUEST}{agendo_id}"
-        source_label = f"request {agendo_id}"
-    else:
-        raise RuntimeError("Missing flowcell_id (from bcl_dir) and agendo_id; cannot fetch samplesheet")
+    # Resolve flowcell id from bcl_dir; fall back to agendo_id on flowcell 404.
+    flowcell = _parse_flowcell_id(bcl_dir) or ""
+    if not flowcell:
+        raise RuntimeError("Could not determine flowcell_id from bcl_dir")
+    try:
+        ctx.params["flowcell_id"] = flowcell
+    except Exception:
+        pass
+
+    url = f"{API_BASE_FLOWCELL}{flowcell}"
+    source_label = f"flowcell {flowcell}"
 
     # Credentials
     user, pw = _get_creds_from_params_or_env(ctx)
@@ -84,7 +81,17 @@ def main(ctx) -> None:
         raise RuntimeError(f"Network error fetching samplesheet: {e}")
 
     if resp.status_code != http.HTTPStatus.OK:
-        raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
+        if resp.status_code == http.HTTPStatus.NOT_FOUND and agendo_id:
+            url = f"{API_BASE_REQUEST}{agendo_id}"
+            source_label = f"request {agendo_id}"
+            try:
+                resp = requests.get(url, auth=HTTPBasicAuth(user, pw), timeout=20)
+            except Exception as e:
+                raise RuntimeError(f"Network error fetching samplesheet: {e}")
+            if resp.status_code != http.HTTPStatus.OK:
+                raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
+        else:
+            raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
 
     try:
         out_csv.write_bytes(resp.content)
