@@ -12,7 +12,6 @@ params:
     description: "Project ID/name to delete (e.g., 261119_Guo_Weis_test_FASTQ)."
   job_id:
     type: str
-    cli: "--job-id"
     required: false
     description: "Export job_id to resolve the project; falls back to project.yaml published.export_job_id."
   api_url:

@@ -1,11 +1,10 @@
 # export_del
 
-Delete an exported project by project ID or job ID (resolved via status API).
+Delete an exported project by project ID.
 
 ## Run
 ```
 bpm workflow run export_del --project-id PROJECT_ID
-bpm workflow run export_del --job-id JOB_ID
 bpm workflow run export_del --project-id PROJECT_ID --api-url http://genomics.rwth-aachen.de:9500/export
 ```
 
