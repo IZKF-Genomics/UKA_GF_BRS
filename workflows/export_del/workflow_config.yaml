@@ -1,0 +1,29 @@
+# Workflow: export_del
+# Delete an export project by project_id or by job_id (resolved via status or project.yaml).
+
+id: export_del
+description: "Delete an exported project by project_id or job_id."
+
+params:
+  project_id:
+    type: str
+    cli: "--project-id"
+    required: false
+    description: "Project ID/name to delete (e.g., 261119_Guo_Weis_test_FASTQ)."
+  job_id:
+    type: str
+    cli: "--job-id"
+    required: false
+    description: "Export job_id to resolve the project; falls back to project.yaml published.export_job_id."
+  api_url:
+    type: str
+    cli: "--api-url"
+    required: false
+    default: "http://genomics.rwth-aachen.de:9500/export"
+    description: "Export engine base URL (with or without trailing /export)."
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python]
