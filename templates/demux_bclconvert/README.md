@@ -22,6 +22,7 @@ bpm template run demux_bclconvert
 - `sampleproject_subdirs` (bool, default `false`): Create per-sample project subdirectories.
 - `use_api_samplesheet` (bool, default `true`): Fetch samplesheet.csv from API in post-render.
 - `gf_api_name` / `gf_api_pass` (optional): Credentials for API (env vars also supported).
+- `agendo_id` (optional): Agendo request ID for samplesheet retrieval when flowcell is unavailable.
 
 ## Outputs
 - Render target (project mode): `${ctx.project_dir}/${ctx.template.id}/`.
@@ -39,7 +40,8 @@ bpm template run demux_bclconvert
 
 ## Notes
 - Post-render hook fetches samplesheet when `use_api_samplesheet=true`.
-- API URL: `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.
+- API URL (flowcell): `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.
+- API URL (Agendo request): `https://genomics.rwth-aachen.de/api/get/samplesheet/request/{id}`.
 - Credentials: params `gf_api_name`/`gf_api_pass` or env `GF_API_NAME`/`GF_API_PASS`.
-- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`.
+- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, `agendo_id` is used.
 - Render aborts if samplesheet fetch fails.

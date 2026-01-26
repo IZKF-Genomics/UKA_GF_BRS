@@ -21,6 +21,10 @@ params:
     type: str
     cli: "--api-pass"
     description: "GF API password or token"
+  agendo_id:
+    type: str
+    cli: "--agendo-id"
+    description: "Agendo request ID to fetch samplesheet when flowcell ID is unavailable"
   run_fastq_screen:
     type: bool
     default: false

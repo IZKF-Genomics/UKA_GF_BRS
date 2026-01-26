@@ -64,3 +64,6 @@ cd /path/to/output
 ## Conventions
 - Project mode renders into `<project_dir>/<template_id>/` and updates `project.yaml`.
 - Ad-hoc mode renders into the provided `--out` directory and writes `bpm.meta.yaml`.
+
+## Notes
+- demux_bclconvert samplesheet retrieval uses the flowcell endpoint when available and falls back to the Agendo request ID endpoint if no flowcell ID can be derived.

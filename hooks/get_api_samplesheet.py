@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 
 
-API_BASE = "https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/"
+API_BASE_FLOWCELL = "https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/"
+API_BASE_REQUEST = "https://genomics.rwth-aachen.de/api/get/samplesheet/request/"
 
 
 def _get_creds_from_params_or_env(ctx) -> tuple[str | None, str | None]:
@@ -43,24 +44,28 @@ def main(ctx) -> None:
         return
 
     bcl_dir = str((ctx.params or {}).get("bcl_dir") or "").strip()
-    if not bcl_dir:
-        raise RuntimeError("bcl_dir missing; cannot derive flowcell_id")
+    agendo_id = (ctx.params or {}).get("agendo_id")
+    agendo_id = str(agendo_id).strip() if agendo_id is not None else ""
 
     # Determine run directory
     run_dir = (Path(ctx.project_dir) / ctx.template.id) if ctx.project else Path(ctx.cwd)
     run_dir.mkdir(parents=True, exist_ok=True)
     out_csv = run_dir / "samplesheet.csv"
 
-    # Resolve flowcell id from bcl_dir
-    flowcell = _parse_flowcell_id(bcl_dir) or ""
-    if not flowcell:
-        raise RuntimeError("Could not determine flowcell_id from bcl_dir")
-
-    # Persist for downstream usage (optional)
-    try:
-        ctx.params["flowcell_id"] = flowcell
-    except Exception:
-        pass
+    # Resolve flowcell id from bcl_dir or fallback to agendo_id
+    flowcell = _parse_flowcell_id(bcl_dir) or "" if bcl_dir else ""
+    if flowcell:
+        try:
+            ctx.params["flowcell_id"] = flowcell
+        except Exception:
+            pass
+        url = f"{API_BASE_FLOWCELL}{flowcell}"
+        source_label = f"flowcell {flowcell}"
+    elif agendo_id:
+        url = f"{API_BASE_REQUEST}{agendo_id}"
+        source_label = f"request {agendo_id}"
+    else:
+        raise RuntimeError("Missing flowcell_id (from bcl_dir) and agendo_id; cannot fetch samplesheet")
 
     # Credentials
     user, pw = _get_creds_from_params_or_env(ctx)
@@ -73,18 +78,16 @@ def main(ctx) -> None:
     except Exception:
         raise RuntimeError("Python 'requests' package not available for hooks")
 
-    url = f"{API_BASE}{flowcell}"
     try:
         resp = requests.get(url, auth=HTTPBasicAuth(user, pw), timeout=20)
     except Exception as e:
         raise RuntimeError(f"Network error fetching samplesheet: {e}")
 
     if resp.status_code != http.HTTPStatus.OK:
-        raise RuntimeError(f"HTTP {resp.status_code} from API for flowcell {flowcell}")
+        raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
 
     try:
         out_csv.write_bytes(resp.content)
-        print(f"[get_api_samplesheet] Downloaded samplesheet for {flowcell} → {out_csv}")
+        print(f"[get_api_samplesheet] Downloaded samplesheet for {source_label} → {out_csv}")
     except Exception as e:
         raise RuntimeError(f"Failed to write samplesheet: {e}")
-
