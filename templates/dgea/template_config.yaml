@@ -55,6 +55,7 @@ render:
     - pixi.lock -> pixi.lock
     - .vscode/settings.json.j2 -> .vscode/settings.json
     - run.sh.j2 -> run.sh
+    - install_bioc_data.sh -> install_bioc_data.sh
 
 run:
   entry: "run.sh"

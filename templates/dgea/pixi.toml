@@ -6,6 +6,8 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
+# Install Bioconductor data packages that require a post-link download.
+install-bioc-data = { cmd = ["bash", "install_bioc_data.sh"] }
 
 
 [dependencies]
@@ -15,6 +17,7 @@ pixi-kernel = ">=0.6.6,<0.7"
 r-essentials = ">=4.4,<5"
 r-kableextra = ">=1.4.0,<2"
 bioconductor-genomeinfodb = ">=1.42.0,<2"
+bioconductor-genomeinfodbdata = ">=1.2.13,<2"
 bioconductor-deseq2 = ">=1.46.0,<2"
 bioconductor-summarizedexperiment = ">=1.36.0,<2"
 r-plotly = ">=4.11.0,<5"
@@ -39,4 +42,3 @@ quarto = ">=1.8.26,<2"
 
 [pypi-dependencies]
 quarto-cli = ">=1.8.25, <2"
-

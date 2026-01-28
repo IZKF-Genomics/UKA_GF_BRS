@@ -8,7 +8,7 @@ params:
     description: "iGenomes identifier (e.g. GRCh38, GRCm39)"
   agendo_id:
     type: int
-    required: true
+    required: false
     cli: "--agendo-id"
     description: "Agendo request id to fetch metadata"
   umi:

@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+pixi install
+# Ensure Bioconductor data packages are installed (post-link downloads).
+pixi run install-bioc-data
+
 # Render the DGEA constructor, which orchestrates all comparisons and the overview.
 Rscript DGEA_constructor.R
