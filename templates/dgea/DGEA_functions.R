@@ -9,6 +9,62 @@ null_if_na <- function(x) {
   x
 }
 
+yaml_escape_string <- function(x) {
+  gsub("\"", "\\\\\"", x)
+}
+
+yaml_format_value <- function(x) {
+  if (is.null(x) || (length(x) == 1 && is.na(x))) {
+    return("null")
+  }
+  if (inherits(x, "formula")) {
+    return(paste(as.character(x), collapse = " "))
+  }
+  if (is.logical(x) || is.numeric(x)) {
+    return(as.character(x))
+  }
+  if (is.character(x)) {
+    if (length(x) == 1) {
+      return(paste0("\"", yaml_escape_string(x), "\""))
+    }
+    if (length(x) == 0) {
+      return("[]")
+    }
+    vals <- vapply(x, function(v) paste0("\"", yaml_escape_string(v), "\""), character(1))
+    return(paste0("[", paste(vals, collapse = ", "), "]"))
+  }
+  paste0("\"", yaml_escape_string(as.character(x)), "\"")
+}
+
+write_qmd_with_params <- function(template_path, output_path, params) {
+  lines <- readLines(template_path, warn = FALSE)
+  header_start <- which(lines == "---")[1]
+  header_end <- which(lines == "---")[2]
+  if (is.na(header_start) || is.na(header_end)) {
+    stop("QMD template must contain a YAML header delimited by '---'.")
+  }
+
+  header <- lines[(header_start + 1):(header_end - 1)]
+  params_idx <- which(grepl("^params:\\s*$", header))
+  if (length(params_idx) > 0) {
+    header <- header[seq_len(params_idx[1] - 1)]
+  }
+
+  params_block <- c(
+    "params:",
+    paste0("  ", names(params), ": ", vapply(params, yaml_format_value, character(1)))
+  )
+
+  new_lines <- c(
+    lines[1:header_start],
+    header,
+    params_block,
+    lines[header_end:length(lines)]
+  )
+  writeLines(new_lines, output_path)
+  invisible(output_path)
+}
+
 ####################################################################
 # Render DGEA reports (no hidden RData; pass params explicitly)
 ####################################################################
@@ -38,7 +94,11 @@ render_DGEA_report <- function(config) {
     base_group = config$base_group,
     target_group = config$target_group,
     additional_tag = null_if_na(config$additional_tag),
-    design_formula = config$design_formula,
+    design_formula = if (inherits(config$design_formula, "formula")) {
+      paste(as.character(config$design_formula), collapse = " ")
+    } else {
+      config$design_formula
+    },
     paired = isTRUE(config$paired),
     go = isTRUE(config$go),
     gsea = isTRUE(config$gsea),
@@ -51,10 +111,18 @@ render_DGEA_report <- function(config) {
     filetag = filetag
   )
 
+  qmd_file <- paste0("DGEA_", filetag, ".qmd")
+  write_qmd_with_params(
+    template_path = "DGEA_template.qmd",
+    output_path = qmd_file,
+    params = execute_params
+  )
+  message("Writing standalone QMD to: ", normalizePath(file.path(getwd(), qmd_file), winslash = "/", mustWork = FALSE))
+
   output_file <- paste0("DGEA_", filetag, ".html")
   message("Rendering DGEA report to: ", normalizePath(file.path(getwd(), output_file), winslash = "/", mustWork = FALSE))
   quarto::quarto_render(
-    input = "DGEA_template.qmd",
+    input = qmd_file,
     output_file = output_file,
     execute_params = execute_params,
     quiet = FALSE
