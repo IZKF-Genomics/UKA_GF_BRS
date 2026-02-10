@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import sys
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -72,6 +74,28 @@ def _load_meta(run_dir: Path) -> dict:
         return yaml.safe_load(meta_path.read_text()) or {}
     except Exception:
         return {}
+
+def _run_with_spinner(message: str, func):
+    stop_event = threading.Event()
+    spinner = ["|", "/", "-", "\\"]
+
+    def _spin():
+        idx = 0
+        while not stop_event.is_set():
+            sys.stdout.write(f"\r{message} {spinner[idx % len(spinner)]}")
+            sys.stdout.flush()
+            idx += 1
+            time.sleep(0.2)
+        sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
+        sys.stdout.flush()
+
+    thread = threading.Thread(target=_spin, daemon=True)
+    thread.start()
+    try:
+        return func()
+    finally:
+        stop_event.set()
+        thread.join()
 
 
 def _resolve_path(run_dir: Path, raw: str | Path) -> Path:
@@ -161,8 +185,14 @@ def main() -> None:
     )
 
     try:
-        with urlopen(req, timeout=30) as resp:
-            resp_body = resp.read().decode("utf-8")
+        def _post_request():
+            with urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8")
+
+        resp_body = _run_with_spinner(
+            "[export_bcl] Sending request to export API (waiting for response)",
+            _post_request,
+        )
     except HTTPError as exc:
         detail = exc.read().decode("utf-8") if exc.fp else str(exc)
         raise SystemExit(f"Export API request failed: {exc.code} {detail}")
@@ -191,13 +221,18 @@ def main() -> None:
     max_attempts = 4
     for attempt in range(1, max_attempts + 1):
         try:
-            with urlopen(final_req, timeout=30) as resp:
-                final_body = resp.read().decode("utf-8")
+            def _final_request():
+                with urlopen(final_req, timeout=30) as resp:
+                    return resp.read().decode("utf-8")
+
+            final_body = _run_with_spinner(
+                f"[export_bcl] Checking final message (attempt {attempt}/{max_attempts})",
+                _final_request,
+            )
             final_json = json.loads(final_body)
         except HTTPError as exc:
             if exc.code == 425 and attempt < max_attempts:
                 wait = attempt * 5
-                print(f"[export_bcl] Final message not ready (HTTP {exc.code}); retrying in {wait}s...")
                 time.sleep(wait)
                 continue
             detail = exc.read().decode("utf-8") if exc.fp else str(exc)

@@ -43,5 +43,5 @@ bpm template run demux_bclconvert
 - API URL (flowcell): `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.
 - API URL (Agendo request): `https://genomics.rwth-aachen.de/api/get/samplesheet/request/{id}`.
 - Credentials: params `gf_api_name`/`gf_api_pass` or env `GF_API_NAME`/`GF_API_PASS`.
-- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, `agendo_id` is used.
+- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, render fails. `agendo_id` is only used on flowcell 404 responses.
 - Render aborts if samplesheet fetch fails.
