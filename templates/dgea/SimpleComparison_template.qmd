@@ -19,7 +19,7 @@ params:
   samplesheet_path: ""
   samplesheet: null
   organism: ""
-  ercc: false
+  spikein: ""
   application: ""
   name: ""
   authors: ""

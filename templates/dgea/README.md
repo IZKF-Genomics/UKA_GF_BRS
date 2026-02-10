@@ -45,7 +45,7 @@ If you use Pixi, the template ships a `pixi.toml` with all R/Quarto dependencies
 - `--salmon-dir`: Path to Salmon quant output (from nfcore_rnaseq or nfcore_3mrnaseq).
 - `--samplesheet`: Path to nf-core samplesheet CSV containing a `sample` column.
 - `--organism`: One of `hsapiens`, `mmusculus`, `rnorvegicus`.
-- `--ercc`: Set to enable ERCC spike-in handling.
+- `--spikein`: Spike-in description string; ERCC filtering is enabled when it contains `ERCC`.
 - `--application`: `RNAseq` or `3mRNAseq` to select count handling.
 - `--name`: Project name for the report header.
 - `--authors`: Comma-separated author names for the report header.

@@ -10,7 +10,7 @@
 salmon_dir <- "{{ ctx.materialize(ctx.params.salmon_dir) }}"
 samplesheet_path <- "{{ ctx.materialize(ctx.params.nfcore_samplesheet) }}"
 organism <- "{{ ctx.params.organism }}" # hsapiens, mmusculus, rnorvegicus
-ercc <- {{ "TRUE" if ctx.params.ercc else "FALSE" }}
+spikein <- "{{ ctx.params.spikein }}"
 application <- "{{ ctx.params.application }}"
 project_name <- "{{ ctx.params.name }}"
 authors <- "{{ ctx.params.authors }}"
@@ -55,7 +55,8 @@ global_config <- list(
   design_formula = "~ group", # simple comparison by group column
   # design_formula = "~ id + group" # pairwise by id and compare by group column
   # design_formula = "~ id + group * treatment" # Captures whether the effect of treatment depends on the group
-  norm_spikein_ercc = FALSE,
+  spikein = spikein,
+  norm_spikein_ercc = grepl("ERCC", spikein, ignore.case = TRUE),
   organism = organism, # Define organism for GO/GSEA e.g., "hsapiens", "mmusculus", "rnorvegicus"
   highlighted_genes = NULL, # e.g., c("Gene1", "Gene2") for highlighting genes in all figures
   go = TRUE,
@@ -166,7 +167,7 @@ render_DGEA_report(report_config)
 #   salmon_dir = report_config$salmon_dir,
 #   samplesheet_path = report_config$samplesheet_path,
 #   organism = report_config$organism,
-#   ercc = isTRUE(report_config$ercc),
+#   spikein = report_config$spikein,
 #   application = report_config$application,
 #   name = report_config$name %||% "project",
 #   authors = report_config$authors %||% "PROJECT_AUTHORS",

@@ -20,7 +20,7 @@ params:
   salmon_dir: ""
   samplesheet_path: ""
   organism: ""
-  ercc: false
+  spikein: ""
   application: ""
   name: ""
   authors: ""
@@ -44,7 +44,8 @@ samplesheet <- read.csv(params$samplesheet_path, stringsAsFactors = FALSE)
 rownames(samplesheet) <- samplesheet$sample
 application <- params$application
 organism <- params$organism
-norm_spikein_ercc <- isTRUE(params$ercc)
+spikein <- params$spikein
+norm_spikein_ercc <- isTRUE(grepl("ERCC", spikein, ignore.case = TRUE))
 
 if (identical(application, "nfcore_RNAseq")) {
   counts_from_abundance <- "lengthScaledTPM"

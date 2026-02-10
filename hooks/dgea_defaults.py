@@ -84,8 +84,8 @@ def populate(ctx) -> None:
                 params["organism"] = mapping[genome_norm]
         if _needs_fill(params.get("organism")):
             raise RuntimeError("organism/genome not found or unmappable in upstream templates")
-    if "ercc" not in params or params.get("ercc") is None:
-        params["ercc"] = bool(_first_available(["params", "ercc"]))
+    if "spikein" not in params or params.get("spikein") is None:
+        params["spikein"] = _first_available(["params", "spikein"])
     if _needs_fill(params.get("application")):
         params["application"] = _first_available(["params", "application"]) or "nfcore_3mrnaseq"
     if _needs_fill(params.get("name")) and getattr(ctx, "project", None):

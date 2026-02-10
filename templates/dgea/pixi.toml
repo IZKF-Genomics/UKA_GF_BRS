@@ -39,6 +39,10 @@ r-ggridges = ">=0.5.7,<0.6"
 "bioconductor-org.hs.eg.db" = { version = ">=3.20.0,<4", channel = "bioconda" }
 "bioconductor-go.db" = { version = ">=3.20.0,<4", channel = "bioconda" }
 quarto = ">=1.8.26,<2"
+r-dplyr = ">=1.2.0,<2"
+r-rlang = ">=1.1.7,<2"
+r-vctrs = ">=0.7.1,<1"
+r-lifecycle = ">=1.0.5,<2"
 
 [pypi-dependencies]
 quarto-cli = ">=1.8.25, <2"

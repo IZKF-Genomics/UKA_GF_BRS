@@ -67,3 +67,11 @@ cd /path/to/output
 
 ## Notes
 - demux_bclconvert samplesheet retrieval uses the flowcell endpoint when available and falls back to the Agendo request ID endpoint if no flowcell ID can be derived.
+- nfcore_3mrnaseq and nfcore_rnaseq use `spikein` (string) to capture Agendo spike-in metadata; `_with_ERCC` is appended when the value contains `ERCC`.
+- ercc template no longer uses a pre-render hook; provide `--salmon-dir`/`--samplesheet` directly.
+- nfcore_3mrnaseq and nfcore_rnaseq no longer require `--genome` when Agendo provides an organism; the genome hook may fill it.
+- dgea pixi environment now pins `r-rlang >= 1.1.7` to satisfy `dplyr` requirements.
+- dgea pixi environment now pins `r-vctrs >= 0.7.1` to satisfy `dplyr` requirements.
+- dgea pixi environment now pins `r-lifecycle >= 1.0.5` to satisfy `dplyr` requirements.
+- export template now writes the final API response to `export_final_<job_id>.json`, storing only paths + summary fields in `project.yaml`.
+- hooks.agendo:fetch and hooks.genome_from_organism:set_from_organism print the resolved or missing organism/umi/genome to guide manual overrides.

@@ -21,7 +21,7 @@ params:
   samplesheet: NULL
   samplesheet_path: ""
   organism: ""
-  ercc: false
+  spikein: ""
   application: ""
   name: ""
   authors: ""
@@ -121,12 +121,15 @@ design_formula <- tryCatch(
   error = function(e) { warning("Invalid design formula, using ~ group"); ~ group }
 )
 
+spikein <- params$spikein
+norm_spikein_ercc <- isTRUE(grepl("ERCC", spikein, ignore.case = TRUE))
+
 config <- list(
   samplesheet = samplesheet,
   salmon_dir = params$salmon_dir,
   tx2gene_file = tx2gene_file,
   organism = organism,
-  ercc = isTRUE(params$ercc),
+  spikein = spikein,
   application = params$application,
   name = params$name,
   authors = params$authors,
@@ -144,7 +147,7 @@ config <- list(
   pvalueCutoff_GSEA = params$pvalueCutoff_GSEA,
   counts_from_abundance = counts_from_abundance,
   length_correction = length_correction,
-  norm_spikein_ercc = isTRUE(params$ercc),
+  norm_spikein_ercc = norm_spikein_ercc,
   filetag = filetag
 )
 ```

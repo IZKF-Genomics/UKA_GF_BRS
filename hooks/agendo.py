@@ -78,6 +78,13 @@ def fetch(ctx):
         "application",
         "agendo_application",
         "sample_number",
+        "umi",
+        "library_kit",
+        "index_kit",
+        "sequencer",
+        "sequencing_kit",
+        "read_type",
+        "flow_cell",
         # additionally requested fields
         "ref",
         "created_by_name",
@@ -88,7 +95,30 @@ def fetch(ctx):
         "pi_email",
     ):
         v = data.get(k)
-        if v is not None and k not in ctx.params:
+        if v is None:
+            continue
+        if k == "umi":
+            if ctx.params.get("umi") in (None, "", False):
+                ctx.params["umi"] = v
+            continue
+        if k not in ctx.params:
             ctx.params[k] = v
+
+    spike_in_value = data.get("spike_in")
+    if "spikein" not in ctx.params and spike_in_value is not None:
+        ctx.params["spikein"] = spike_in_value
+
+    organism_value = ctx.params.get("organism") or "-"
+    umi_value = ctx.params.get("umi") or "-"
+    spikein_value = ctx.params.get("spikein") or "-"
+    genome_value = ctx.params.get("genome") or "-"
+    print(
+        "[hook:agendo] organism={organism} umi={umi} spikein={spikein} genome={genome}".format(
+            organism=organism_value,
+            umi=umi_value,
+            spikein=spikein_value,
+            genome=genome_value,
+        )
+    )
 
     return {"ok": True, "id": agendo_id_str, "cached": cache_file.exists()}

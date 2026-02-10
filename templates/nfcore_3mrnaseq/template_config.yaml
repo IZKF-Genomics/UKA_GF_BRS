@@ -3,7 +3,7 @@ description: nf-core/rnaseq wrapper; requires only genome. Samplesheet generated
 params:
   genome:
     type: str
-    required: true
+    required: false
     cli: "--genome"
     description: "iGenomes identifier (e.g. GRCh38, GRCm39)"
   agendo_id:
@@ -12,17 +12,15 @@ params:
     cli: "--agendo-id"
     description: "Agendo request id to fetch metadata"
   umi:
-    type: bool
+    type: str
     required: false
     cli: "--umi"
-    description: "Whether the data contains UMI barcodes"
-    default: false
-  ercc:
-    type: bool
+    description: "UMI kit description (e.g., UMI Second Strand SynthesisModule for QuantSeq FWD)."
+  spikein:
+    type: str
     required: false
-    cli: "--ercc"
-    description: "Whether the data contains ERCC spike-ins"
-    default: false
+    cli: "--spikein"
+    description: "Spike-in description (e.g., ERCC RNA Spike-in Mix, None, Unknown)."
   max_cpus:
     type: int
     required: false

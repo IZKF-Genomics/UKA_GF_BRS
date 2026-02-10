@@ -16,11 +16,11 @@ params:
     cli: "--organism"
     required: false
     description: "Organism identifier (hsapiens, mmusculus, rnorvegicus)."
-  ercc:
-    type: bool
-    cli: "--ercc"
+  spikein:
+    type: str
+    cli: "--spikein"
     required: false
-    description: "Whether ERCC spike-ins are present (used to drop ERCCs)."
+    description: "Spike-in description (e.g., ERCC RNA Spike-in Mix, None, Unknown)."
   application:
     type: str
     cli: "--application"

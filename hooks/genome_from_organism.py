@@ -17,12 +17,14 @@ def set_from_organism(ctx):
     """
     # Respect explicit genome if present
     if ctx.params.get("genome"):
+        print(f"[hook:genome] genome={ctx.params.get('genome')} (pre-set)")
         return {"skipped": "genome already set"}
 
     org = ctx.params.get("organism")
     if not org:
         # Leave genome empty so user can edit run.sh manually
         ctx.params.setdefault("genome", "")
+        print("[hook:genome] organism missing; genome not set")
         return {"skipped": "organism missing; genome left empty"}
 
     key = str(org).strip().lower()
@@ -35,7 +37,9 @@ def set_from_organism(ctx):
     if not genome:
         # Unsupported organism; leave empty for manual edit
         ctx.params["genome"] = ""
+        print("[hook:genome] unsupported organism; genome not set")
         return {"skipped": f"unsupported organism '{org}'; genome left empty"}
 
     ctx.params["genome"] = genome
+    print(f"[hook:genome] genome={genome} (from organism '{org}')")
     return {"ok": True, "genome": genome}

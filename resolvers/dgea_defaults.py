@@ -79,10 +79,9 @@ def get_organism_any_dgea(ctx) -> str:
   raise RuntimeError(f"Cannot map genome '{val}' to organism (hsapiens/mmusculus/rnorvegicus)")
 
 
-def get_ercc_any_dgea(ctx) -> bool:
-  val = _first_available(ctx, ["params", "ercc"])
-  # Default to False if missing entirely
-  return bool(val)
+def get_spikein_any_dgea(ctx) -> str:
+  val = _first_available(ctx, ["params", "spikein"])
+  return val
 
 
 def get_application_any_dgea(ctx) -> str:

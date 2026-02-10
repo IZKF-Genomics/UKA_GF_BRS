@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-{% if ctx.params.umi %}
+{% if ctx.params.umi == "UMI Second Strand SynthesisModule for QuantSeq FWD" %}
 # Using UMI arguments tuned for Takara Bio SMARTer® Stranded Total RNA-Seq Kit v3.
 {% endif %}
 {% set genome_val = ctx.params.genome %}
-{% if ctx.params.ercc %}
+{% if ctx.params.spikein and "ERCC" in ctx.params.spikein %}
 {% set genome_val = genome_val + "_with_ERCC" %}
 {% endif %}
 echo "[info] $(date) nf-core/rnaseq profile=docker genome={{ genome_val }}"
@@ -24,7 +24,7 @@ nextflow run nf-core/rnaseq \
 {% if ctx.params.max_memory %}
   --max_memory "{{ ctx.params.max_memory }}" \
 {% endif %}
-{% if ctx.params.umi %}
+{% if ctx.params.umi == "UMI Second Strand SynthesisModule for QuantSeq FWD" %}
   --with_umi \
   --umitools_extract_method "regex" \
   --umitools_bc_pattern2 "^(?P<umi_1>.{8})(?P<discard_1>.{6}).*" \

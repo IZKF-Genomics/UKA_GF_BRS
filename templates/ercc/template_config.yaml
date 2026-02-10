@@ -28,10 +28,6 @@ render:
 run:
   entry: "run.sh"
 
-hooks:
-  pre_render:
-    - hooks.ercc_defaults:populate
-
 tools:
   required: [quarto, Rscript]
   optional: []

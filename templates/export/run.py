@@ -2,12 +2,46 @@
 from __future__ import annotations
 
 import json
+import sys
+import threading
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from bpm.io.yamlio import safe_dump_yaml, safe_load_yaml
+
+
+def _run_with_spinner(message: str, func):
+    stop_event = threading.Event()
+    spinner = ["|", "/", "-", "\\"]
+
+    def _spin():
+        idx = 0
+        while not stop_event.is_set():
+            sys.stdout.write(f"\r{message} {spinner[idx % len(spinner)]}")
+            sys.stdout.flush()
+            idx += 1
+            time.sleep(0.2)
+        sys.stdout.write("\r" + " " * (len(message) + 2) + "\r")
+        sys.stdout.flush()
+
+    thread = threading.Thread(target=_spin, daemon=True)
+    thread.start()
+    try:
+        return func()
+    finally:
+        stop_event.set()
+        thread.join()
+
+def _strip_created_resources(value):
+    if isinstance(value, dict):
+        value.pop("created_resources", None)
+        for v in value.values():
+            _strip_created_resources(v)
+    elif isinstance(value, list):
+        for v in value:
+            _strip_created_resources(v)
 
 
 def main() -> None:
@@ -60,8 +94,14 @@ def main() -> None:
     )
 
     try:
-        with urlopen(req, timeout=30) as resp:
-            resp_body = resp.read().decode("utf-8")
+        def _post_request():
+            with urlopen(req, timeout=30) as resp:
+                return resp.read().decode("utf-8")
+
+        resp_body = _run_with_spinner(
+            "[export] Sending request to export API (waiting for response)",
+            _post_request,
+        )
     except HTTPError as exc:
         detail = exc.read().decode("utf-8") if exc.fp else str(exc)
         raise SystemExit(f"Export API request failed: {exc.code} {detail}")
@@ -81,13 +121,14 @@ def main() -> None:
     if not isinstance(job_id, str) or not job_id:
         raise SystemExit("Export API response missing job_id")
 
+    export_dir = Path.cwd()
     published = export_entry.get("published") or {}
     published["export_job_id"] = job_id
-    published["export_response"] = response_json
     export_entry["published"] = published
+    _strip_created_resources(export_entry)
     safe_dump_yaml(project_path, project_data)
 
-    print(f"[export] project.yaml updated with published export_job_id={job_id}.")
+    print(f"[export] project.yaml updated with export_job_id={job_id}.")
 
     # Fetch final message for the job, with a short retry for "too early" responses.
     final_endpoint = (
@@ -100,8 +141,14 @@ def main() -> None:
     max_attempts = 4
     for attempt in range(1, max_attempts + 1):
         try:
-            with urlopen(final_req, timeout=30) as resp:
-                final_body = resp.read().decode("utf-8")
+            def _final_request():
+                with urlopen(final_req, timeout=30) as resp:
+                    return resp.read().decode("utf-8")
+
+            final_body = _run_with_spinner(
+                f"[export] Checking final message (attempt {attempt}/{max_attempts})",
+                _final_request,
+            )
             final_json = json.loads(final_body)
         except HTTPError as exc:
             if exc.code == 425 and attempt < max_attempts:
@@ -145,7 +192,15 @@ def main() -> None:
             lines.append("=" * 60)
 
             print("\n".join(lines))
-            published["export_final_message"] = final_json
+
+            final_path = export_dir / f"export_final_{job_id}.json"
+            final_path.write_text(json.dumps(final_json, indent=2, sort_keys=True))
+            published["export_final_path"] = str(final_path)
+            if final_json.get("status"):
+                published["export_status"] = final_json.get("status")
+            if final_json.get("main_report"):
+                published["export_main_report"] = final_json.get("main_report")
+            _strip_created_resources(export_entry)
             safe_dump_yaml(project_path, project_data)
             break
 
