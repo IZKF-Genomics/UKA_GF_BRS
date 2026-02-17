@@ -484,7 +484,7 @@ if (nrow(significant_genes) <= 1) {
   significant_genes <- res %>%
     arrange(padj) %>%
     slice_head(n = 20)
-  heatmap_title <- "Heatmap of Significant Genes (N=20)"
+  heatmap_title <- "Heatmap of Top DE Genes (N=20)"
 } else {
   heatmap_title <- paste0(
     "Heatmap of Significant Genes (N=",
@@ -730,7 +730,7 @@ if (nrow(significant_genes) <= 1) {
   significant_genes <- res %>%
     arrange(padj) %>%
     slice_head(n = 20)
-  heatmap_title <- "Heatmap of Significant Genes (N=20)"
+  heatmap_title <- "Heatmap of Top DE Genes (N=20)"
 } else {
   heatmap_title <- paste0(
     "Heatmap of Significant Genes (N=",
