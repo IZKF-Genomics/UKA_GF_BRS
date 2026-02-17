@@ -484,6 +484,13 @@ if (nrow(significant_genes) <= 1) {
   significant_genes <- res %>%
     arrange(padj) %>%
     slice_head(n = 20)
+  heatmap_title <- "Heatmap of Significant Genes (N=20)"
+} else {
+  heatmap_title <- paste0(
+    "Heatmap of Significant Genes (N=",
+    length(significant_genes$gene_id),
+    ")"
+  )
 }
 
 # Get gene IDs for selected genes
@@ -511,11 +518,7 @@ fig <- plot_ly(
   showscale = TRUE
 ) %>%
   layout(
-    title = paste0(
-      "Heatmap of Significant Genes (N=",
-      length(selected_genes),
-      ")"
-    ),
+    title = heatmap_title,
     xaxis = list(title = "Samples", tickangle = 45),
     yaxis = list(
       title = "Genes",
@@ -727,7 +730,15 @@ if (nrow(significant_genes) <= 1) {
   significant_genes <- res %>%
     arrange(padj) %>%
     slice_head(n = 20)
+  heatmap_title <- "Heatmap of Significant Genes (N=20)"
+} else {
+  heatmap_title <- paste0(
+    "Heatmap of Significant Genes (N=",
+    length(significant_genes$gene_id),
+    ")"
+  )
 }
+
 
 # Get gene IDs for selected genes
 selected_genes <- significant_genes$gene_id
@@ -753,11 +764,7 @@ pheatmap(
   show_colnames = TRUE, # Show column names
   angle_col = 45, # Rotate x-axis labels by 45 degrees
   fontsize = 10, # Font size for readability
-  main = paste0(
-    "Heatmap of Significant Genes (N=",
-    length(selected_genes),
-    ")"
-  ),
+  main = heatmap_title,
   annotation_col = column_annotations # Add group annotation to columns
 )
 ```
