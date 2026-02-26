@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "cell-cell communication"
 version = "0.1.0"
 description = "Module for cell-cell communication."
