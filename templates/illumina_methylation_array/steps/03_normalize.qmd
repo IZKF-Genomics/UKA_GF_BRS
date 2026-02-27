@@ -1,0 +1,44 @@
+---
+title: "03 Normalize"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+rgset <- read_rds("../results/rds/rgset.rds")
+method <- cfg$normalization$method
+if (!requireNamespace("minfi", quietly = TRUE)) log_error("Package 'minfi' is required")
+normset <- switch(
+  method,
+  noob = minfi::preprocessNoob(rgset),
+  quantile = minfi::preprocessQuantile(rgset),
+  swan = {
+    mset_raw <- minfi::preprocessRaw(rgset)
+    minfi::preprocessSwan(rgset, mset = mset_raw)
+  },
+  funnorm = minfi::preprocessFunnorm(rgset),
+  log_error("Unsupported normalization method: ", method)
+)
+save_rds(normset, "../results/rds/normset.rds")
+summary_tbl <- tibble::tibble(metric = c("method", "n_samples", "n_probes"), value = c(method, ncol(normset), nrow(normset)))
+write_table(summary_tbl, "../results/tables/normalization_summary.csv")
+```
+
+## Method
+
+```{r}
+summary_tbl
+```
+
+## Density (post-normalization beta)
+
+```{r}
+beta <- get_beta_matrix(normset)
+dens_df <- as.data.frame(beta)
+dens_long <- tidyr::pivot_longer(tibble::rownames_to_column(dens_df, "probe"), -probe, names_to = "sample_id", values_to = "beta")
+p <- ggplot(dens_long, aes(beta, group = sample_id)) + geom_density(alpha = 0.2) + labs(title = paste("Beta density:", method))
+print(p)
+save_plot(p, "../results/figures/normalize_beta_density.png", width = 9, height = 5)
+```

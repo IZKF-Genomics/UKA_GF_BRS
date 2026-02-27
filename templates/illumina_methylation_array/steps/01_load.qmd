@@ -1,0 +1,46 @@
+---
+title: "01 Load IDAT"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+samples <- load_samples("../config/samples.csv")
+val <- validate_project(cfg, samples, fail_on_missing_idats = FALSE)
+samples_resolved <- val$samples_resolved
+idat_status <- val$idat_status
+write_table(samples_resolved, "../results/tables/samples_resolved.csv")
+write_table(idat_status, "../results/tables/idat_status.csv")
+if (any(!idat_status$red_exists | !idat_status$grn_exists)) {
+  bad <- dplyr::filter(idat_status, !red_exists | !grn_exists)
+  write_table(bad, "../results/tables/missing_idats.csv")
+  log_error("Missing IDAT pair(s) detected; fix paths before continuing.")
+}
+```
+
+## Sample summary
+
+```{r}
+dplyr::count(samples, .data[[cfg$groups$primary_group_col]], name = "n")
+```
+
+## Sentrix distribution
+
+```{r}
+dplyr::count(samples, SentrixBarcode, SentrixPosition, name = "n")
+```
+
+## Import IDATs
+
+```{r}
+if (!requireNamespace("minfi", quietly = TRUE)) log_error("Package 'minfi' is required")
+rgset <- minfi::read.metharray.exp(
+  targets = as.data.frame(samples_resolved),
+  recursive = isTRUE(cfg$idat$recursive),
+  extended = TRUE
+)
+save_rds(rgset, "../results/rds/rgset.rds")
+log_info("Saved rgset to ../results/rds/rgset.rds")
+```

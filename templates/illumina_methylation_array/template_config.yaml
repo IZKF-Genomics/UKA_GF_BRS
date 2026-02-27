@@ -1,0 +1,81 @@
+id: illumina_methylation_array
+description: "Config-driven Illumina methylation array pipeline (Quarto + Pixi + R/Bioconductor)."
+
+params:
+  study_name:
+    type: str
+    cli: "--study-name"
+    required: false
+    default: "MyStudy"
+    description: "Project/report name written into config/project.toml"
+  idat_base_dir:
+    type: str
+    cli: "--idat-base-dir"
+    required: false
+    default: "data/idat"
+    description: "Directory containing IDAT files (flat or per-barcode subdirs)"
+  array_type:
+    type: str
+    cli: "--array-type"
+    required: false
+    default: "EPIC"
+    description: "Array type: 450K, EPIC, or EPIC_V2"
+  genome_build:
+    type: str
+    cli: "--genome-build"
+    required: false
+    default: "hg38"
+    description: "Genome build used for annotation and reporting"
+  group_col:
+    type: str
+    cli: "--group-col"
+    required: false
+    default: "group"
+    description: "Primary grouping column in config/samples.csv"
+  case_label:
+    type: str
+    cli: "--case"
+    required: false
+    default: "case"
+    description: "Case label in the primary grouping column"
+  control_label:
+    type: str
+    cli: "--control"
+    required: false
+    default: "control"
+    description: "Control label in the primary grouping column"
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+    - _quarto.yml -> _quarto.yml
+    - pixi.toml -> pixi.toml
+    - run.sh.j2 -> run.sh
+    - .gitignore -> .gitignore
+    - config/project.toml.j2 -> config/project.toml
+    - config/samples.csv -> config/samples.csv
+    - config/contrasts.toml -> config/contrasts.toml
+    - config/drilldown.toml -> config/drilldown.toml
+    - lib/common.R -> lib/common.R
+    - lib/io.R -> lib/io.R
+    - lib/qc.R -> lib/qc.R
+    - lib/norm.R -> lib/norm.R
+    - lib/filter.R -> lib/filter.R
+    - lib/model.R -> lib/model.R
+    - lib/enrich.R -> lib/enrich.R
+    - lib/drilldown.R -> lib/drilldown.R
+    - steps/01_load.qmd -> steps/01_load.qmd
+    - steps/02_qc.qmd -> steps/02_qc.qmd
+    - steps/03_normalize.qmd -> steps/03_normalize.qmd
+    - steps/04_filter.qmd -> steps/04_filter.qmd
+    - steps/05_batch_cell.qmd -> steps/05_batch_cell.qmd
+    - steps/06_cluster.qmd -> steps/06_cluster.qmd
+    - steps/07_dmp.qmd -> steps/07_dmp.qmd
+    - steps/08_dmr.qmd -> steps/08_dmr.qmd
+    - steps/09_enrichment.qmd -> steps/09_enrichment.qmd
+    - steps/10_drilldown.qmd -> steps/10_drilldown.qmd
+    - steps/99_index.qmd -> steps/99_index.qmd
+
+run:
+  entry: "run.sh"

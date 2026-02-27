@@ -1,0 +1,63 @@
+---
+title: "04 Filter"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+rgset <- read_rds("../results/rds/rgset.rds")
+normset <- read_rds("../results/rds/normset.rds")
+qc <- read_rds("../results/rds/qc.rds")
+detp <- qc$detp
+keep <- rep(TRUE, nrow(normset))
+names(keep) <- rownames(normset)
+removed <- list()
+if (isTRUE(cfg$filter$remove_detection_fail)) {
+  fail_any <- rowMeans(detp > cfg$qc$detection_p_threshold, na.rm = TRUE) > 0
+  removed$detection_fail <- sum(fail_any)
+  keep[names(fail_any)] <- keep[names(fail_any)] & !fail_any
+} else {
+  removed$detection_fail <- 0
+}
+ann <- get_annotation_df(normset)
+ann_key <- ann$Name
+if (isTRUE(cfg$filter$remove_sex_chr) || isTRUE(cfg$filter$keep_autosomal_only)) {
+  chr_col <- intersect(c("chr", "CHR"), names(ann))[1]
+  if (!is.na(chr_col) && !is.null(chr_col)) {
+    sex_names <- ann %>% dplyr::filter(.data[[chr_col]] %in% c("chrX", "chrY", "X", "Y")) %>% dplyr::pull(.data$Name)
+    sex_hit <- intersect(names(keep), sex_names)
+    keep[sex_hit] <- FALSE
+    removed$sex_chr <- length(sex_hit)
+  } else {
+    log_warn("Sex chromosome filtering requested but annotation chromosome column was not found")
+    removed$sex_chr <- 0
+  }
+} else {
+  removed$sex_chr <- 0
+}
+if (isTRUE(cfg$filter$remove_snps)) {
+  log_warn("SNP probe filtering is enabled but no packaged SNP list is included in this scaffold. Add list integration in lib/filter.R.")
+  removed$snps <- 0
+} else {
+  removed$snps <- 0
+}
+if (isTRUE(cfg$filter$remove_cross_reactive)) {
+  log_warn("Cross-reactive probe filtering is enabled but no packaged cross-reactive list is included in this scaffold. Add list integration in lib/filter.R.")
+  removed$cross_reactive <- 0
+} else {
+  removed$cross_reactive <- 0
+}
+filteredset <- normset[keep, ]
+save_rds(filteredset, "../results/rds/filteredset.rds")
+filter_summary <- tibble::tibble(metric = c("probes_in", "probes_kept", "probes_removed_total"), value = c(nrow(normset), nrow(filteredset), nrow(normset) - nrow(filteredset)))
+removed_tbl <- tibble::enframe(removed, name = "reason", value = "n_removed")
+write_table(filter_summary, "../results/tables/filter_summary.csv")
+write_table(removed_tbl, "../results/tables/probes_removed.csv")
+```
+
+```{r}
+filter_summary
+removed_tbl
+```

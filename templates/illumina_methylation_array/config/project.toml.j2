@@ -1,0 +1,73 @@
+[project]
+name = "{{ ctx.params.study_name }}"
+array_type = "{{ ctx.params.array_type }}"    # "450K" | "EPIC" | "EPIC_V2"
+genome_build = "{{ ctx.params.genome_build }}"
+outdir = "reports"
+
+[idat]
+base_dir = "{{ ctx.params.idat_base_dir }}"
+layout = "flat"            # "flat" or "per_barcode_subdir"
+recursive = true
+
+[groups]
+primary_group_col = "{{ ctx.params.group_col }}"
+case = "{{ ctx.params.case_label }}"
+control = "{{ ctx.params.control_label }}"
+
+[qc]
+max_failed_probes_fraction = 0.01
+detection_p_threshold = 0.01
+flag_outliers = true
+exclude_flagged_samples = false
+
+[normalization]
+method = "noob"            # "noob" | "quantile" | "swan" | "funnorm"
+
+[filter]
+remove_detection_fail = true
+remove_snps = true
+remove_cross_reactive = true
+remove_sex_chr = false
+min_beads = 3
+keep_autosomal_only = false
+
+[batch]
+enabled = true
+combat = false
+combat_batch_col = "SentrixBarcode"
+
+[cell_counts]
+enabled = false
+reference = "blood"
+
+[clustering]
+top_variable_cpg = 5000
+methods = ["pca", "umap", "hclust"]
+
+[dmp]
+enabled = true
+use_m_values = true
+adjust_method = "BH"
+alpha = 0.05
+delta_beta_min = 0.10
+covariates = ["age", "sex_reported"]
+
+[dmr]
+enabled = false
+method = "DMRcate"
+alpha = 0.05
+
+[enrichment]
+enabled = true
+method = "missMethyl_gometh"
+collections = ["GO", "KEGG"]
+ontologies = ["BP", "MF", "CC"]
+top_n = 30
+
+[drilldown]
+enabled = true
+cpg_ids = ["cg00000029"]
+loci = ["chr1:1000000-1010000"]
+genes = ["BRCA1"]
+max_cpgs_per_locus = 200
+heatmap_top_var = 100

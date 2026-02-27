@@ -1,0 +1,25 @@
+---
+title: "08 Differentially Methylated Regions (DMR)"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+if (!isTRUE(cfg$dmr$enabled)) {
+  cat("DMR step disabled in config.\n")
+  knitr::knit_exit()
+}
+obj <- load_analysis_inputs()
+dmp <- read_rds("../results/rds/dmp_table.rds")
+method <- cfg$dmr$method
+log_warn("DMR step is a scaffold. Implement method-specific workflows in this template (DMRcate/bumphunter).")
+dmr_tbl <- tibble::tibble(method = method, note = "Scaffold placeholder", n_input_cpg = nrow(dmp))
+save_rds(dmr_tbl, "../results/rds/dmr_table.rds")
+write_table(dmr_tbl, "../results/tables/dmr_table.csv")
+```
+
+```{r}
+dmr_tbl
+```

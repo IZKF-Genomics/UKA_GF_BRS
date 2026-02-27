@@ -1,0 +1,74 @@
+---
+title: "07 Differential Methylation (CpG / DMP)"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+samples <- load_samples("../config/samples.csv")
+if (!isTRUE(cfg$dmp$enabled)) {
+  cat("DMP step disabled in config.\n")
+  knitr::knit_exit()
+}
+obj <- load_analysis_inputs()
+if (!requireNamespace("limma", quietly = TRUE)) log_error("Package 'limma' is required")
+beta <- get_beta_matrix(obj)
+mval <- get_m_matrix(obj)
+pdata <- get_pdata(obj)
+if (!("sample_id" %in% names(pdata))) pdata$sample_id <- colnames(beta)
+meta <- dplyr::left_join(tibble::tibble(sample_id = colnames(beta)), samples, by = "sample_id")
+meta <- meta[match(colnames(beta), meta$sample_id), , drop = FALSE]
+group_col <- cfg$groups$primary_group_col
+case_label <- cfg$groups$case
+control_label <- cfg$groups$control
+if (!(group_col %in% names(meta))) log_error("Group column not found in merged metadata:", group_col)
+meta[[group_col]] <- factor(meta[[group_col]])
+keep_samples <- meta[[group_col]] %in% c(case_label, control_label)
+meta2 <- meta[keep_samples, , drop = FALSE]
+mat_beta <- beta[, keep_samples, drop = FALSE]
+mat_model <- if (isTRUE(cfg$dmp$use_m_values)) mval[, keep_samples, drop = FALSE] else mat_beta
+meta2[[group_col]] <- factor(meta2[[group_col]], levels = c(control_label, case_label))
+validate_groups(cfg, meta2)
+covars <- intersect(unlist(cfg$dmp$covariates), names(meta2))
+design_vars <- c(group_col, covars)
+form <- stats::as.formula(paste("~", paste(design_vars, collapse = " + ")))
+design <- model.matrix(form, data = meta2)
+fit <- limma::lmFit(mat_model, design)
+fit <- limma::eBayes(fit)
+coef_name <- paste0(group_col, case_label)
+if (!(coef_name %in% colnames(fit$coefficients))) {
+  # fallback when factor coding produces a different coefficient name
+  coef_name <- colnames(fit$coefficients)[grepl(group_col, colnames(fit$coefficients))][1]
+}
+if (is.na(coef_name) || length(coef_name) == 0) log_error("Could not determine limma coefficient for group effect")
+res <- limma::topTable(fit, coef = coef_name, number = Inf, sort.by = "P")
+res$CpG <- rownames(res)
+delta_beta <- rowMeans(mat_beta[, meta2[[group_col]] == case_label, drop = FALSE], na.rm = TRUE) -
+  rowMeans(mat_beta[, meta2[[group_col]] == control_label, drop = FALSE], na.rm = TRUE)
+res$delta_beta <- delta_beta[res$CpG]
+ann <- get_annotation_df(obj)
+if ("Name" %in% names(ann)) res <- dplyr::left_join(tibble::as_tibble(res), ann, by = c("CpG" = "Name")) else res <- tibble::as_tibble(res)
+res <- dplyr::mutate(res, significant = adj.P.Val <= cfg$dmp$alpha & abs(delta_beta) >= cfg$dmp$delta_beta_min)
+save_rds(res, "../results/rds/dmp_table.rds")
+write_table(res, "../results/tables/dmp_table.csv")
+write_table(dplyr::filter(res, significant), "../results/tables/dmp_significant.csv")
+```
+
+## Top DMPs
+
+```{r}
+head(res, 25)
+```
+
+## Volcano plot
+
+```{r}
+p <- ggplot(res, aes(delta_beta, -log10(P.Value), color = significant)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("FALSE" = "grey70", "TRUE" = "firebrick")) +
+  labs(x = "Delta beta (case - control)", y = "-log10(P)")
+print(p)
+save_plot(p, "../results/figures/dmp_volcano.png", width = 8, height = 5)
+```

@@ -1,0 +1,47 @@
+---
+title: "06 Clustering"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+obj <- load_analysis_inputs()
+beta <- get_beta_matrix(obj)
+top_n <- as.integer(cfg$clustering$top_variable_cpg)
+beta_top <- safe_top_var_rows(beta, n = top_n)
+pca <- prcomp(t(beta_top), center = TRUE, scale. = FALSE)
+pca_df <- tibble::as_tibble(pca$x[, 1:3], rownames = "sample_id")
+if (requireNamespace("umap", quietly = TRUE) && ("umap" %in% unlist(cfg$clustering$methods))) {
+  um <- umap::umap(t(beta_top))
+  umap_df <- tibble::tibble(sample_id = colnames(beta_top), UMAP1 = um$layout[,1], UMAP2 = um$layout[,2])
+} else {
+  umap_df <- tibble::tibble()
+}
+d <- stats::dist(t(beta_top))
+hc <- hclust(d)
+clusters <- tibble::tibble(sample_id = hc$labels, hclust_order = match(hc$labels, hc$labels[hc$order]))
+write_table(clusters, "../results/tables/sample_clusters.csv")
+save_rds(list(pca = pca, hc = hc, dist = d), "../results/rds/clustering.rds")
+```
+
+## PCA
+
+```{r}
+p <- ggplot(pca_df, aes(PC1, PC2, label = sample_id)) + geom_point(size = 3) + ggrepel::geom_text_repel(max.overlaps = 20)
+print(p)
+save_plot(p, "../results/figures/cluster_pca.png", width = 8, height = 5)
+```
+
+## UMAP (optional)
+
+```{r}
+if (nrow(umap_df) > 0) {
+  p_umap <- ggplot(umap_df, aes(UMAP1, UMAP2, label = sample_id)) + geom_point(size = 3) + ggrepel::geom_text_repel(max.overlaps = 20)
+  print(p_umap)
+  save_plot(p_umap, "../results/figures/cluster_umap.png", width = 8, height = 5)
+} else {
+  cat("UMAP not available or not enabled.\n")
+}
+```

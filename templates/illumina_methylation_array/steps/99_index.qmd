@@ -1,0 +1,53 @@
+---
+title: "99 Pipeline Index"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+read_if <- function(path) if (file.exists(path)) readr::read_csv(path, show_col_types = FALSE) else NULL
+samples <- read_if("../results/tables/samples_resolved.csv")
+qc <- read_if("../results/tables/qc_metrics.csv")
+filt <- read_if("../results/tables/filter_summary.csv")
+dmp_sig <- read_if("../results/tables/dmp_significant.csv")
+go <- read_if("../results/tables/go_terms.csv")
+dmr <- read_if("../results/tables/dmr_table.csv")
+summary_tbl <- tibble::tibble(
+  metric = c("project_name", "samples_loaded", "normalization_method", "probes_kept", "significant_cpgs", "dmr_rows"),
+  value = c(
+    cfg$project$name,
+    if (is.null(samples)) NA else nrow(samples),
+    cfg$normalization$method,
+    if (is.null(filt)) NA else filt$value[filt$metric == "probes_kept"][1],
+    if (is.null(dmp_sig)) NA else nrow(dmp_sig),
+    if (is.null(dmr)) NA else nrow(dmr)
+  )
+)
+```
+
+## Summary
+
+```{r}
+summary_tbl
+```
+
+## Reports
+
+- [01 Load](01_load.html)
+- [02 QC](02_qc.html)
+- [03 Normalize](03_normalize.html)
+- [04 Filter](04_filter.html)
+- [05 Batch/Cell](05_batch_cell.html)
+- [06 Cluster](06_cluster.html)
+- [07 DMP](07_dmp.html)
+- [08 DMR](08_dmr.html)
+- [09 Enrichment](09_enrichment.html)
+- [10 Drilldown](10_drilldown.html)
+
+## Top GO terms (if available)
+
+```{r}
+if (!is.null(go)) head(go, cfg$enrichment$top_n) else cat("No GO results found yet.\n")
+```

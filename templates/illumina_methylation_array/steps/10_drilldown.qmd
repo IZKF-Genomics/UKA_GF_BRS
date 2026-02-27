@@ -1,0 +1,70 @@
+---
+title: "10 Drilldown (CpG / Locus / Gene)"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+if (!isTRUE(cfg$drilldown$enabled)) {
+  cat("Drilldown disabled in config.\n")
+  knitr::knit_exit()
+}
+obj <- load_analysis_inputs()
+beta <- get_beta_matrix(obj)
+ann <- get_annotation_df(obj)
+pdata <- get_pdata(obj)
+dmp <- if (file.exists("../results/rds/dmp_table.rds")) read_rds("../results/rds/dmp_table.rds") else NULL
+ann2 <- ann
+if (!("Name" %in% names(ann2))) ann2$Name <- rownames(beta)
+ann2 <- dplyr::mutate(ann2, chr = dplyr::coalesce(.data$chr, .data$CHR, NA_character_))
+ann2 <- dplyr::mutate(ann2, pos = dplyr::coalesce(as.numeric(.data$pos), as.numeric(.data$MAPINFO), NA_real_))
+# CpG drilldowns
+cpg_ids <- unlist(cfg$drilldown$cpg_ids)
+for (cpg in cpg_ids) {
+  if (!(cpg %in% rownames(beta))) next
+  df <- tibble::tibble(sample_id = colnames(beta), beta = as.numeric(beta[cpg, ]))
+  if ("sample_id" %in% names(pdata)) df <- dplyr::left_join(df, tibble::as_tibble(pdata), by = "sample_id")
+  if (!is.null(dmp) && "CpG" %in% names(dmp)) df$in_dmp <- cpg %in% dmp$CpG
+  write_table(df, file.path("../results/tables", paste0("drilldown_cpg_", cpg, ".csv")))
+}
+# Locus drilldowns
+loci <- unlist(cfg$drilldown$loci)
+for (loc in loci) {
+  m <- stringr::str_match(loc, "^([^:]+):(\d+)-(\d+)$")
+  if (any(is.na(m))) next
+  chr <- m[,2]; start <- as.numeric(m[,3]); end <- as.numeric(m[,4])
+  loc_tbl <- ann2 %>% dplyr::filter(.data$chr == chr, .data$pos >= start, .data$pos <= end)
+  if (nrow(loc_tbl) > cfg$drilldown$max_cpgs_per_locus) loc_tbl <- dplyr::slice_head(loc_tbl, n = cfg$drilldown$max_cpgs_per_locus)
+  tag <- gsub("[^A-Za-z0-9]+", "_", loc)
+  write_table(loc_tbl, file.path("../results/tables", paste0("drilldown_locus_", tag, ".csv")))
+}
+# Gene drilldowns (annotation column names vary by annotation package)
+genes <- unlist(cfg$drilldown$genes)
+gene_cols <- intersect(c("UCSC_RefGene_Name", "GeneSymbol", "gene", "SYMBOL"), names(ann2))
+for (gene in genes) {
+  if (length(gene_cols) == 0) break
+  gene_tbl <- ann2[Reduce(`|`, lapply(gene_cols, function(col) grepl(gene, ann2[[col]], fixed = TRUE))), , drop = FALSE]
+  tag <- gsub("[^A-Za-z0-9]+", "_", gene)
+  write_table(gene_tbl, file.path("../results/tables", paste0("drilldown_gene_", tag, ".csv")))
+}
+```
+
+## Requested CpG IDs
+
+```{r}
+tibble::tibble(cpg_ids = unlist(cfg$drilldown$cpg_ids))
+```
+
+## Requested loci
+
+```{r}
+tibble::tibble(loci = unlist(cfg$drilldown$loci))
+```
+
+## Requested genes
+
+```{r}
+tibble::tibble(genes = unlist(cfg$drilldown$genes))
+```

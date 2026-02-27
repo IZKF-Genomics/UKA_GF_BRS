@@ -1,0 +1,7 @@
+# Optional multiple contrast definitions for future extensions.
+# Example:
+# [[contrasts]]
+# name = "case_vs_control"
+# lhs = "case"
+# rhs = "control"
+# group_col = "group"

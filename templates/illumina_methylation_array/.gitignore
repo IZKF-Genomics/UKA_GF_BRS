@@ -1,0 +1,5 @@
+reports/
+results/
+.Rhistory
+.RData
+.quarto/

@@ -1,0 +1,35 @@
+---
+title: "05 Batch / Cell Composition"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+obj <- read_rds("../results/rds/filteredset.rds")
+pdata <- get_pdata(obj)
+beta <- get_beta_matrix(obj)
+pc <- prcomp(t(beta), center = TRUE, scale. = FALSE)
+pc_df <- tibble::as_tibble(pc$x[, 1:2], rownames = "sample_col")
+pc_df$sample_col <- colnames(beta)
+if ("sample_id" %in% names(pdata)) {
+  pc_df <- dplyr::left_join(pc_df, tibble::as_tibble(pdata), by = c("sample_col" = "sample_id"))
+}
+# This scaffold keeps the object unchanged by default; ComBat/cell-count estimation are extension points.
+adjustedset <- obj
+save_rds(adjustedset, "../results/rds/adjustedset.rds")
+write_table(tibble::tibble(note = c("No adjustment applied in scaffold by default")), "../results/tables/batch_summary.csv")
+if (isTRUE(cfg$cell_counts$enabled)) {
+  write_table(tibble::tibble(note = "Cell count estimation enabled in config but not implemented in scaffold"), "../results/tables/cell_counts.csv")
+}
+```
+
+```{r}
+col_group <- if (cfg$groups$primary_group_col %in% names(pc_df)) cfg$groups$primary_group_col else NULL
+p <- ggplot(pc_df, aes(PC1, PC2, color = if (!is.null(col_group)) .data[[col_group]] else NULL)) +
+  geom_point(size = 3) +
+  labs(title = "PCA colored by primary group")
+print(p)
+save_plot(p, "../results/figures/batch_pca_group.png", width = 8, height = 5)
+```

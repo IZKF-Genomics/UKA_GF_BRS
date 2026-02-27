@@ -1,0 +1,60 @@
+---
+title: "09 Enrichment"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+if (!isTRUE(cfg$enrichment$enabled)) {
+  cat("Enrichment step disabled in config.\n")
+  knitr::knit_exit()
+}
+dmp <- read_rds("../results/rds/dmp_table.rds")
+if (!requireNamespace("missMethyl", quietly = TRUE)) log_error("Package 'missMethyl' is required")
+array_for_gometh <- normalize_array_type_for_gometh(cfg$project$array_type)
+if (is.na(array_for_gometh)) {
+  log_warn("Skipping gometh: array_type not supported by scaffold mapping (likely EPIC_V2 support/version issue).")
+  go_tbl <- tibble::tibble(note = "Skipped due to unsupported array_type for gometh in current environment")
+  write_table(go_tbl, "../results/tables/go_terms.csv")
+  save_rds(go_tbl, "../results/rds/enrichment_go.rds")
+  knitr::knit_exit()
+}
+sig <- dplyr::filter(dmp, adj.P.Val <= cfg$dmp$alpha, abs(delta_beta) >= cfg$dmp$delta_beta_min)
+all_cpg <- dmp$CpG
+sig_cpg <- sig$CpG
+write_table(tibble::tibble(metric = c("all_cpg", "sig_cpg"), value = c(length(all_cpg), length(sig_cpg))), "../results/tables/enrichment_input_summary.csv")
+res_go_all <- list()
+if ("GO" %in% unlist(cfg$enrichment$collections)) {
+  for (ont in unlist(cfg$enrichment$ontologies)) {
+    go <- missMethyl::gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "GO", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+    go$ontology <- ont
+    res_go_all[[ont]] <- tibble::as_tibble(go)
+  }
+}
+go_tbl <- dplyr::bind_rows(res_go_all)
+if (nrow(go_tbl) == 0) go_tbl <- tibble::tibble(note = "GO not requested or no results")
+write_table(go_tbl, "../results/tables/go_terms.csv")
+save_rds(go_tbl, "../results/rds/enrichment_go.rds")
+if ("KEGG" %in% unlist(cfg$enrichment$collections)) {
+  kegg <- missMethyl::gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "KEGG", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+  kegg_tbl <- tibble::as_tibble(kegg)
+  write_table(kegg_tbl, "../results/tables/kegg_terms.csv")
+  save_rds(kegg_tbl, "../results/rds/enrichment_kegg.rds")
+} else {
+  kegg_tbl <- tibble::tibble(note = "KEGG not requested")
+}
+```
+
+## GO terms
+
+```{r}
+head(go_tbl, cfg$enrichment$top_n)
+```
+
+## KEGG terms
+
+```{r}
+head(kegg_tbl, cfg$enrichment$top_n)
+```

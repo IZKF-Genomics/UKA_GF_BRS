@@ -1,0 +1,5 @@
+sample_id,group,SentrixBarcode,SentrixPosition,sex_reported,age,batch,plate,tissue,processing_date
+S1,case,1234567890,R01C01,F,52,b1,p1,blood,2026-02-26
+S2,control,1234567890,R02C01,M,49,b1,p1,blood,2026-02-26
+S3,case,1234567891,R01C01,F,61,b2,p2,blood,2026-02-27
+S4,control,1234567891,R02C01,M,58,b2,p2,blood,2026-02-27

@@ -1,0 +1,52 @@
+---
+title: "02 QC"
+format: html
+---
+
+```{r}
+source("../lib/common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+samples <- load_samples("../config/samples.csv")
+rgset <- read_rds("../results/rds/rgset.rds")
+detp <- get_detp(rgset)
+qc_metrics <- tibble::tibble(
+  sample_id = colnames(detp),
+  mean_detp = colMeans(detp, na.rm = TRUE),
+  frac_failed = colMeans(detp > cfg$qc$detection_p_threshold, na.rm = TRUE)
+)
+write_table(qc_metrics, "../results/tables/qc_metrics.csv")
+save_rds(list(detp = detp, qc_metrics = qc_metrics), "../results/rds/qc.rds")
+```
+
+## Detection p-value summary
+
+```{r}
+qc_metrics
+```
+
+```{r}
+p <- ggplot(qc_metrics, aes(x = reorder(sample_id, frac_failed), y = frac_failed)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = cfg$qc$max_failed_probes_fraction, linetype = 2, color = "red") +
+  coord_flip() +
+  labs(x = "Sample", y = "Fraction failed probes")
+print(p)
+save_plot(p, "../results/figures/qc_failed_fraction.png", width = 9, height = 5)
+```
+
+## Intensity distributions
+
+```{r}
+if (requireNamespace("minfi", quietly = TRUE)) {
+  mdat <- minfi::getMeth(rgset)
+  udat <- minfi::getUnmeth(rgset)
+  int_df <- tibble::tibble(
+    sample_id = colnames(rgset),
+    median_meth = apply(mdat, 2, median, na.rm = TRUE),
+    median_unmeth = apply(udat, 2, median, na.rm = TRUE)
+  )
+  print(int_df)
+  write_table(int_df, "../results/tables/qc_intensity_medians.csv")
+}
+```
