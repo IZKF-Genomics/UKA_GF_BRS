@@ -27,7 +27,7 @@ load_samples <- function(path = "samples.csv") {
   readr::read_csv(path, show_col_types = FALSE)
 }
 
-ensure_array_support_packages <- function(array_type, auto_install = FALSE) {
+ensure_array_support_packages <- function(array_type) {
   pkg_map <- list(
     "450K" = c("IlluminaHumanMethylation450kmanifest", "IlluminaHumanMethylation450kanno.ilmn12.hg19"),
     "EPIC" = c("IlluminaHumanMethylationEPICmanifest", "IlluminaHumanMethylationEPICanno.ilm10b4.hg19"),
@@ -37,24 +37,11 @@ ensure_array_support_packages <- function(array_type, auto_install = FALSE) {
   needed <- unique(unlist(pkg_map, use.names = FALSE))
   missing <- needed[!vapply(needed, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
   if (length(missing) == 0) return(invisible(TRUE))
-  if (!isTRUE(auto_install)) {
-    log_error(
-      "Missing array support package(s): ",
-      paste(missing, collapse = ", "),
-      ". Install once via `pixi run install-array-support` ",
-      "or set BPM_AUTO_INSTALL_ARRAY_PKGS=1 to auto-install."
-    )
-  }
-  log_warn("Missing array support package(s): ", paste(missing, collapse = ", "), ". Installing via BiocManager.")
-  if (!requireNamespace("BiocManager", quietly = TRUE)) {
-    install.packages("BiocManager", repos = "https://cloud.r-project.org")
-  }
-  BiocManager::install(missing, ask = FALSE, update = FALSE)
-  still_missing <- missing[!vapply(missing, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
-  if (length(still_missing) > 0) {
-    log_error("Could not install required array support package(s): ", paste(still_missing, collapse = ", "))
-  }
-  invisible(TRUE)
+  log_error(
+    "Missing array support package(s): ",
+    paste(missing, collapse = ", "),
+    ". Install them via pixi dependencies (pixi.toml), then run `pixi install`."
+  )
 }
 
 save_rds <- function(object, path) {

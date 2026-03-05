@@ -27,10 +27,7 @@ execute:
 source("common.R")
 ensure_dirs(".")
 cfg <- load_config("project.toml")
-ensure_array_support_packages(
-  cfg$project$array_type,
-  auto_install = identical(Sys.getenv("BPM_AUTO_INSTALL_ARRAY_PKGS"), "1")
-)
+ensure_array_support_packages(cfg$project$array_type)
 samples <- load_samples("samples.csv")
 ```
 
