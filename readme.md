@@ -75,3 +75,13 @@ cd /path/to/output
 - dgea pixi environment now pins `r-lifecycle >= 1.0.5` to satisfy `dplyr` requirements.
 - export template now writes the final API response to `export_final_<job_id>.json`, storing only paths + summary fields in `project.yaml`.
 - hooks.agendo:fetch and hooks.genome_from_organism:set_from_organism print the resolved or missing organism/umi/genome to guide manual overrides.
+
+## Agent Readability
+
+To keep this BRS easy for `bpm agent` to interpret:
+
+- Each template/workflow `README.md` includes an `Agent Metadata` block (YAML).
+- Keep descriptor files (`template_config.yaml`, `workflow_config.yaml`) aligned with README text.
+- Prefer explicit parameter descriptions and concrete command examples.
+- Document required inputs and expected outputs in README files.
+

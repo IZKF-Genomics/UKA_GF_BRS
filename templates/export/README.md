@@ -1,5 +1,25 @@
 # export
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: export
+kind: template
+description: Generate and submit export job specs from a rule-based mapping table.
+descriptor: templates/export/template_config.yaml
+required_params: []
+optional_params:
+- export_engine_api_url
+- export_engine_backends
+- export_expiry_days
+cli_flags: {}
+run_entry: run.py
+publish_keys: []
+render_file_count: 1
+```
+<!-- AGENT_METADATA_END -->
+
 Build and submit an export engine job spec from a mapping table and project.yaml
 state.
 

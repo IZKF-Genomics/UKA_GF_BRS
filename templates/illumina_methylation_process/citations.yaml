@@ -1,0 +1,11 @@
+citations:
+  - id: minfi
+    text: "Aryee MJ, et al. Minfi: a flexible and comprehensive Bioconductor package for the analysis of Infinium DNA methylation microarrays. Bioinformatics (2014)."
+    doi: "10.1093/bioinformatics/btu049"
+    url: "https://bioconductor.org/packages/minfi"
+  - id: r-base
+    text: "R Core Team. R: A language and environment for statistical computing."
+    url: "https://www.r-project.org/"
+  - id: quarto
+    text: "Quarto publishing system."
+    url: "https://quarto.org/"

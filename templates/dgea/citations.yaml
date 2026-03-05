@@ -1,0 +1,8 @@
+citations:
+  - id: limma
+    text: "Ritchie ME, et al. limma powers differential expression analyses for RNA-sequencing and microarray studies. Nucleic Acids Research (2015)."
+    doi: "10.1093/nar/gkv007"
+    url: "https://bioconductor.org/packages/limma"
+  - id: r-base
+    text: "R Core Team. R: A language and environment for statistical computing."
+    url: "https://www.r-project.org/"

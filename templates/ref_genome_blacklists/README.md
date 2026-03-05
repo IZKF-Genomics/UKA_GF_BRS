@@ -1,5 +1,23 @@
 # ref_genome_blacklists
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: ref_genome_blacklists
+kind: template
+description: Download Boyle-Lab blacklist v2 BED files. Optimized for ad-hoc usage
+  (--out).
+descriptor: templates/ref_genome_blacklists/template_config.yaml
+required_params: []
+optional_params: []
+cli_flags: {}
+run_entry: run.sh
+publish_keys: []
+render_file_count: 2
+```
+<!-- AGENT_METADATA_END -->
+
 Download Boyle-Lab blacklist v2 BED files.
 
 Source:

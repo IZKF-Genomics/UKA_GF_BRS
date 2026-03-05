@@ -1,5 +1,24 @@
 # ref_genomes
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: ref_genomes
+kind: template
+description: 'Reference genomes manager: download FASTA/annotation, build indices
+  with local tools, and create ERCC-augmented indices. Optimized for ad-hoc usage
+  (--out).'
+descriptor: templates/ref_genomes/template_config.yaml
+required_params: []
+optional_params: []
+cli_flags: {}
+run_entry: run.sh
+publish_keys: []
+render_file_count: 7
+```
+<!-- AGENT_METADATA_END -->
+
 Download reference genomes, build indices, and create ERCC-augmented indices.
 
 ## Usage

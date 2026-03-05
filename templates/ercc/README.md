@@ -1,5 +1,28 @@
 # ercc
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: ercc
+kind: template
+description: ERCC spike-in QC report.
+descriptor: templates/ercc/template_config.yaml
+required_params: []
+optional_params:
+- authors
+- salmon_dir
+- samplesheet
+cli_flags:
+  salmon_dir: --salmon-dir
+  samplesheet: --samplesheet
+  authors: --authors
+run_entry: run.sh
+publish_keys: []
+render_file_count: 4
+```
+<!-- AGENT_METADATA_END -->
+
 ERCC spike-in QC report rendered from a Quarto template.
 
 ## Render

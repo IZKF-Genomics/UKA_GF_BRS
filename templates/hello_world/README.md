@@ -1,5 +1,29 @@
 # hello_world
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: hello_world
+kind: template
+description: A demo template that prints a greeting and project name.
+descriptor: templates/hello_world/template_config.yaml
+required_params:
+- name
+optional_params:
+- include_time
+- items
+cli_flags:
+  name: --name
+  include_time: --include-time
+  items: --items
+run_entry: run.sh
+publish_keys:
+- greeting
+render_file_count: 1
+```
+<!-- AGENT_METADATA_END -->
+
 A demo template that prints a greeting and project name.
 
 ## Render

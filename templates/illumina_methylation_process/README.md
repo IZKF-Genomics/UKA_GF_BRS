@@ -1,5 +1,35 @@
 # illumina_methylation_process
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: illumina_methylation_process
+kind: template
+description: Illumina methylation array preprocessing + clustering (Quarto + Pixi
+  + R/Bioconductor).
+descriptor: templates/illumina_methylation_process/template_config.yaml
+required_params: []
+optional_params:
+- array_type
+- authors
+- genome_build
+- group_col
+- idat_base_dir
+- study_name
+cli_flags:
+  study_name: --study-name
+  authors: --authors
+  idat_base_dir: --idat-base-dir
+  array_type: --array-type
+  genome_build: --genome-build
+  group_col: --group-col
+run_entry: run.sh
+publish_keys: []
+render_file_count: 8
+```
+<!-- AGENT_METADATA_END -->
+
 Preprocessing + clustering template for Illumina methylation arrays.
 
 Scope:

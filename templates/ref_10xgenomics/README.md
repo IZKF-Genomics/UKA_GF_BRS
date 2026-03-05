@@ -1,5 +1,23 @@
 # ref_10xgenomics
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: ref_10xgenomics
+kind: template
+description: Download and extract 10x Genomics reference indices. Optimized for ad-hoc
+  usage (--out).
+descriptor: templates/ref_10xgenomics/template_config.yaml
+required_params: []
+optional_params: []
+cli_flags: {}
+run_entry: run.sh
+publish_keys: []
+render_file_count: 2
+```
+<!-- AGENT_METADATA_END -->
+
 Download and extract 10x Genomics reference indices.
 
 ## Usage

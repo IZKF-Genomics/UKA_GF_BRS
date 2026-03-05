@@ -1,5 +1,36 @@
 # dgea
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: dgea
+kind: template
+description: Differential gene expression analysis (DGEA).
+descriptor: templates/dgea/template_config.yaml
+required_params: []
+optional_params:
+- application
+- authors
+- name
+- nfcore_samplesheet
+- organism
+- salmon_dir
+- spikein
+cli_flags:
+  salmon_dir: --salmon-dir
+  nfcore_samplesheet: --samplesheet
+  organism: --organism
+  spikein: --spikein
+  application: --application
+  name: --name
+  authors: --authors
+run_entry: run.sh
+publish_keys: []
+render_file_count: 15
+```
+<!-- AGENT_METADATA_END -->
+
 Differential gene expression analysis (DGEA).
 
 ## Inputs

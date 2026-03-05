@@ -1,5 +1,41 @@
 # demux_bclconvert
 
+
+<!-- AGENT_METADATA_START -->
+## Agent Metadata
+```yaml
+id: demux_bclconvert
+kind: template
+description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen,
+  and MultiQC.
+descriptor: templates/demux_bclconvert/template_config.yaml
+required_params:
+- bcl_dir
+optional_params:
+- agendo_id
+- gf_api_name
+- gf_api_pass
+- no_lane_splitting
+- run_fastq_screen
+- sampleproject_subdirs
+- thread_ratio
+- use_api_samplesheet
+cli_flags:
+  bcl_dir: --bcl
+  use_api_samplesheet: --api-samplesheet
+  gf_api_name: --api-user
+  gf_api_pass: --api-pass
+  agendo_id: --agendo-id
+  run_fastq_screen: --fastq-screen
+  thread_ratio: --thread-ratio
+run_entry: run.sh
+publish_keys:
+- FASTQ_dir
+- multiqc_report
+render_file_count: 3
+```
+<!-- AGENT_METADATA_END -->
+
 Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen, and a MultiQC summary.
 
 ## Usage
