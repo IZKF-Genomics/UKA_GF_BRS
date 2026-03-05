@@ -26,6 +26,7 @@ else
 fi
 
 pixi install 2>&1 | tee -a "$LOG_FILE"
+pixi run install-array-support 2>&1 | tee -a "$LOG_FILE"
 pixi run check 2>&1 | tee -a "$LOG_FILE"
 pixi run render 2>&1 | tee -a "$LOG_FILE"
 

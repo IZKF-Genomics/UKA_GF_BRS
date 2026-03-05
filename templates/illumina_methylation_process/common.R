@@ -27,6 +27,36 @@ load_samples <- function(path = "samples.csv") {
   readr::read_csv(path, show_col_types = FALSE)
 }
 
+ensure_array_support_packages <- function(array_type, auto_install = FALSE) {
+  pkg_map <- list(
+    "450K" = c("IlluminaHumanMethylation450kmanifest", "IlluminaHumanMethylation450kanno.ilmn12.hg19"),
+    "EPIC" = c("IlluminaHumanMethylationEPICmanifest", "IlluminaHumanMethylationEPICanno.ilm10b4.hg19"),
+    "EPIC_V2" = c("IlluminaHumanMethylationEPICv2manifest", "IlluminaHumanMethylationEPICv2anno.20a1.hg38")
+  )
+  # Mixed historical datasets can trigger any Illumina manifest at QC time.
+  needed <- unique(unlist(pkg_map, use.names = FALSE))
+  missing <- needed[!vapply(needed, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
+  if (length(missing) == 0) return(invisible(TRUE))
+  if (!isTRUE(auto_install)) {
+    log_error(
+      "Missing array support package(s): ",
+      paste(missing, collapse = ", "),
+      ". Install once via `pixi run install-array-support` ",
+      "or set BPM_AUTO_INSTALL_ARRAY_PKGS=1 to auto-install."
+    )
+  }
+  log_warn("Missing array support package(s): ", paste(missing, collapse = ", "), ". Installing via BiocManager.")
+  if (!requireNamespace("BiocManager", quietly = TRUE)) {
+    install.packages("BiocManager", repos = "https://cloud.r-project.org")
+  }
+  BiocManager::install(missing, ask = FALSE, update = FALSE)
+  still_missing <- missing[!vapply(missing, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
+  if (length(still_missing) > 0) {
+    log_error("Could not install required array support package(s): ", paste(still_missing, collapse = ", "))
+  }
+  invisible(TRUE)
+}
+
 save_rds <- function(object, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   saveRDS(object, path)

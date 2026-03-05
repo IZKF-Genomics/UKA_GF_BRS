@@ -8,6 +8,7 @@ version = "0.1.0"
 render = { cmd = ["quarto", "render", "illumina_methylation_process.qmd"] }
 clean = { cmd = ["bash", "-lc", "find results -depth -delete 2>/dev/null || true; find illumina_methylation_process_files -depth -delete 2>/dev/null || true; find illumina_methylation_process_cache -depth -delete 2>/dev/null || true; find illumina_methylation_process.html -depth -delete 2>/dev/null || true"] }
 check = { cmd = ["Rscript", "-e", "source('common.R'); cfg <- load_config('project.toml'); smp <- load_samples('samples.csv'); ensure_dirs('.'); validate_project(cfg, smp, fail_on_missing_idats = FALSE)"] }
+install-array-support = { cmd = ["Rscript", "-e", "source('common.R'); cfg <- load_config('project.toml'); ensure_array_support_packages(cfg$project$array_type, auto_install = TRUE)"] }
 
 [dependencies]
 quarto = ">=1.6,<2"

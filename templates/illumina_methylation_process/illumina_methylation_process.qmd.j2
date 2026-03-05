@@ -27,6 +27,10 @@ execute:
 source("common.R")
 ensure_dirs(".")
 cfg <- load_config("project.toml")
+ensure_array_support_packages(
+  cfg$project$array_type,
+  auto_install = identical(Sys.getenv("BPM_AUTO_INSTALL_ARRAY_PKGS"), "1")
+)
 samples <- load_samples("samples.csv")
 ```
 
@@ -149,16 +153,13 @@ qc_metrics <- tibble::tibble(
   mean_detp = colMeans(detp, na.rm = TRUE),
   frac_failed = colMeans(detp > cfg$qc$detection_p_threshold, na.rm = TRUE)
 )
+qc_plot_height <- max(5, min(20, 2 + 0.22 * nrow(qc_metrics)))
 write_table(qc_metrics, "results/tables/qc_metrics.csv")
 save_rds(list(detp = detp, qc_metrics = qc_metrics), "results/rds/qc.rds")
 pretty_table(qc_metrics, caption = "Detection p-value QC metrics")
 ```
 
-```{r qc_plot_failed_fraction}
-n_samples_qc <- nrow(qc_metrics)
-qc_plot_height <- max(5, min(20, 2 + 0.22 * n_samples_qc))
-knitr::opts_current$set(fig.height = qc_plot_height)
-
+```{r qc_plot_failed_fraction, fig.height=qc_plot_height}
 p <- ggplot(qc_metrics, aes(x = reorder(sample_id, frac_failed), y = frac_failed)) +
   geom_col(fill = publication_palette[1], alpha = 0.9) +
   geom_hline(yintercept = cfg$qc$max_failed_probes_fraction, linetype = 2, color = publication_palette[2], linewidth = 0.6) +
