@@ -2,7 +2,7 @@
 name = "{{ ctx.params.study_name }}"
 array_type = "{{ ctx.params.array_type }}"    # "450K" | "EPIC" | "EPIC_V2"
 genome_build = "{{ ctx.params.genome_build }}"
-outdir = "reports"
+outdir = "."
 
 [idat]
 base_dir = "{{ ctx.params.idat_base_dir }}"
@@ -11,8 +11,6 @@ recursive = true
 
 [groups]
 primary_group_col = "{{ ctx.params.group_col }}"
-case = "{{ ctx.params.case_label }}"
-control = "{{ ctx.params.control_label }}"
 
 [qc]
 max_failed_probes_fraction = 0.01
@@ -42,32 +40,4 @@ reference = "blood"
 
 [clustering]
 top_variable_cpg = 5000
-methods = ["pca", "umap", "hclust"]
-
-[dmp]
-enabled = true
-use_m_values = true
-adjust_method = "BH"
-alpha = 0.05
-delta_beta_min = 0.10
-covariates = ["age", "sex_reported"]
-
-[dmr]
-enabled = false
-method = "DMRcate"
-alpha = 0.05
-
-[enrichment]
-enabled = true
-method = "missMethyl_gometh"
-collections = ["GO", "KEGG"]
-ontologies = ["BP", "MF", "CC"]
-top_n = 30
-
-[drilldown]
-enabled = true
-cpg_ids = ["cg00000029"]
-loci = ["chr1:1000000-1010000"]
-genes = ["BRCA1"]
-max_cpgs_per_locus = 200
-heatmap_top_var = 100
+methods = ["pca", "umap", "tsne", "hclust"]

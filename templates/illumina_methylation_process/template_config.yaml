@@ -1,0 +1,55 @@
+id: illumina_methylation_process
+description: "Illumina methylation array preprocessing + clustering (Quarto + Pixi + R/Bioconductor)."
+
+params:
+  study_name:
+    type: str
+    cli: "--study-name"
+    required: false
+    default: "MyStudy"
+    description: "Project/report name written into project.toml"
+  authors:
+    type: str
+    cli: "--authors"
+    required: false
+    default: "unknown"
+    description: "Author name shown in reports"
+  idat_base_dir:
+    type: str
+    cli: "--idat-base-dir"
+    required: false
+    default: "data/idat"
+    description: "Directory containing IDAT files (flat or per-barcode subdirs)"
+  array_type:
+    type: str
+    cli: "--array-type"
+    required: false
+    default: "EPIC"
+    description: "Array type: 450K, EPIC, or EPIC_V2"
+  genome_build:
+    type: str
+    cli: "--genome-build"
+    required: false
+    default: "hg38"
+    description: "Genome build used for annotation and reporting"
+  group_col:
+    type: str
+    cli: "--group-col"
+    required: false
+    default: "group"
+    description: "Grouping column used for summary and clustering labels"
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+    - pixi.toml -> pixi.toml
+    - run.sh.j2 -> run.sh
+    - .gitignore -> .gitignore
+    - project.toml.j2 -> project.toml
+    - samples.csv -> samples.csv
+    - common.R -> common.R
+    - illumina_methylation_process.qmd.j2 -> illumina_methylation_process.qmd
+
+run:
+  entry: "run.sh"

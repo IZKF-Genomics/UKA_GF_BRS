@@ -1,0 +1,522 @@
+---
+title: "Illumina Methylation Process"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
+    theme: lumen
+execute:
+  echo: true
+  warning: false
+  message: false
+  freeze: auto
+  cache: false
+---
+
+```{r setup}
+source("common.R")
+ensure_dirs(".")
+cfg <- load_config("project.toml")
+samples <- load_samples("samples.csv")
+```
+
+## 1. Load IDAT
+
+This section validates sample metadata, resolves IDAT basenames, and imports raw methylation signals.
+Use these tables to confirm that all expected samples were found and grouped as intended before QC starts.
+
+```{r load_import_idat}
+val <- validate_project(cfg, samples, fail_on_missing_idats = FALSE)
+samples_resolved <- val$samples_resolved
+idat_status <- val$idat_status
+write_table(samples_resolved, "results/tables/samples_resolved.csv")
+write_table(idat_status, "results/tables/idat_status.csv")
+preflight <- idat_status %>%
+  dplyr::left_join(
+    samples_resolved %>% dplyr::select(sample_id, BasenameSource, EffectiveIdatBaseDir),
+    by = "sample_id"
+  ) %>%
+  dplyr::mutate(
+    idat_pair_ok = red_exists & grn_exists,
+    missing_component = dplyr::case_when(
+      !red_exists & !grn_exists ~ "both",
+      !red_exists ~ "red",
+      !grn_exists ~ "green",
+      TRUE ~ "none"
+    )
+  )
+write_table(preflight, "results/tables/idat_preflight.csv")
+preflight_summary <- preflight %>%
+  dplyr::count(BasenameSource, EffectiveIdatBaseDir, idat_pair_ok, name = "n_samples")
+write_table(preflight_summary, "results/tables/idat_preflight_summary.csv")
+if (any(!idat_status$red_exists | !idat_status$grn_exists)) {
+  bad <- dplyr::filter(idat_status, !red_exists | !grn_exists)
+  write_table(bad, "results/tables/missing_idats.csv")
+  log_error("Missing IDAT pair(s) detected; see results/tables/idat_preflight.csv and results/tables/missing_idats.csv")
+}
+if (!requireNamespace("minfi", quietly = TRUE)) log_error("Package 'minfi' is required")
+rgset <- minfi::read.metharray.exp(
+  targets = as.data.frame(samples_resolved),
+  recursive = isTRUE(cfg$idat$recursive),
+  extended = TRUE
+)
+# Normalize all sample labels to samples.csv sample_id across the full report.
+sample_name_map <- c(
+  setNames(as.character(samples_resolved$sample_id), as.character(samples_resolved$Basename)),
+  setNames(as.character(samples_resolved$sample_id), basename(as.character(samples_resolved$Basename))),
+  setNames(as.character(samples_resolved$sample_id), as.character(samples_resolved$sample_id))
+)
+map_sample_id <- function(x) {
+  x <- as.character(x)
+  y <- unname(sample_name_map[x])
+  ifelse(is.na(y) | y == "", x, y)
+}
+colnames(rgset) <- map_sample_id(colnames(rgset))
+save_rds(rgset, "results/rds/rgset.rds")
+log_info("Saved rgset to results/rds/rgset.rds")
+```
+
+```{r load_table_samples_per_group}
+pretty_table(dplyr::count(samples, .data[[cfg$groups$primary_group_col]], name = "n"), caption = "Samples per group")
+```
+
+```{r load_table_sentrix_distribution}
+if (all(c("SentrixBarcode", "SentrixPosition") %in% names(samples))) {
+  pretty_table(dplyr::count(samples, SentrixBarcode, SentrixPosition, name = "n"), caption = "Samples by Sentrix barcode and position")
+} else {
+  cat("SentrixBarcode/SentrixPosition columns are not present; using idat_basename-driven import.\n")
+}
+```
+
+```{r load_table_preflight_summary}
+pretty_table(preflight_summary, caption = "IDAT preflight summary")
+```
+
+```{r load_table_sample_idat_detail}
+group_col <- cfg$groups$primary_group_col
+sample_meta <- tibble::as_tibble(samples) %>%
+  dplyr::select(sample_id, dplyr::all_of(group_col))
+
+load_detail <- samples_resolved %>%
+  dplyr::left_join(sample_meta, by = "sample_id", suffix = c("", "_meta")) %>%
+  dplyr::left_join(
+    idat_status %>% dplyr::select(sample_id, red_exists, grn_exists),
+    by = "sample_id"
+  )
+if (!(paste0(group_col, "_meta") %in% names(load_detail))) {
+  load_detail[[paste0(group_col, "_meta")]] <- NA_character_
+}
+if (!(group_col %in% names(load_detail))) {
+  load_detail[[group_col]] <- NA_character_
+}
+load_detail <- load_detail %>%
+  dplyr::mutate(
+    idat_pair_ok = red_exists & grn_exists,
+    group = dplyr::coalesce(.data[[group_col]], .data[[paste0(group_col, "_meta")]])
+  ) %>%
+  dplyr::select(
+    sample_id,
+    group,
+    dplyr::any_of(c("SentrixBarcode", "SentrixPosition")),
+    red_exists,
+    grn_exists,
+    idat_pair_ok
+  )
+
+pretty_table(load_detail, caption = "Loaded samples with group and IDAT status")
+write_table(load_detail, "results/tables/load_detail.csv")
+```
+
+## 2. QC
+
+This section screens sample-level technical quality using detection p-values and intensity summaries.
+Samples with high failed-probe fraction (above the red threshold line) should be reviewed before downstream interpretation.
+
+```{r qc_compute_metrics}
+detp <- get_detp(rgset)
+qc_metrics <- tibble::tibble(
+  sample_id = colnames(detp),
+  mean_detp = colMeans(detp, na.rm = TRUE),
+  frac_failed = colMeans(detp > cfg$qc$detection_p_threshold, na.rm = TRUE)
+)
+write_table(qc_metrics, "results/tables/qc_metrics.csv")
+save_rds(list(detp = detp, qc_metrics = qc_metrics), "results/rds/qc.rds")
+pretty_table(qc_metrics, caption = "Detection p-value QC metrics")
+```
+
+```{r qc_plot_failed_fraction}
+n_samples_qc <- nrow(qc_metrics)
+qc_plot_height <- max(5, min(20, 2 + 0.22 * n_samples_qc))
+knitr::opts_current$set(fig.height = qc_plot_height)
+
+p <- ggplot(qc_metrics, aes(x = reorder(sample_id, frac_failed), y = frac_failed)) +
+  geom_col(fill = publication_palette[1], alpha = 0.9) +
+  geom_hline(yintercept = cfg$qc$max_failed_probes_fraction, linetype = 2, color = publication_palette[2], linewidth = 0.6) +
+  coord_flip() +
+  labs(
+    x = "Sample",
+    y = "Fraction failed probes",
+    title = "Detection p-value failure fraction per sample"
+  ) +
+  theme_publication()
+print(p)
+save_plot(p, "results/figures/qc_failed_fraction.png", width = 9, height = qc_plot_height)
+```
+
+```{r qc_table_intensity_summary}
+if (requireNamespace("minfi", quietly = TRUE)) {
+  int_df <- tryCatch({
+    red <- minfi::getRed(rgset)
+    grn <- minfi::getGreen(rgset)
+    tibble::tibble(
+      sample_id = colnames(rgset),
+      median_red = apply(red, 2, median, na.rm = TRUE),
+      median_green = apply(grn, 2, median, na.rm = TRUE)
+    )
+  }, error = function(e) {
+    mdat <- minfi::getMeth(rgset)
+    udat <- minfi::getUnmeth(rgset)
+    tibble::tibble(
+      sample_id = colnames(rgset),
+      median_meth = apply(mdat, 2, median, na.rm = TRUE),
+      median_unmeth = apply(udat, 2, median, na.rm = TRUE)
+    )
+  })
+  pretty_table(int_df, caption = "Median intensity summary")
+  write_table(int_df, "results/tables/qc_intensity_medians.csv")
+}
+```
+
+## 3. Normalize
+
+This section applies the configured normalization method and checks whether beta-value distributions are comparable across samples.
+After successful normalization, density curves should have broadly similar shapes without obvious technical separation.
+
+```{r normalize_apply_method}
+method <- cfg$normalization$method
+normset <- switch(
+  method,
+  noob = minfi::preprocessNoob(rgset),
+  quantile = minfi::preprocessQuantile(rgset),
+  swan = {
+    mset_raw <- minfi::preprocessRaw(rgset)
+    minfi::preprocessSwan(rgset, mset = mset_raw)
+  },
+  funnorm = minfi::preprocessFunnorm(rgset),
+  log_error("Unsupported normalization method: ", method)
+)
+save_rds(normset, "results/rds/normset.rds")
+summary_tbl <- tibble::tibble(metric = c("method", "n_samples", "n_probes"), value = c(method, ncol(normset), nrow(normset)))
+write_table(summary_tbl, "results/tables/normalization_summary.csv")
+pretty_table(summary_tbl, caption = "Normalization summary")
+```
+
+```{r normalize_plot_beta_density}
+beta <- get_beta_matrix(normset)
+dens_df <- as.data.frame(beta)
+dens_long <- tidyr::pivot_longer(tibble::rownames_to_column(dens_df, "probe"), -probe, names_to = "sample_id", values_to = "beta")
+dens_long <- dplyr::left_join(
+  dens_long,
+  tibble::as_tibble(samples) %>% dplyr::select(sample_id, dplyr::all_of(cfg$groups$primary_group_col)),
+  by = "sample_id"
+)
+p <- ggplot(dens_long, aes(beta, group = sample_id, color = .data[[cfg$groups$primary_group_col]])) +
+  geom_density(alpha = 0.35, linewidth = 0.5) +
+  labs(
+    title = paste("Beta density:", method),
+    x = "Beta value",
+    y = "Density",
+    color = "group"
+  ) +
+  scale_color_publication() +
+  theme_publication()
+print(p)
+save_plot(p, "results/figures/normalize_beta_density.png", width = 9, height = 5)
+```
+
+## 4. Filter
+
+This section removes low-confidence or unwanted probes according to the project filter settings.
+Interpret the summary as a probe-retention audit: high probe retention with expected removals indicates stable preprocessing.
+
+```{r filter_apply_and_summarize}
+qc <- read_rds("results/rds/qc.rds")
+detp <- qc$detp
+probe_ids <- NULL
+if (methods::hasMethod("featureNames", class(normset))) {
+  probe_ids <- Biobase::featureNames(normset)
+}
+if (is.null(probe_ids) || length(probe_ids) == 0) probe_ids <- rownames(normset)
+if (is.null(probe_ids) || length(probe_ids) == 0) probe_ids <- rownames(detp)
+keep <- rep(TRUE, length(probe_ids))
+names(keep) <- probe_ids
+removed <- list()
+if (isTRUE(cfg$filter$remove_detection_fail)) {
+  fail_any <- rowMeans(detp > cfg$qc$detection_p_threshold, na.rm = TRUE) > 0
+  removed$detection_fail <- sum(fail_any)
+  keep[names(fail_any)] <- keep[names(fail_any)] & !fail_any
+} else {
+  removed$detection_fail <- 0
+}
+ann <- get_annotation_df(normset)
+if (isTRUE(cfg$filter$remove_sex_chr) || isTRUE(cfg$filter$keep_autosomal_only)) {
+  chr_col <- intersect(c("chr", "CHR"), names(ann))[1]
+  if (!is.na(chr_col) && !is.null(chr_col)) {
+    sex_names <- ann %>% dplyr::filter(.data[[chr_col]] %in% c("chrX", "chrY", "X", "Y")) %>% dplyr::pull(.data$Name)
+    sex_hit <- intersect(names(keep), sex_names)
+    keep[sex_hit] <- FALSE
+    removed$sex_chr <- length(sex_hit)
+  } else {
+    log_warn("Sex chromosome filtering requested but annotation chromosome column was not found")
+    removed$sex_chr <- 0
+  }
+} else {
+  removed$sex_chr <- 0
+}
+removed$snps <- 0
+removed$cross_reactive <- 0
+filteredset <- normset[keep, ]
+save_rds(filteredset, "results/rds/filteredset.rds")
+probes_in <- length(probe_ids)
+probes_kept <- sum(keep, na.rm = TRUE)
+filter_summary <- tibble::tibble(metric = c("probes_in", "probes_kept", "probes_removed_total"), value = c(probes_in, probes_kept, probes_in - probes_kept))
+removed_tbl <- tibble::enframe(removed, name = "reason", value = "n_removed")
+write_table(filter_summary, "results/tables/filter_summary.csv")
+write_table(removed_tbl, "results/tables/probes_removed.csv")
+pretty_table(filter_summary, caption = "Filter summary")
+pretty_table(removed_tbl, caption = "Removed probes by reason")
+```
+
+## 5. Batch / Cell
+
+This section provides an exploratory PCA view to detect potential structure from biology or technical effects.
+When coloring by `group`, look for coherent within-group clustering and possible outliers.
+
+```{r batch_prepare_pca}
+obj <- read_rds("results/rds/filteredset.rds")
+pdata <- get_pdata(obj)
+beta <- get_beta_matrix(obj)
+if (!("sample_id" %in% names(pdata))) {
+  pdata$sample_id <- map_sample_id(colnames(beta))
+} else {
+  pdata$sample_id <- map_sample_id(pdata$sample_id)
+}
+pc <- prcomp(t(beta), center = TRUE, scale. = FALSE)
+pc_df <- tibble::as_tibble(pc$x[, 1:2], rownames = "sample_col")
+pc_df$sample_col <- colnames(beta)
+if ("sample_id" %in% names(pdata)) {
+  pc_df <- dplyr::left_join(pc_df, tibble::as_tibble(pdata), by = c("sample_col" = "sample_id"))
+}
+adjustedset <- obj
+save_rds(adjustedset, "results/rds/adjustedset.rds")
+write_table(tibble::tibble(note = c("No adjustment applied in scaffold by default")), "results/tables/batch_summary.csv")
+if (isTRUE(cfg$cell_counts$enabled)) {
+  write_table(tibble::tibble(note = "Cell count estimation enabled in config but not implemented in scaffold"), "results/tables/cell_counts.csv")
+}
+```
+
+```{r batch_plot_pca_group}
+col_group <- if (cfg$groups$primary_group_col %in% names(pc_df)) cfg$groups$primary_group_col else NULL
+pdata_meta <- tibble::as_tibble(samples) %>% dplyr::select(sample_id, dplyr::all_of(cfg$groups$primary_group_col))
+pc_df_plot <- dplyr::left_join(pc_df, pdata_meta, by = c("sample_col" = "sample_id"))
+gcol <- cfg$groups$primary_group_col
+if (!(gcol %in% names(pc_df_plot))) {
+  gx <- paste0(gcol, ".x")
+  gy <- paste0(gcol, ".y")
+  if (gx %in% names(pc_df_plot) && gy %in% names(pc_df_plot)) {
+    pc_df_plot[[gcol]] <- dplyr::coalesce(pc_df_plot[[gx]], pc_df_plot[[gy]])
+  } else if (gx %in% names(pc_df_plot)) {
+    pc_df_plot[[gcol]] <- pc_df_plot[[gx]]
+  } else if (gy %in% names(pc_df_plot)) {
+    pc_df_plot[[gcol]] <- pc_df_plot[[gy]]
+  }
+}
+if (!is.null(col_group) && (col_group %in% names(pc_df_plot))) {
+  p <- ggplot(pc_df_plot, aes(PC1, PC2, color = .data[[col_group]])) +
+    geom_point(size = 3.2, alpha = 0.9) +
+    labs(title = "PCA colored by primary group", color = "group", x = "PC1", y = "PC2") +
+    scale_color_publication() +
+    theme_publication()
+} else {
+  p <- ggplot(pc_df_plot, aes(PC1, PC2)) +
+    geom_point(size = 3.2, alpha = 0.9, color = publication_palette[1]) +
+    labs(title = "PCA colored by primary group", x = "PC1", y = "PC2") +
+    theme_publication()
+}
+print(p)
+save_plot(p, "results/figures/batch_pca_group.png", width = 8, height = 5)
+```
+
+## 6. Clustering
+
+This section performs unsupervised sample similarity analysis using top variable CpGs.
+Consistent PCA/UMAP neighborhood patterns support robust subtype structure; isolated points can indicate outliers or rare biology.
+
+```{r cluster_compute_embeddings}
+obj <- load_analysis_inputs()
+beta <- get_beta_matrix(obj)
+top_n <- as.integer(cfg$clustering$top_variable_cpg)
+beta_top <- safe_top_var_rows(beta, n = top_n)
+pca <- prcomp(t(beta_top), center = TRUE, scale. = FALSE)
+pca_df <- tibble::as_tibble(pca$x[, 1:3], rownames = "sample_id")
+pca_df <- dplyr::left_join(
+  pca_df,
+  tibble::as_tibble(samples) %>% dplyr::select(sample_id, dplyr::all_of(cfg$groups$primary_group_col)),
+  by = "sample_id"
+)
+if (!(cfg$groups$primary_group_col %in% names(pca_df))) {
+  gx <- paste0(cfg$groups$primary_group_col, ".x")
+  gy <- paste0(cfg$groups$primary_group_col, ".y")
+  if (gx %in% names(pca_df) && gy %in% names(pca_df)) {
+    pca_df[[cfg$groups$primary_group_col]] <- dplyr::coalesce(pca_df[[gx]], pca_df[[gy]])
+  } else if (gx %in% names(pca_df)) {
+    pca_df[[cfg$groups$primary_group_col]] <- pca_df[[gx]]
+  } else if (gy %in% names(pca_df)) {
+    pca_df[[cfg$groups$primary_group_col]] <- pca_df[[gy]]
+  }
+}
+if (requireNamespace("umap", quietly = TRUE) && ("umap" %in% unlist(cfg$clustering$methods))) {
+  n_samples <- ncol(beta_top)
+  if (n_samples >= 3) {
+    umap_cfg <- umap::umap.defaults
+    umap_cfg$n_neighbors <- min(umap_cfg$n_neighbors, n_samples - 1)
+    um <- umap::umap(t(beta_top), config = umap_cfg)
+    umap_df <- tibble::tibble(sample_id = colnames(beta_top), UMAP1 = um$layout[,1], UMAP2 = um$layout[,2])
+  } else {
+    umap_df <- tibble::tibble()
+  }
+} else {
+  umap_df <- tibble::tibble()
+}
+if (nrow(umap_df) > 0) {
+  umap_df <- dplyr::left_join(
+    umap_df,
+    tibble::as_tibble(samples) %>% dplyr::select(sample_id, dplyr::all_of(cfg$groups$primary_group_col)),
+    by = "sample_id"
+  )
+}
+if (requireNamespace("Rtsne", quietly = TRUE) && ("tsne" %in% unlist(cfg$clustering$methods))) {
+  n_samples <- ncol(beta_top)
+  if (n_samples >= 4) {
+    perp <- min(30, floor((n_samples - 1) / 3))
+    perp <- max(2, perp)
+    ts <- Rtsne::Rtsne(t(beta_top), dims = 2, perplexity = perp, pca = TRUE, check_duplicates = FALSE)
+    tsne_df <- tibble::tibble(sample_id = colnames(beta_top), TSNE1 = ts$Y[, 1], TSNE2 = ts$Y[, 2])
+  } else {
+    tsne_df <- tibble::tibble()
+  }
+} else {
+  tsne_df <- tibble::tibble()
+}
+if (nrow(tsne_df) > 0) {
+  tsne_df <- dplyr::left_join(
+    tsne_df,
+    tibble::as_tibble(samples) %>% dplyr::select(sample_id, dplyr::all_of(cfg$groups$primary_group_col)),
+    by = "sample_id"
+  )
+}
+d <- stats::dist(t(beta_top))
+hc <- hclust(d)
+clusters <- tibble::tibble(sample_id = hc$labels, hclust_order = match(hc$labels, hc$labels[hc$order]))
+write_table(clusters, "results/tables/sample_clusters.csv")
+save_rds(list(pca = pca, hc = hc, dist = d), "results/rds/clustering.rds")
+```
+
+```{r cluster_plot_pca}
+p <- ggplot(
+  pca_df,
+  aes(
+    PC1, PC2,
+    label = sample_id,
+    color = .data[[cfg$groups$primary_group_col]]
+  )
+) +
+  geom_point(size = 3.2, alpha = 0.9) +
+  ggrepel::geom_text_repel(max.overlaps = 30, size = 3.3, box.padding = 0.35, point.padding = 0.2) +
+  scale_color_publication() +
+  theme_publication() +
+  labs(
+    title = "PCA of top variable CpGs",
+    x = "PC1",
+    y = "PC2",
+    color = "group"
+  )
+print(p)
+save_plot(p, "results/figures/cluster_pca.png", width = 8, height = 5)
+```
+
+```{r cluster_plot_umap}
+if (nrow(umap_df) > 0) {
+  p_umap <- ggplot(
+    umap_df,
+    aes(
+      UMAP1, UMAP2,
+      label = sample_id,
+      color = .data[[cfg$groups$primary_group_col]]
+    )
+  ) +
+    geom_point(size = 3.2, alpha = 0.9) +
+    ggrepel::geom_text_repel(max.overlaps = 30, size = 3.3, box.padding = 0.35, point.padding = 0.2) +
+    labs(title = "UMAP of top variable CpGs", color = "group") +
+    scale_color_publication() +
+    theme_publication()
+  print(p_umap)
+  save_plot(p_umap, "results/figures/cluster_umap.png", width = 8, height = 5)
+} else {
+  cat("UMAP not available or not enabled.\n")
+}
+```
+
+```{r cluster_plot_tsne}
+if (nrow(tsne_df) > 0) {
+  p_tsne <- ggplot(
+    tsne_df,
+    aes(
+      TSNE1, TSNE2,
+      label = sample_id,
+      color = .data[[cfg$groups$primary_group_col]]
+    )
+  ) +
+    geom_point(size = 3.2, alpha = 0.9) +
+    ggrepel::geom_text_repel(max.overlaps = 30, size = 3.3, box.padding = 0.35, point.padding = 0.2) +
+    labs(title = "t-SNE of top variable CpGs", color = "group") +
+    scale_color_publication() +
+    theme_publication()
+  print(p_tsne)
+  save_plot(p_tsne, "results/figures/cluster_tsne.png", width = 8, height = 5)
+} else {
+  cat("t-SNE not available or not enabled.\n")
+}
+```
+
+## Summary
+
+This final section reports key run-level metrics for reproducibility and quick quality check.
+Use it as a compact snapshot of what was processed, how it was normalized, and how many probes were retained.
+
+```{r summary_process_run}
+read_if <- function(path) if (file.exists(path)) readr::read_csv(path, show_col_types = FALSE) else NULL
+samples_res <- read_if("results/tables/samples_resolved.csv")
+filt <- read_if("results/tables/filter_summary.csv")
+summary_tbl <- tibble::tibble(
+  metric = c("project_name", "array_type", "samples_loaded", "normalization_method", "probes_kept"),
+  value = c(
+    cfg$project$name,
+    cfg$project$array_type,
+    if (is.null(samples_res)) NA else nrow(samples_res),
+    cfg$normalization$method,
+    if (is.null(filt)) NA else filt$value[filt$metric == "probes_kept"][1]
+  )
+)
+pretty_table(summary_tbl, caption = "Process run summary")
+```
