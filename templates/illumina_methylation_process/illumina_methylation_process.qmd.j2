@@ -409,10 +409,17 @@ if (nrow(umap_df) > 0) {
 if (requireNamespace("Rtsne", quietly = TRUE) && ("tsne" %in% unlist(cfg$clustering$methods))) {
   n_samples <- ncol(beta_top)
   if (n_samples >= 4) {
-    perp <- min(30, floor((n_samples - 1) / 3))
-    perp <- max(2, perp)
-    ts <- Rtsne::Rtsne(t(beta_top), dims = 2, perplexity = perp, pca = TRUE, check_duplicates = FALSE)
-    tsne_df <- tibble::tibble(sample_id = colnames(beta_top), TSNE1 = ts$Y[, 1], TSNE2 = ts$Y[, 2])
+    # Rtsne requires: 3 * perplexity < n_samples - 1
+    max_perp <- ((n_samples - 1) / 3) - 1e-6
+    perp <- min(30, max_perp)
+    perp <- max(1, perp)
+    tsne_df <- tryCatch({
+      ts <- Rtsne::Rtsne(t(beta_top), dims = 2, perplexity = perp, pca = TRUE, check_duplicates = FALSE)
+      tibble::tibble(sample_id = colnames(beta_top), TSNE1 = ts$Y[, 1], TSNE2 = ts$Y[, 2])
+    }, error = function(e) {
+      message(sprintf("t-SNE skipped: %s", conditionMessage(e)))
+      tibble::tibble()
+    })
   } else {
     tsne_df <- tibble::tibble()
   }
