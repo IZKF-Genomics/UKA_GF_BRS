@@ -9,6 +9,12 @@ kind: template
 description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen,
   and MultiQC.
 descriptor: templates/demux_bclconvert/template_config.yaml
+source_of_truth:
+- templates/demux_bclconvert/run.sh.j2
+- templates/demux_bclconvert/template_config.yaml
+methods_file: templates/demux_bclconvert/METHODS.md
+citations_file: templates/demux_bclconvert/citations.yaml
+bibliography_file: templates/demux_bclconvert/references.bib
 required_params:
 - bcl_dir
 optional_params:
@@ -32,11 +38,19 @@ run_entry: run.sh
 publish_keys:
 - FASTQ_dir
 - multiqc_report
-render_file_count: 3
+software_version_capture:
+  run_info: results/run_info.yaml
+  commands:
+  - bcl-convert --version
+  - fastqc --version
+  - fastq_screen --version
+  - multiqc --version
+  - parallel --version
+render_file_count: 4
 ```
 <!-- AGENT_METADATA_END -->
 
-Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen, and a MultiQC summary.
+Demultiplex Illumina BCLs using `bcl-convert`, then summarize FASTQ quality with FastQC and MultiQC. Optional cross-species contamination screening can be enabled with `fastq_screen`.
 
 ## Usage
 Render, then run in the desired working directory (where you want outputs):
@@ -51,14 +65,14 @@ bpm template run demux_bclconvert
 ```
 
 ## Parameters
-- `bcl_dir` (required, str, exists: dir): Path to the BCL run folder.
-- `run_fastq_screen` (bool, default `false`): Run fastq_screen on FASTQs.
-- `thread_ratio` (float, default `0.8`): Fraction of idle CPUs to allocate per bcl-convert pool (0-1).
-- `no_lane_splitting` (bool, default `true`): Pass `--no-lane-splitting` to bcl-convert.
-- `sampleproject_subdirs` (bool, default `false`): Create per-sample project subdirectories.
-- `use_api_samplesheet` (bool, default `true`): Fetch samplesheet.csv from API in post-render.
-- `gf_api_name` / `gf_api_pass` (optional): Credentials for API (env vars also supported).
-- `agendo_id` (optional): Agendo request ID for samplesheet retrieval when flowcell is unavailable.
+- `bcl_dir` (required, str, exists: dir): Path to the Illumina BCL run directory.
+- `run_fastq_screen` (bool, default `false`): Enable optional contamination screening.
+- `thread_ratio` (float, default `0.8`): Fraction of idle CPUs allocated to demultiplexing/QC.
+- `no_lane_splitting` (bool, default `true`): Produce one FASTQ per read/sample (not per lane).
+- `sampleproject_subdirs` (bool, default `false`): Keep FASTQs in sample project subdirectories.
+- `use_api_samplesheet` (bool, default `true`): Retrieve `samplesheet.csv` via post-render API hook.
+- `gf_api_name` / `gf_api_pass` (optional): API credentials (env vars also supported).
+- `agendo_id` (optional): API fallback identifier when flowcell lookup fails.
 
 ## Outputs
 - Render target (project mode): `${ctx.project_dir}/${ctx.template.id}/`.
@@ -68,13 +82,30 @@ bpm template run demux_bclconvert
 - Other outputs:
   - `samplesheet.csv` (rendered; overwritten by API hook when enabled).
   - `run.sh` in the run directory.
+  - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
   - `multiqc/multiqc_report.html`.
 
 ## Published Keys
 - `FASTQ_dir`: Host-aware path to the chosen FASTQ directory.
 - `multiqc_report`: Host-aware path to the MultiQC HTML report.
 
+## Methods and Citations
+- Publication-grade methods text: `METHODS.md`.
+- Machine-readable references for BPM agent: `citations.yaml`.
+- Manuscript bibliography source (for Quarto/Pandoc): `references.bib`.
+
+## Version Provenance
+This template captures versions from tools executed in `run.sh` and writes them to `results/run_info.yaml`. The primary commands are:
+- `bcl-convert --version`
+- `fastqc --version`
+- `fastq_screen --version`
+- `multiqc --version`
+- `parallel --version`
+
 ## Notes
+- Primary scientific provenance is defined by:
+  - runtime workflow in `run.sh.j2`
+  - configured values in `template_config.yaml` and rendered parameters
 - Post-render hook fetches samplesheet when `use_api_samplesheet=true`.
 - API URL (flowcell): `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.
 - API URL (Agendo request): `https://genomics.rwth-aachen.de/api/get/samplesheet/request/{id}`.

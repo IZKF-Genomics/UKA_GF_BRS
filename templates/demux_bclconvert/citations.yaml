@@ -1,0 +1,19 @@
+citations:
+  - id: bcl-convert
+    text: "Illumina. bcl-convert Software Guide (v4.0)."
+    url: "https://support-docs.illumina.com/SW/BCL_Convert/Content/SW/BCLConvert/BCLConvert.htm"
+  - id: fastqc
+    text: "Andrews S. FastQC: A Quality Control Tool for High Throughput Sequence Data (2010)."
+    url: "https://www.bioinformatics.babraham.ac.uk/projects/fastqc/"
+  - id: fastq-screen
+    text: "Wingett SW, Andrews S. FastQ Screen: A tool for multi-genome mapping and quality control. F1000Research (2018)."
+    doi: "10.12688/f1000research.15931.2"
+    url: "https://f1000research.com/articles/7-1338"
+  - id: multiqc
+    text: "Ewels P, Magnusson M, Lundin S, Kaller M. MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics (2016)."
+    doi: "10.1093/bioinformatics/btw354"
+    url: "https://academic.oup.com/bioinformatics/article/32/19/3047/2196507"
+  - id: gnu-parallel
+    text: "Tange O. GNU Parallel: The Command-Line Power Tool. ;login: The USENIX Magazine (2011)."
+    url: "https://www.gnu.org/software/parallel/"
+

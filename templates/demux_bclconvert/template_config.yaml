@@ -46,8 +46,8 @@ params:
 
 
 tools:
-  required: [bcl-convert]
-  optional: [fastqc, fastq_screen, multiqc, parallel]
+  required: [bcl-convert, fastqc, multiqc, parallel]
+  optional: [fastq_screen]
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
@@ -56,6 +56,7 @@ render:
     - samplesheet.csv -> samplesheet.csv
     - run.sh.j2 -> run.sh
     - get_threads.sh.j2 -> get_threads.sh
+    - references.bib -> references.bib
 
 run:
   entry: "run.sh"
