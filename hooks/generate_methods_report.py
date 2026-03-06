@@ -6,18 +6,13 @@ from typing import Any
 
 def main(ctx: Any) -> str:
     """
-    Post-render hook for template `export`.
+    Post-render hook for template `methods_report`.
 
     Generates a publication-oriented methods draft from project history and writes
-    it into the export template directory. This keeps methods generation automatic
-    when users render the export template.
+    it into the methods_report template directory.
     """
     if not getattr(ctx, "project", None):
-        return "[hook:export_generate_methods] skipped (no project context)"
-
-    enabled = bool(ctx.params.get("generate_methods_on_render", True))
-    if not enabled:
-        return "[hook:export_generate_methods] skipped (generate_methods_on_render=false)"
+        return "[hook:generate_methods_report] skipped (no project context)"
 
     style = str(ctx.params.get("methods_style") or "full").strip().lower()
     if style not in ("full", "concise"):
@@ -36,11 +31,10 @@ def main(ctx: Any) -> str:
         result = agent_methods.generate_methods_markdown(Path(ctx.project_dir), style=style)
         out_path.write_text(result.markdown, encoding="utf-8")
         return (
-            "[hook:export_generate_methods] wrote "
+            "[hook:generate_methods_report] wrote "
             f"{out_path} (templates={result.templates_count}, citations={result.citation_count}, style={style})"
         )
     except Exception as e:
-        # Non-fatal: export rendering should still succeed even if methods generation fails.
         note = (
             "# Methods Draft\n\n"
             f"Automatic generation failed: {e}\n"
@@ -48,5 +42,8 @@ def main(ctx: Any) -> str:
             f"`bpm agent methods --dir {ctx.project_dir} --style {style} --out {out_path}`\n"
         )
         out_path.write_text(note, encoding="utf-8")
-        return f"[hook:export_generate_methods] warning: generation failed ({e}); wrote fallback note to {out_path}"
+        return (
+            "[hook:generate_methods_report] warning: generation failed "
+            f"({e}); wrote fallback note to {out_path}"
+        )
 

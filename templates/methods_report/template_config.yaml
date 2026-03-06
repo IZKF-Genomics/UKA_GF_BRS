@@ -1,0 +1,28 @@
+id: methods_report
+description: "Generate a publication-oriented methods draft from project.yaml template history."
+
+params:
+  methods_style:
+    type: str
+    required: false
+    default: "full"
+    cli: "--methods-style"
+    description: "Methods output style: full or concise"
+  methods_output:
+    type: str
+    required: false
+    default: "auto_methods.md"
+    cli: "--methods-output"
+    description: "Methods draft filename inside methods_report directory"
+
+tools:
+  required: [python]
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+
+hooks:
+  post_render:
+    - hooks.generate_methods_report:main
