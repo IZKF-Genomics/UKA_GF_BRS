@@ -47,6 +47,9 @@ Metadata context files are generated during export render:
 - `export/metadata_raw.json`
 - `export/metadata_normalized.yaml`
 - `export/metadata_context.yaml`
+Methods composition files are also generated and injected into `export_job_spec.json`:
+- `export/project_methods.md`
+- `export/methods_context.yaml`
 
 ## Methods Draft (independent from export)
 Generate publication-oriented methods text from project history:

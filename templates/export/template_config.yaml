@@ -56,6 +56,18 @@ params:
     cli: "--metadata-api-timeout"
     default: 20
     description: "Metadata API timeout in seconds"
+  include_methods_in_spec:
+    type: bool
+    required: false
+    cli: "--include-methods-in-spec"
+    default: true
+    description: "Whether to compose project-level methods text and inject into export_job_spec.json"
+  methods_style:
+    type: str
+    required: false
+    cli: "--methods-style"
+    default: "full"
+    description: "Methods style used for injected methods block: full|concise"
 
 tools:
   required: [python]
@@ -72,3 +84,4 @@ hooks:
   post_render:
     - hooks.export_build_spec:main
     - hooks.export_fetch_metadata:main
+    - hooks.export_compose_methods:main
