@@ -27,7 +27,7 @@ nextflow run nf-core/rnaseq \
 {% if ctx.params.umi == "UMI Second Strand SynthesisModule for QuantSeq FWD" %}
   --with_umi \
   --umitools_extract_method "regex" \
-  --umitools_bc_pattern2 "^(?P<umi_1>.{8})(?P<discard_1>.{6}).*" \
+  --umitools_bc_pattern "^(?P<umi_1>.{8})(?P<discard_1>.{6}).*" \
 {% endif %}
   --extra_salmon_quant_args="--noLengthCorrection" \
   --extra_star_align_args="--alignIntronMax 1000000 --alignIntronMin 20 --alignMatesGapMax 1000000 --alignSJoverhangMin 8 --outFilterMismatchNmax 999 --outFilterMultimapNmax 20 --outFilterType BySJout --outFilterMismatchNoverLmax 0.1 --clip3pAdapterSeq AAAAAAAA" \
