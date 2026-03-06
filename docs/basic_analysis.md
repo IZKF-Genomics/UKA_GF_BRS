@@ -40,6 +40,10 @@ bpm template render export
 bpm template run export
 ```
 
+`export` auto-discovers `agendo_id`/`flowcell_id` from `project.yaml` when available
+(typically from previous template params). Use `--agendo-id` / `--flowcell-id` only
+to override.
+
 ## Methods Draft (independent from export)
 Generate publication-oriented methods text from project history:
 ```

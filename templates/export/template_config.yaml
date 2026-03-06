@@ -17,6 +17,16 @@ params:
     required: false
     default: 30
     description: "Optional expiry_days for export engine job spec"
+  agendo_id:
+    type: str
+    required: false
+    cli: "--agendo-id"
+    description: "Optional override Agendo ID for metadata lookup (auto-discovered from project.yaml if omitted)"
+  flowcell_id:
+    type: str
+    required: false
+    cli: "--flowcell-id"
+    description: "Optional override flowcell ID for metadata lookup (auto-discovered from project.yaml if omitted)"
 
 tools:
   required: [python]

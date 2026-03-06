@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from bpm.core import brs_loader
-from bpm.io.yamlio import safe_load_yaml
+from bpm.io.yamlio import safe_dump_yaml, safe_load_yaml
 
 
 def _load_project_data(project_dir: Path) -> Dict[str, Any]:
@@ -66,6 +66,84 @@ def _load_export_job_id(project_dir: Path, project_data: Dict[str, Any] | None =
             if isinstance(job_id, str):
                 return job_id
     return ""
+
+
+def _normalize_id_value(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return v.strip()
+    return ""
+
+
+def _resolve_metadata_identifiers(ctx_params: Dict[str, Any], project_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Resolve Agendo/flowcell identifiers with precedence:
+      1) export template CLI params (ctx.params)
+      2) latest template params in project.yaml
+      3) top-level project.yaml keys
+    """
+    out: Dict[str, Any] = {
+        "agendo_id": "",
+        "flowcell_id": "",
+        "sources": {},
+    }
+
+    # 1) Explicit export params
+    ag_cli = _normalize_id_value(ctx_params.get("agendo_id"))
+    fc_cli = _normalize_id_value(ctx_params.get("flowcell_id"))
+    if ag_cli:
+        out["agendo_id"] = ag_cli
+        out["sources"]["agendo_id"] = "cli_param"
+    if fc_cli:
+        out["flowcell_id"] = fc_cli
+        out["sources"]["flowcell_id"] = "cli_param"
+
+    # 2) Most recent template params in project.yaml
+    templates = project_data.get("templates") or []
+    if isinstance(templates, list):
+        for entry in reversed(templates):
+            if not isinstance(entry, dict):
+                continue
+            params = entry.get("params") or {}
+            if not isinstance(params, dict):
+                continue
+            tid = str(entry.get("id") or entry.get("source_template") or "unknown")
+
+            if not out["agendo_id"]:
+                ag = _normalize_id_value(params.get("agendo_id"))
+                if ag:
+                    out["agendo_id"] = ag
+                    out["sources"]["agendo_id"] = f"template_params:{tid}"
+
+            if not out["flowcell_id"]:
+                for k in ("flowcell_id", "flow_cell", "flowcell"):
+                    fc = _normalize_id_value(params.get(k))
+                    if fc:
+                        out["flowcell_id"] = fc
+                        out["sources"]["flowcell_id"] = f"template_params:{tid}.{k}"
+                        break
+
+            if out["agendo_id"] and out["flowcell_id"]:
+                break
+
+    # 3) Top-level project keys as fallback
+    if not out["agendo_id"]:
+        ag = _normalize_id_value(project_data.get("agendo_id"))
+        if ag:
+            out["agendo_id"] = ag
+            out["sources"]["agendo_id"] = "project_root:agendo_id"
+    if not out["flowcell_id"]:
+        for k in ("flowcell_id", "flow_cell", "flowcell"):
+            fc = _normalize_id_value(project_data.get(k))
+            if fc:
+                out["flowcell_id"] = fc
+                out["sources"]["flowcell_id"] = f"project_root:{k}"
+                break
+
+    return out
 
 
 def _split_host(path_str: str, default_host: str) -> Tuple[str, str]:
@@ -375,6 +453,8 @@ def main(ctx: Any) -> Dict[str, Any]:
     if not ctx.params.get("export_password"):
         ctx.params["export_password"] = secrets.token_urlsafe(16)
 
+    identifiers = _resolve_metadata_identifiers(ctx.params, project_data if isinstance(project_data, dict) else {})
+
     job_spec = {
         "project_name": project_name,
         "export_list": export_list,
@@ -383,6 +463,11 @@ def main(ctx: Any) -> Dict[str, Any]:
         "password": str(ctx.params.get("export_password", "")),
         "authors": project_authors,
         "expiry_days": int(ctx.params.get("export_expiry_days", 0) or 0),
+        "metadata_identifiers": {
+            "agendo_id": identifiers.get("agendo_id") or None,
+            "flowcell_id": identifiers.get("flowcell_id") or None,
+            "sources": identifiers.get("sources") or {},
+        },
     }
     # Only include job_id if already present in the project (e.g., re-run)
     if export_job_id:
@@ -390,6 +475,14 @@ def main(ctx: Any) -> Dict[str, Any]:
 
     out_dir = project_dir / ctx.template.id if ctx.project else Path(ctx.cwd)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Persist resolved metadata context for downstream hooks/reports.
+    metadata_context = {
+        "metadata_identifiers": job_spec.get("metadata_identifiers"),
+        "project_name": project_name,
+    }
+    safe_dump_yaml(out_dir / "metadata_context.yaml", metadata_context)
+
     spec_path = out_dir / "export_job_spec.json"
     spec_path.write_text(json.dumps(job_spec, indent=2))
 

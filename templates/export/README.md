@@ -13,7 +13,11 @@ optional_params:
 - export_engine_api_url
 - export_engine_backends
 - export_expiry_days
-cli_flags: {}
+- agendo_id
+- flowcell_id
+cli_flags:
+  agendo_id: --agendo-id
+  flowcell_id: --flowcell-id
 run_entry: run.py
 publish_keys: []
 render_file_count: 1
@@ -35,9 +39,22 @@ state.
 - `export_engine_api_url` (str): Base URL for the export engine API (no trailing `/export`).
 - `export_engine_backends` (str): Comma-separated backends for the job spec.
 - `export_expiry_days` (int): Expiry days for the job spec.
+- `agendo_id` (str, optional): Override Agendo ID used for metadata context.
+- `flowcell_id` (str, optional): Override flowcell ID used for metadata context.
 
 ## Outputs
 - `export_job_spec.json`: JSON payload sent to the export engine.
+- `metadata_context.yaml`: Resolved metadata identifiers and their provenance.
+
+## Metadata Identifier Resolution
+Export resolves metadata identifiers in this precedence order:
+1. Explicit export params (`--agendo-id`, `--flowcell-id`)
+2. Most recent `templates[].params` entries in `project.yaml`
+3. Top-level `project.yaml` keys (`agendo_id`, `flowcell_id`)
+
+If identifiers are found in `project.yaml`, CLI params are not required.
+Resolved values are written to `metadata_context.yaml` and included in
+`export_job_spec.json` under `metadata_identifiers`.
 
 ## Mapping Table
 The mapping table lives at `export_mapping.table.yaml`. Each entry becomes one
