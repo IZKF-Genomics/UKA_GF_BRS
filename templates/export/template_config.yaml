@@ -17,6 +17,21 @@ params:
     required: false
     default: 30
     description: "Optional expiry_days for export engine job spec"
+  generate_methods_on_render:
+    type: bool
+    required: false
+    default: true
+    description: "Generate methods draft automatically during export template render"
+  methods_style:
+    type: str
+    required: false
+    default: "full"
+    description: "Methods output style: full or concise"
+  methods_output:
+    type: str
+    required: false
+    default: "auto_methods.md"
+    description: "Methods draft filename inside export template directory"
 
 tools:
   required: [python]
@@ -32,3 +47,4 @@ run:
 hooks:
   post_render:
     - hooks.export_build_spec:main
+    - hooks.export_generate_methods:main
