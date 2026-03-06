@@ -39,10 +39,14 @@ params:
     default: "group"
     description: "Grouping column used for summary and clustering labels"
 
+tools:
+  required: [pixi, quarto, Rscript]
+
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
   files:
     - README.md -> README.md
+    - references.bib -> references.bib
     - pixi.toml -> pixi.toml
     - run.sh.j2 -> run.sh
     - .gitignore -> .gitignore

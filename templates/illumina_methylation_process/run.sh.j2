@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+capture_version() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "not_found"
+    return 0
+  fi
+  local raw
+  raw="$("$@" 2>&1 | head -n 1 | tr -d '\r')" || raw="unknown"
+  if [[ -z "$raw" ]]; then
+    raw="unknown"
+  fi
+  echo "$raw"
+}
+
+yaml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 mkdir -p results/logs
 LOG_FILE="results/logs/run_$(date +%Y%m%d_%H%M%S).log"
+START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 required=(pixi.toml project.toml samples.csv)
 for f in "${required[@]}"; do
@@ -18,6 +36,23 @@ done
 echo "[INFO] Running Illumina methylation PROCESS pipeline for {{ ctx.params.study_name | default('study') }}" | tee -a "$LOG_FILE"
 echo "[INFO] Root: $ROOT_DIR" | tee -a "$LOG_FILE"
 
+PIXI_VER="$(capture_version pixi pixi --version)"
+QUARTO_VER="$(capture_version quarto quarto --version)"
+
+finalize_run_info() {
+  local exit_code=$?
+  local end_ts
+  end_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if [[ $exit_code -eq 0 ]]; then
+    echo "status: \"completed\"" >> results/run_info.yaml
+  else
+    echo "status: \"failed\"" >> results/run_info.yaml
+  fi
+  echo "exit_code: $exit_code" >> results/run_info.yaml
+  echo "completed_at: \"$end_ts\"" >> results/run_info.yaml
+}
+trap finalize_run_info EXIT
+
 if command -v pixi >/dev/null 2>&1; then
   :
 else
@@ -27,6 +62,33 @@ fi
 
 pixi install 2>&1 | tee -a "$LOG_FILE"
 pixi run install-array-support 2>&1 | tee -a "$LOG_FILE"
+
+R_VER="$(pixi run Rscript -e "cat(as.character(getRversion()))" 2>/dev/null || echo unknown)"
+MINFI_VER="$(pixi run Rscript -e "suppressWarnings(suppressMessages(library(minfi))); cat(as.character(packageVersion('minfi')))" 2>/dev/null || echo unknown)"
+LIMMA_VER="$(pixi run Rscript -e "suppressWarnings(suppressMessages(library(limma))); cat(as.character(packageVersion('limma')))" 2>/dev/null || echo unknown)"
+
+{
+  echo "timestamp: \"$START_TS\""
+  echo "command: \"bash run.sh\""
+  echo "versions:"
+  echo "  pixi: \"$(yaml_escape "$PIXI_VER")\""
+  echo "  quarto: \"$(yaml_escape "$QUARTO_VER")\""
+  echo "  R: \"$(yaml_escape "$R_VER")\""
+  echo "  minfi: \"$(yaml_escape "$MINFI_VER")\""
+  echo "  limma: \"$(yaml_escape "$LIMMA_VER")\""
+  echo "params:"
+  echo "  study_name: \"{{ ctx.params.study_name | default('MyStudy') }}\""
+  echo "  authors: \"{{ ctx.params.authors | default('unknown') }}\""
+  echo "  idat_base_dir: \"{{ ctx.params.idat_base_dir | default('data/idat') }}\""
+  echo "  array_type: \"{{ ctx.params.array_type | default('EPIC') }}\""
+  echo "  genome_build: \"{{ ctx.params.genome_build | default('hg38') }}\""
+  echo "  group_col: \"{{ ctx.params.group_col | default('group') }}\""
+  echo "software_version_sources:"
+  echo "  - \"pixi --version\""
+  echo "  - \"quarto --version\""
+  echo "  - \"pixi run Rscript -e packageVersion(...)\""
+} > results/run_info.yaml
+
 pixi run check 2>&1 | tee -a "$LOG_FILE"
 pixi run render 2>&1 | tee -a "$LOG_FILE"
 

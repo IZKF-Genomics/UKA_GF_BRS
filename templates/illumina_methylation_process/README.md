@@ -9,6 +9,12 @@ kind: template
 description: Illumina methylation array preprocessing + clustering (Quarto + Pixi
   + R/Bioconductor).
 descriptor: templates/illumina_methylation_process/template_config.yaml
+source_of_truth:
+- templates/illumina_methylation_process/run.sh.j2
+- templates/illumina_methylation_process/template_config.yaml
+methods_file: templates/illumina_methylation_process/METHODS.md
+citations_file: templates/illumina_methylation_process/citations.yaml
+bibliography_file: templates/illumina_methylation_process/references.bib
 required_params: []
 optional_params:
 - array_type
@@ -26,7 +32,13 @@ cli_flags:
   group_col: --group-col
 run_entry: run.sh
 publish_keys: []
-render_file_count: 8
+software_version_capture:
+  run_info: results/run_info.yaml
+  commands:
+  - pixi --version
+  - quarto --version
+  - pixi run Rscript -e packageVersion(...)
+render_file_count: 9
 ```
 <!-- AGENT_METADATA_END -->
 
@@ -61,3 +73,10 @@ bpm template run illumina_methylation_process --dir /path/to/project
 # or inside rendered folder
 ./run.sh
 ```
+
+Run metadata and version provenance are written to `results/run_info.yaml`.
+
+## Methods and Citations
+- Publication-grade methods text: `METHODS.md`.
+- Machine-readable citation source for BPM agent: `citations.yaml`.
+- Manuscript bibliography source (Quarto/Pandoc): `references.bib`.
