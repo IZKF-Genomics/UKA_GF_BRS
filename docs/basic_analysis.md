@@ -40,6 +40,17 @@ bpm template render export
 bpm template run export
 ```
 
+## Methods Draft (independent from export)
+Generate publication-oriented methods text from project history:
+```
+bpm template render methods_report
+# output: methods_report/auto_methods.md
+```
+Optional:
+```
+bpm template render methods_report --methods-style concise --methods-output methods_for_publication.md
+```
+
 ## Notes
 - Parameters vary by template; check the per-template README for details.
 - `bpm template readme <template_id>` prints the README from the active BRS.
