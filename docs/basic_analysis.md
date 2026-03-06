@@ -43,6 +43,10 @@ bpm template run export
 `export` auto-discovers `agendo_id`/`flowcell_id` from `project.yaml` when available
 (typically from previous template params). Use `--agendo-id` / `--flowcell-id` only
 to override.
+Metadata context files are generated during export render:
+- `export/metadata_raw.json`
+- `export/metadata_normalized.yaml`
+- `export/metadata_context.yaml`
 
 ## Methods Draft (independent from export)
 Generate publication-oriented methods text from project history:

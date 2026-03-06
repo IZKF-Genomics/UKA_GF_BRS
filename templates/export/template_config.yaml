@@ -27,6 +27,35 @@ params:
     required: false
     cli: "--flowcell-id"
     description: "Optional override flowcell ID for metadata lookup (auto-discovered from project.yaml if omitted)"
+  metadata_source:
+    type: str
+    required: false
+    cli: "--metadata-source"
+    default: "auto"
+    description: "Metadata input mode: auto|api|file|mock|none"
+  metadata_file:
+    type: str
+    required: false
+    cli: "--metadata-file"
+    description: "Optional local JSON/YAML metadata payload path (used in file mode, preferred in auto when provided)"
+  metadata_api_url:
+    type: str
+    required: false
+    cli: "--metadata-api-url"
+    default: "https://genomics.rwth-aachen.de/api"
+    description: "Metadata API base URL"
+  metadata_api_endpoint:
+    type: str
+    required: false
+    cli: "--metadata-api-endpoint"
+    default: "/project-output"
+    description: "Metadata API endpoint path appended to metadata_api_url"
+  metadata_api_timeout:
+    type: int
+    required: false
+    cli: "--metadata-api-timeout"
+    default: 20
+    description: "Metadata API timeout in seconds"
 
 tools:
   required: [python]
@@ -42,3 +71,4 @@ run:
 hooks:
   post_render:
     - hooks.export_build_spec:main
+    - hooks.export_fetch_metadata:main
