@@ -38,6 +38,9 @@ params:
     description: "Author list for the report header."
 
 
+tools:
+  required: [pixi, Rscript, quarto]
+
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
   files:

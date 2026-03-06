@@ -8,6 +8,12 @@ id: dgea
 kind: template
 description: Differential gene expression analysis (DGEA).
 descriptor: templates/dgea/template_config.yaml
+source_of_truth:
+- templates/dgea/run.sh.j2
+- templates/dgea/template_config.yaml
+methods_file: templates/dgea/METHODS.md
+citations_file: templates/dgea/citations.yaml
+bibliography_file: templates/dgea/references.bib
 required_params: []
 optional_params:
 - application
@@ -27,6 +33,12 @@ cli_flags:
   authors: --authors
 run_entry: run.sh
 publish_keys: []
+software_version_capture:
+  run_info: results/run_info.yaml
+  commands:
+  - pixi --version
+  - quarto --version
+  - pixi run Rscript -e packageVersion(...)
 render_file_count: 15
 ```
 <!-- AGENT_METADATA_END -->
@@ -69,8 +81,15 @@ blocks in `DGEA_constructor.R`:
 bpm template run dgea --dir /path/to/project
 ```
 
+Run metadata and version provenance are written to `results/run_info.yaml`.
+
 ## Environment
 If you use Pixi, the template ships a `pixi.toml` with all R/Quarto dependencies.
+
+## Methods and Citations
+- Publication-grade methods text: `METHODS.md`.
+- Machine-readable citation source for BPM agent: `citations.yaml`.
+- Manuscript bibliography source (Quarto/Pandoc): `references.bib`.
 
 ## Parameters
 - `--salmon-dir`: Path to Salmon quant output (from nfcore_rnaseq or nfcore_3mrnaseq).

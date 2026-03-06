@@ -1,9 +1,69 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+capture_version() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "not_found"
+    return 0
+  fi
+  local raw
+  raw="$("$@" 2>&1 | head -n 1 | tr -d '\r')" || raw="unknown"
+  if [[ -z "$raw" ]]; then
+    raw="unknown"
+  fi
+  echo "$raw"
+}
+
+yaml_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+mkdir -p results
+START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+{
+  echo "timestamp: \"$START_TS\""
+  echo "command: \"bash run.sh\""
+  echo "versions:"
+  echo "  pixi: \"$(yaml_escape "$(capture_version pixi pixi --version)")\""
+  echo "  quarto: \"$(yaml_escape "$(capture_version quarto quarto --version)")\""
+  echo "  R: \"$(yaml_escape "$(pixi run Rscript -e 'cat(as.character(getRversion()))' 2>/dev/null || echo unknown)")\""
+  echo "  DESeq2: \"$(yaml_escape "$(pixi run Rscript -e \"suppressWarnings(suppressMessages(library(DESeq2))); cat(as.character(packageVersion('DESeq2')))\" 2>/dev/null || echo unknown)")\""
+  echo "  tximport: \"$(yaml_escape "$(pixi run Rscript -e \"suppressWarnings(suppressMessages(library(tximport))); cat(as.character(packageVersion('tximport')))\" 2>/dev/null || echo unknown)")\""
+  echo "  clusterProfiler: \"$(yaml_escape "$(pixi run Rscript -e \"suppressWarnings(suppressMessages(library(clusterProfiler))); cat(as.character(packageVersion('clusterProfiler')))\" 2>/dev/null || echo unknown)")\""
+  echo "  limma: \"$(yaml_escape "$(pixi run Rscript -e \"suppressWarnings(suppressMessages(library(limma))); cat(as.character(packageVersion('limma')))\" 2>/dev/null || echo unknown)")\""
+  echo "params:"
+  echo "  salmon_dir: \"{{ ctx.params.get('salmon_dir', '') }}\""
+  echo "  nfcore_samplesheet: \"{{ ctx.params.get('nfcore_samplesheet', '') }}\""
+  echo "  organism: \"{{ ctx.params.get('organism', '') }}\""
+  echo "  spikein: \"{{ ctx.params.get('spikein', '') }}\""
+  echo "  application: \"{{ ctx.params.get('application', '') }}\""
+  echo "software_version_sources:"
+  echo "  - \"pixi --version\""
+  echo "  - \"quarto --version\""
+  echo "  - \"pixi run Rscript -e packageVersion(...)\""
+} > results/run_info.yaml
+
+finalize_run_info() {
+  local exit_code=$?
+  local end_ts
+  end_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if [[ $exit_code -eq 0 ]]; then
+    echo "status: \"completed\"" >> results/run_info.yaml
+  else
+    echo "status: \"failed\"" >> results/run_info.yaml
+  fi
+  echo "exit_code: $exit_code" >> results/run_info.yaml
+  echo "completed_at: \"$end_ts\"" >> results/run_info.yaml
+}
+trap finalize_run_info EXIT
+
 pixi install
 # Ensure Bioconductor data packages are installed (post-link downloads).
 pixi run install-bioc-data
 
 # Render the DGEA constructor, which orchestrates all comparisons and the overview.
-Rscript DGEA_constructor.R
+pixi run Rscript DGEA_constructor.R
