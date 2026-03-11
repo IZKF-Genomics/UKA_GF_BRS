@@ -49,6 +49,8 @@ cd /path/to/output
 - scrnaseq_pipeline: [templates/scrnaseq_pipeline/README.md](templates/scrnaseq_pipeline/README.md)
 
 ## Workflows
+- archive_cleanup: [workflows/archive_cleanup/README.md](workflows/archive_cleanup/README.md) (manifest-driven guarded deletion of source folders)
+- archive_rawdata: [workflows/archive_rawdata/README.md](workflows/archive_rawdata/README.md) (archive + verify + manifest generation; no source deletion)
 - export_bcl: [workflows/export_bcl/README.md](workflows/export_bcl/README.md)
 - export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md) (report_links-based spec)
 - export_status: [workflows/export_status/README.md](workflows/export_status/README.md)
@@ -58,6 +60,7 @@ cd /path/to/output
 - Install BPM: [docs/install_bpm.md](docs/install_bpm.md)
 - Add this BRS: [docs/add_brs.md](docs/add_brs.md)
 - Update this BRS: [docs/update_brs.md](docs/update_brs.md)
+- Archiving: [docs/archiving.md](docs/archiving.md)
 - Demultiplexing: [docs/demultiplexing.md](docs/demultiplexing.md)
 - Basic analysis: [docs/basic_analysis.md](docs/basic_analysis.md)
 
@@ -75,6 +78,8 @@ cd /path/to/output
 - dgea pixi environment now pins `r-lifecycle >= 1.0.5` to satisfy `dplyr` requirements.
 - export template now writes the final API response to `export_final_<job_id>.json`, storing only paths + summary fields in `project.yaml`.
 - hooks.agendo:fetch and hooks.genome_from_organism:set_from_organism print the resolved or missing organism/umi/genome to guide manual overrides.
+- archive_rawdata workflow supports `non_interactive=true` for cron-safe execution (`interactive=false`, `yes=true`) and now produces a manifest for external cleanup.
+- archive_cleanup workflow consumes archive_rawdata manifests and applies guarded source deletion, suitable for sudo execution.
 
 ## Agent Readability
 
@@ -84,4 +89,3 @@ To keep this BRS easy for `bpm agent` to interpret:
 - Keep descriptor files (`template_config.yaml`, `workflow_config.yaml`) aligned with README text.
 - Prefer explicit parameter descriptions and concrete command examples.
 - Document required inputs and expected outputs in README files.
-

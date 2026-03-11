@@ -1,0 +1,57 @@
+# Workflow: archive_cleanup
+# Delete source run directories based on a manifest produced by archive_rawdata.
+
+id: archive_cleanup
+description: "Cleanup archived source run directories using an archive_rawdata manifest."
+
+params:
+  manifest_path:
+    type: str
+    cli: "--manifest-path"
+    required: false
+    description: "Path to a manifest JSON produced by archive_rawdata."
+  manifest_dir:
+    type: str
+    required: false
+    default: "/data/raw/.archive_manifests"
+    description: "If manifest_path is omitted, pick latest archive_rawdata manifest from this directory."
+  allowed_source_roots:
+    type: str
+    required: false
+    default: "/data/raw"
+    description: "Comma-separated source root allowlist for deletion safety checks."
+  instrument_folders:
+    type: str
+    cli: "--instrument-folders"
+    required: false
+    default: "miseq1_M00818,miseq2_M04404,miseq3_M00403,nextseq500_NB501289,novaseq_A01742"
+    description: "Comma-separated instrument folder allowlist for deletion safety checks."
+  non_interactive:
+    type: bool
+    cli: "--non-interactive"
+    required: false
+    default: false
+    description: "Cron-safe mode shortcut: sets interactive=false and yes=true."
+  interactive:
+    type: bool
+    required: false
+    default: true
+    description: "Enable interactive global confirmation prompt."
+  yes:
+    type: bool
+    cli: "--yes"
+    required: false
+    default: false
+    description: "Skip global confirmation prompt and proceed non-interactively."
+  dry_run:
+    type: bool
+    cli: "--dry-run"
+    required: false
+    default: false
+    description: "Plan only; do not delete."
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python]
