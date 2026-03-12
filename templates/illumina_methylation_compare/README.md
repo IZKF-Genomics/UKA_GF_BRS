@@ -12,6 +12,7 @@ descriptor: templates/illumina_methylation_compare/template_config.yaml
 required_params: []
 optional_params:
 - array_type
+- auto_discover_inputs
 - authors
 - case_label
 - control_label
@@ -23,6 +24,7 @@ cli_flags:
   study_name: --study-name
   authors: --authors
   array_type: --array-type
+  auto_discover_inputs: --auto-discover-inputs
   genome_build: --genome-build
   process_results_dir: --process-results-dir
   group_col: --group-col
@@ -49,11 +51,12 @@ Input expectation:
 
 Typical workflow:
 1. Run `illumina_methylation_process` first.
-2. Edit `config/input_registry.csv` to define run provenance and enable selected runs.
-3. Optionally maintain `config/group_map.csv` for cross-dataset group harmonization.
-4. Run `pixi run sync-samples` (or rely on `run.sh`, which does this by default).
-5. Review `config/samples.csv` and analysis settings in `config/project.toml`.
-6. Run this compare template.
+2. On render, `config/input_registry.csv` is auto-populated from active `illumina_methylation_process` runs in `project.yaml`.
+3. Review/edit `config/input_registry.csv` if you want to adjust enabled runs, include/exclude filters, or external/manual inputs.
+4. Optionally maintain `config/group_map.csv` for cross-dataset group harmonization.
+5. Run `pixi run sync-samples` (or rely on `run.sh`, which does this by default).
+6. Review `config/samples.csv` and analysis settings in `config/project.toml`.
+7. Run this compare template.
 
 ## Multi-run input selection
 
@@ -90,6 +93,13 @@ bpm template render illumina_methylation_compare \
 ```
 
 `study_name` is optional; if omitted, the rendered template id is used as project/report name.
+
+On render, a post-render hook auto-discovers active `illumina_methylation_process` runs from
+`project.yaml` and writes `config/input_registry.csv`.
+Disable this behavior with:
+```bash
+bpm template render illumina_methylation_compare --param auto_discover_inputs=false --dir /path/to/project
+```
 
 After render, adjust:
 - `config/input_registry.csv` to combine runs / filter samples.

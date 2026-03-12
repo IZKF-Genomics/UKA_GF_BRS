@@ -52,6 +52,12 @@ params:
     required: false
     default: "control"
     description: "Control label in the primary grouping column"
+  auto_discover_inputs:
+    type: bool
+    cli: "--auto-discover-inputs"
+    required: false
+    default: true
+    description: "Auto-populate config/input_registry.csv from active illumina_methylation_process runs in project.yaml"
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
@@ -75,3 +81,7 @@ render:
 
 run:
   entry: "run.sh"
+
+hooks:
+  post_render:
+    - hooks.compare_autodiscover_registry:main
