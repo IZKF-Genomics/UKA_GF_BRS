@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import shutil
@@ -10,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MANIFEST_DIR = "/data/raw/.archive_manifests"
-DEFAULT_ALLOWED_ROOTS = "/data/raw"
+DEFAULT_MANIFEST_DIR = "/data/shared/bpm_manifests"
+DEFAULT_ALLOWED_ROOTS = "/data/raw,/data/fastq"
 DEFAULT_INSTRUMENTS = [
     "miseq1_M00818",
     "miseq2_M04404",
@@ -82,6 +83,25 @@ def _parse_bool(value: Any, default: bool) -> bool:
     return default
 
 
+def _normalize_patterns(value: Any) -> list[str]:
+    pats = _split_csv(value)
+    return [p for p in pats if p]
+
+
+def _first_error_line(exc: Exception) -> str:
+    msg = str(exc).strip()
+    if not msg:
+        return exc.__class__.__name__
+    return msg.splitlines()[0].strip()
+
+
+def _is_permission_error(exc: Exception) -> bool:
+    if isinstance(exc, PermissionError):
+        return True
+    text = str(exc).lower()
+    return "permission denied" in text or "operation not permitted" in text
+
+
 def _print_section(title: str) -> None:
     print("\n" + _title("=" * 80))
     print(_title(title))
@@ -112,10 +132,15 @@ def _release_lock(fd: int, lock_path: Path) -> None:
 
 
 def _resolve_latest_manifest(manifest_dir: Path) -> Path:
-    candidates = sorted(manifest_dir.glob("archive_rawdata_*.json"))
+    candidates = (
+        list(manifest_dir.glob("archive_rawdata_*.json"))
+        + list(manifest_dir.glob("archive_fastq_*.json"))
+    )
     if not candidates:
-        raise SystemExit(f"No archive_rawdata manifest found in {manifest_dir}")
-    return candidates[-1]
+        raise SystemExit(f"No archive_rawdata/archive_fastq manifest found in {manifest_dir}")
+    # Choose newest by filesystem mtime (not lexicographic name),
+    # so mixed workflow prefixes still resolve the true latest file.
+    return max(candidates, key=lambda p: (p.stat().st_mtime, p.name))
 
 
 def _is_under(path: Path, base: Path) -> bool:
@@ -158,11 +183,105 @@ def _manifest_write(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+def _is_safe_flat_run_path(source_path: Path, allowed_roots: list[Path]) -> tuple[bool, str]:
+    if not source_path.is_absolute():
+        return False, "source path is not absolute"
+    resolved = source_path.resolve(strict=False)
+    for root in allowed_roots:
+        if not _is_under(resolved, root):
+            continue
+        rel_parts = resolved.relative_to(root).parts
+        if len(rel_parts) != 1:
+            return False, "flat run path must be directly under source root"
+        if source_path.is_symlink() or resolved.is_symlink():
+            return False, "refusing to clean symlink"
+        return True, ""
+    return False, "source path is outside allowed roots"
+
+
+def _cleanup_by_patterns(source_dir: Path, patterns: list[str], dry_run: bool) -> tuple[int, str]:
+    removed = 0
+    for pattern in patterns:
+        for match in source_dir.rglob(pattern):
+            # Pattern mode only removes regular files and avoids symlink targets.
+            if not match.is_file() or match.is_symlink():
+                continue
+            if dry_run:
+                print(_warn(f"[dry-run] Would remove file: {match}"))
+            else:
+                match.unlink()
+                removed += 1
+
+    if dry_run:
+        return 0, "dry_run_only"
+    if removed == 0:
+        return 0, "done_no_matches"
+    return removed, "done"
+
+
+def _is_preserved_file(path: Path, source_dir: Path, preserve_patterns: list[str]) -> bool:
+    rel = str(path.relative_to(source_dir))
+    name = path.name
+    rel_parts = path.relative_to(source_dir).parts
+    for pat in preserve_patterns:
+        cleaned = pat.strip().strip("/")
+        if not cleaned:
+            continue
+        if fnmatch.fnmatch(name, cleaned) or fnmatch.fnmatch(rel, cleaned):
+            return True
+        # Preserve content inside directory-name patterns (e.g. .pixi, work, .renv).
+        if all(ch not in cleaned for ch in "*?[]"):
+            if cleaned in rel_parts:
+                return True
+            if rel.startswith(cleaned + "/"):
+                return True
+        if fnmatch.fnmatch(rel, cleaned + "/*"):
+            return True
+    return False
+
+
+def _cleanup_except_patterns(source_dir: Path, preserve_patterns: list[str], dry_run: bool) -> tuple[int, int, str]:
+    removed_files = 0
+    removed_dirs = 0
+
+    # Remove non-preserved files.
+    for match in source_dir.rglob("*"):
+        if not match.is_file() or match.is_symlink():
+            continue
+        if _is_preserved_file(match, source_dir, preserve_patterns):
+            continue
+        if dry_run:
+            print(_warn(f"[dry-run] Would remove file: {match}"))
+        else:
+            match.unlink()
+            removed_files += 1
+
+    # Prune empty subdirectories bottom-up, but keep run root directory.
+    dirs = [d for d in source_dir.rglob("*") if d.is_dir()]
+    dirs.sort(key=lambda p: len(p.parts), reverse=True)
+    for d in dirs:
+        if d == source_dir:
+            continue
+        if any(d.iterdir()):
+            continue
+        if dry_run:
+            print(_warn(f"[dry-run] Would remove empty dir: {d}"))
+        else:
+            d.rmdir()
+            removed_dirs += 1
+
+    if dry_run:
+        return 0, 0, "dry_run_only"
+    if removed_files == 0 and removed_dirs == 0:
+        return 0, 0, "done_no_matches"
+    return removed_files, removed_dirs, "done"
+
+
 def _parse_params() -> dict[str, Any]:
     ctx = load_ctx()
     params = dict(ctx.get("params") or {})
 
-    parser = argparse.ArgumentParser(description="Cleanup archived run folders from archive_rawdata manifest.")
+    parser = argparse.ArgumentParser(description="Cleanup archived run folders from archive_rawdata/archive_fastq manifests.")
     parser.add_argument("--manifest-path", default="")
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--allowed-source-roots", default=DEFAULT_ALLOWED_ROOTS)
@@ -224,7 +343,7 @@ def main() -> None:
         copy_status = str(rec.get("copy_status") or "")
         verify_status = str(rec.get("verify_status") or "")
         cleanup_status = str(rec.get("cleanup_status") or "")
-        if cleanup_status in {"done", "skipped_not_eligible", "skipped_outside_allowed_root", "skipped_missing"}:
+        if cleanup_status in {"done", "done_no_matches", "skipped_not_eligible", "skipped_outside_allowed_root", "skipped_missing"}:
             continue
         if status == "copied_verified" and copy_status == "ok" and verify_status == "ok":
             eligible_indexes.append(i)
@@ -235,7 +354,7 @@ def main() -> None:
     print(f"Allowed instruments: {', '.join(sorted(allowed_instruments))}")
     print(f"Eligible runs: {len(eligible_indexes)}")
     if dry_run:
-        print(_warn("Dry-run enabled: no source directories will be deleted."))
+        print(_warn("Dry-run enabled: no source data will be deleted."))
 
     if not eligible_indexes:
         print(_warn("No eligible runs found for cleanup."))
@@ -256,6 +375,7 @@ def main() -> None:
     done = 0
     failed = 0
     skipped = 0
+    sudo_hint_printed = False
 
     try:
         cleanup_history = payload.get("cleanup_runs")
@@ -277,7 +397,11 @@ def main() -> None:
             source_raw = str(rec.get("source") or "").strip()
             source_path = Path(source_raw)
 
-            ok, reason = _is_safe_source_path(source_path, allowed_roots, allowed_instruments)
+            cleanup_mode = str(rec.get("cleanup_mode") or "")
+            if cleanup_mode == "non_fastq_only":
+                ok, reason = _is_safe_flat_run_path(source_path, allowed_roots)
+            else:
+                ok, reason = _is_safe_source_path(source_path, allowed_roots, allowed_instruments)
             if not ok:
                 rec["cleanup_status"] = "skipped_not_eligible"
                 rec["cleanup_error"] = reason
@@ -297,22 +421,72 @@ def main() -> None:
                 continue
 
             rec["cleanup_attempted_at"] = datetime.now().isoformat(timespec="seconds")
-            if dry_run:
-                rec["cleanup_status"] = "dry_run_only"
-                rec["cleanup_error"] = ""
-                print(_warn(f"[dry-run] Would remove: {resolved_source}"))
-                skipped += 1
-                continue
+            mode = cleanup_mode
+            patterns = _normalize_patterns(rec.get("cleanup_patterns"))
+            preserve_patterns = _normalize_patterns(rec.get("cleanup_preserve_patterns"))
 
-            print(_warn(f"[cleanup] Removing: {resolved_source}"))
             try:
-                shutil.rmtree(resolved_source)
-                rec["cleanup_status"] = "done"
-                rec["cleanup_error"] = ""
-                done += 1
+                if mode == "non_fastq_only":
+                    if not preserve_patterns:
+                        preserve_patterns = ["*.fastq.gz", "*.fq.gz"]
+                    rec["cleanup_mode"] = "non_fastq_only"
+                    rec["cleanup_scope"] = "directory_except_preserve_patterns"
+                    rec["cleanup_preserve_patterns"] = preserve_patterns
+                    removed_files, removed_dirs, cleanup_status = _cleanup_except_patterns(
+                        resolved_source,
+                        preserve_patterns,
+                        dry_run,
+                    )
+                    rec["cleanup_removed_file_count"] = removed_files
+                    rec["cleanup_removed_dir_count"] = removed_dirs
+                    rec["cleanup_status"] = cleanup_status
+                    rec["cleanup_error"] = ""
+                    if dry_run:
+                        skipped += 1
+                    else:
+                        done += 1
+                elif patterns:
+                    # Backward compatibility: old manifests may request matching-pattern deletions.
+                    rec["cleanup_mode"] = "patterns"
+                    rec["cleanup_scope"] = "files_only"
+                    rec["cleanup_patterns"] = patterns
+                    removed_count, cleanup_status = _cleanup_by_patterns(resolved_source, patterns, dry_run)
+                    rec["cleanup_removed_count"] = removed_count
+                    rec["cleanup_status"] = cleanup_status
+                    rec["cleanup_error"] = ""
+                    if dry_run:
+                        skipped += 1
+                    else:
+                        done += 1
+                else:
+                    rec["cleanup_mode"] = "directory"
+                    rec["cleanup_scope"] = "directory_tree"
+                    if dry_run:
+                        rec["cleanup_status"] = "dry_run_only"
+                        rec["cleanup_error"] = ""
+                        print(_warn(f"[dry-run] Would remove directory: {resolved_source}"))
+                        skipped += 1
+                    else:
+                        print(_warn(f"[cleanup] Removing directory: {resolved_source}"))
+                        shutil.rmtree(resolved_source)
+                        rec["cleanup_status"] = "done"
+                        rec["cleanup_error"] = ""
+                        done += 1
             except Exception as exc:  # noqa: BLE001
                 rec["cleanup_status"] = "failed"
                 rec["cleanup_error"] = str(exc)
+                run_id = str(rec.get("run_id") or resolved_source.name)
+                print(_err(f"[cleanup][failed] {run_id}: {_first_error_line(exc)}"))
+                print(_dim(f"  source: {resolved_source}"))
+                if _is_permission_error(exc) and not sudo_hint_printed:
+                    sudo_hint_printed = True
+                    print(_warn("[hint] Permission issue detected. Re-run cleanup with sudo:"))
+                    print(
+                        _warn(
+                            f'  sudo env PATH="$PATH" BPM_CACHE="$BPM_CACHE" '
+                            f"bpm workflow run archive_cleanup --manifest-path {manifest_path}"
+                        )
+                    )
                 failed += 1
 
             _manifest_write(manifest_path, payload)
@@ -326,7 +500,7 @@ def main() -> None:
 
         _print_section("Done")
         print(_ok(f"Manifest updated: {manifest_path}"))
-        print(_ok(f"Deleted: {done}"))
+        print(_ok(f"Deleted/Cleaned records: {done}"))
         if failed:
             print(_err(f"Failed: {failed}"))
         else:

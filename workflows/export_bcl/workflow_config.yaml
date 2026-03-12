@@ -19,7 +19,7 @@ params:
     type: str
     cli: "--bcl-dir"
     required: false
-    description: "Optional BCL directory override (defaults to Data/Intensities/BaseCalls under run_dir)."
+    description: "Optional BCL directory override (defaults to published BCL_dir in bpm.meta.yaml, otherwise run_dir)."
   include_in_report:
     type: bool
     required: false

@@ -38,6 +38,19 @@ params:
     type: str
     required: false
     description: "Password/token for the export engine; auto-generated if not provided"
+  include_in_report:
+    type: bool
+    required: false
+    default: true
+    description: "Default include-in-report behavior for demux export entries."
+  include_in_report_fastq:
+    type: bool
+    required: false
+    description: "Override include_in_report for FASTQ export entry."
+  include_in_report_multiqc:
+    type: bool
+    required: false
+    description: "Override include_in_report for MultiQC export entry."
 
 run:
   entry: "run.py"

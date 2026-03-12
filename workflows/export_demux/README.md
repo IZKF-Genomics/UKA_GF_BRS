@@ -16,6 +16,9 @@ optional_params:
 - export_expiry_days
 - export_password
 - export_username
+- include_in_report
+- include_in_report_fastq
+- include_in_report_multiqc
 - project_name
 cli_flags:
   run_dir: --run-dir
@@ -37,7 +40,8 @@ bpm workflow run export_demux --run-dir /absolute/path/to/run --project-name PRO
 ## Notes
 - `--run-dir` should point to a demux run directory containing `output/` and `multiqc/`
   (or a `bpm.meta.yaml` with published paths).
-- `export_job_spec.json` includes report links under `export_list[].report_links`
-  for FASTQ and MultiQC entries.
+- Export request/response metadata is written into `bpm.meta.yaml` under `export.demux`
+  (including `last_exported_at`, `job_spec`, `response`, and optional `final_message`).
+- Sensitive request password is redacted before saving to `bpm.meta.yaml`.
 - Host-prefixed published paths (e.g., `nextgen:/path`) are preserved as export hosts.
 - See `workflow_config.yaml` for all parameters.

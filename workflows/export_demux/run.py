@@ -7,6 +7,7 @@ import secrets
 import sys
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -74,6 +75,57 @@ def _load_meta(run_dir: Path) -> dict:
         return yaml.safe_load(meta_path.read_text()) or {}
     except Exception:
         return {}
+
+
+def _save_meta(run_dir: Path, payload: dict) -> None:
+    meta_path = run_dir / "bpm.meta.yaml"
+    meta_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _update_export_meta(
+    run_dir: Path,
+    workflow_id: str,
+    api_url: str,
+    project_name: str,
+    job_spec: dict,
+    response_json: dict,
+    final_json: dict | None = None,
+) -> None:
+    meta = _load_meta(run_dir)
+    export = meta.get("export") or {}
+    demux = export.get("demux") or {}
+
+    exported_at = _now_iso()
+    safe_spec = json.loads(json.dumps(job_spec))
+    if isinstance(safe_spec, dict) and "password" in safe_spec:
+        safe_spec["password"] = "***redacted***"
+
+    demux.update(
+        {
+            "last_exported_at": exported_at,
+            "workflow_id": workflow_id,
+            "api_url": api_url,
+            "project_name": project_name,
+            "job_id": response_json.get("job_id"),
+            "expiry_days": job_spec.get("expiry_days"),
+            "job_spec": safe_spec,
+            "response": response_json,
+        }
+    )
+    if final_json:
+        demux["final_message"] = final_json
+
+    export["last_exported_at"] = exported_at
+    export["last_workflow_id"] = workflow_id
+    export["last_job_id"] = response_json.get("job_id")
+    export["demux"] = demux
+    meta["export"] = export
+    _save_meta(run_dir, meta)
+
 
 def _run_with_spinner(message: str, func):
     stop_event = threading.Event()
@@ -203,9 +255,7 @@ def main() -> None:
         "expiry_days": expiry_days,
     }
 
-    spec_path = run_dir / "export_job_spec.json"
-    spec_path.write_text(json.dumps(job_spec, indent=2))
-    print(f"[export_demux] Wrote spec -> {spec_path}")
+    print("[export_demux] Prepared export job spec")
 
     api_clean = api_url.rstrip("/")
     export_endpoint = api_clean if api_clean.endswith("/export") else f"{api_clean}/export"
@@ -238,8 +288,15 @@ def main() -> None:
 
     print("[export_demux] API response JSON:")
     print(json.dumps(response_json, indent=2, sort_keys=True))
-
-    (run_dir / "export_response.json").write_text(json.dumps(response_json, indent=2))
+    _update_export_meta(
+        run_dir=run_dir,
+        workflow_id="export_demux",
+        api_url=export_endpoint,
+        project_name=project_name,
+        job_spec=job_spec,
+        response_json=response_json,
+    )
+    print(f"[export_demux] Updated bpm.meta.yaml -> {run_dir / 'bpm.meta.yaml'}")
 
     job_id = response_json.get("job_id")
     if not isinstance(job_id, str) or not job_id:
@@ -303,7 +360,16 @@ def main() -> None:
                     lines.append(report_line)
             lines.append("=" * 60)
             print("\n".join(lines))
-            (run_dir / "export_final_message.json").write_text(json.dumps(final_json, indent=2))
+            _update_export_meta(
+                run_dir=run_dir,
+                workflow_id="export_demux",
+                api_url=export_endpoint,
+                project_name=project_name,
+                job_spec=job_spec,
+                response_json=response_json,
+                final_json=final_json,
+            )
+            print(f"[export_demux] Updated final message in bpm.meta.yaml -> {run_dir / 'bpm.meta.yaml'}")
             break
 
 

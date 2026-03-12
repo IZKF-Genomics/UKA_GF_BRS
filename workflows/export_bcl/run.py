@@ -139,8 +139,6 @@ def main() -> None:
 
     include_default = _parse_bool(params.get("include_in_report"), True)
     include_bcl = _parse_bool(params.get("include_in_report_bcl"), include_default)
-    include_meta = _parse_bool(params.get("include_in_report_metadata"), include_default)
-
     api_url = str(params.get("export_engine_api_url") or "").strip() or "http://genomics.rwth-aachen.de:9500/export"
     backends = _split_csv(params.get("export_engine_backends") or "apache, owncloud, sftp")
     expiry_days = int(params.get("export_expiry_days") or 0)

@@ -50,7 +50,9 @@ cd /path/to/output
 
 ## Workflows
 - archive_cleanup: [workflows/archive_cleanup/README.md](workflows/archive_cleanup/README.md) (manifest-driven guarded deletion of source folders)
+- archive_fastq: [workflows/archive_fastq/README.md](workflows/archive_fastq/README.md) (archive + verify + manifest generation for FASTQ runs)
 - archive_rawdata: [workflows/archive_rawdata/README.md](workflows/archive_rawdata/README.md) (archive + verify + manifest generation; no source deletion)
+- clean_fastq: [workflows/clean_fastq/README.md](workflows/clean_fastq/README.md) (pattern-based cleanup in /data/fastq without archiving)
 - export_bcl: [workflows/export_bcl/README.md](workflows/export_bcl/README.md)
 - export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md) (report_links-based spec)
 - export_status: [workflows/export_status/README.md](workflows/export_status/README.md)
@@ -79,7 +81,13 @@ cd /path/to/output
 - export template now writes the final API response to `export_final_<job_id>.json`, storing only paths + summary fields in `project.yaml`.
 - hooks.agendo:fetch and hooks.genome_from_organism:set_from_organism print the resolved or missing organism/umi/genome to guide manual overrides.
 - archive_rawdata workflow supports `non_interactive=true` for cron-safe execution (`interactive=false`, `yes=true`) and now produces a manifest for external cleanup.
-- archive_cleanup workflow consumes archive_rawdata manifests and applies guarded source deletion, suitable for sudo execution.
+- archive_fastq workflow archives `/data/fastq` runs while always excluding `*.fastq.gz` and `*.fq.gz`; archive_cleanup then removes archived non-FASTQ content while preserving FASTQ files.
+- archive_cleanup workflow consumes archive_rawdata/archive_fastq manifests and applies guarded source cleanup, suitable for sudo execution.
+- archive_cleanup docs now include the recommended sudo command with `BPM_CACHE="$BPM_CACHE"` to avoid "No active BRS" under sudo.
+- archive_rawdata, archive_fastq, archive_cleanup, and clean_fastq now default `manifest_dir` to `/data/shared/bpm_manifests`, so CLI examples can omit `--manifest-dir` unless overriding.
+- archive_cleanup now resolves the latest manifest by file modification time across `archive_rawdata_*.json` and `archive_fastq_*.json` (not by filename ordering).
+- export_demux workflow config now exposes `include_in_report`, `include_in_report_fastq`, and `include_in_report_multiqc` parameters used by the run script.
+- clean_fastq workflow removes pattern-matched files/directories directly from `/data/fastq` without archiving, with retention and manifest logging.
 
 ## Agent Readability
 

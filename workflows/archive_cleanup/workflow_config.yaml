@@ -1,25 +1,25 @@
 # Workflow: archive_cleanup
-# Delete source run directories based on a manifest produced by archive_rawdata.
+# Delete source data based on a manifest produced by archive_rawdata/archive_fastq.
 
 id: archive_cleanup
-description: "Cleanup archived source run directories using an archive_rawdata manifest."
+description: "Cleanup archived source data using archive_rawdata/archive_fastq manifests."
 
 params:
   manifest_path:
     type: str
     cli: "--manifest-path"
     required: false
-    description: "Path to a manifest JSON produced by archive_rawdata."
+    description: "Path to a manifest JSON produced by archive_rawdata or archive_fastq."
   manifest_dir:
     type: str
     required: false
-    default: "/data/raw/.archive_manifests"
-    description: "If manifest_path is omitted, pick latest archive_rawdata manifest from this directory."
+    default: "/data/shared/bpm_manifests"
+    description: "If manifest_path is omitted, pick latest archive_rawdata/archive_fastq manifest from this directory."
   allowed_source_roots:
     type: str
     required: false
-    default: "/data/raw"
-    description: "Comma-separated source root allowlist for deletion safety checks."
+    default: "/data/raw,/data/fastq"
+    description: "Comma-separated source root allowlist for cleanup safety checks."
   instrument_folders:
     type: str
     cli: "--instrument-folders"
