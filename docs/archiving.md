@@ -1,19 +1,15 @@
 # Archiving
 
-This guide covers the two-step archive workflow pair:
+This guide covers:
 - `archive_rawdata`: copy + verify + manifest/log generation
 - `archive_fastq`: copy + verify + manifest/log generation for `/data/fastq`
-- `archive_cleanup`: source deletion based on manifest entries
+- `archive_cleanup`: source deletion based on archive manifests
+- `clean_fastq`: direct pattern cleanup in `/data/fastq` (no archive step)
 
-Additional direct-clean workflow:
-- `clean_fastq`: remove pattern-matched content in `/data/fastq` without archiving.
-
-Keep-rules management workflow:
-- `keep_rules`: manage `/data/shared/bpm_manifests/keep_rules.yaml` (list/add/remove/prune).
-- Dedicated guide: [keep_rules.md](./keep_rules.md)
+Related guide:
+- [Keep Rules](./keep_rules.md)
 
 ## 1) Prepare manifest directory
-Use a shared writable manifest path for both workflows.
 
 ```bash
 sudo mkdir -p /data/shared/bpm_manifests
@@ -21,41 +17,51 @@ sudo chown root:bioinfo /data/shared/bpm_manifests
 sudo chmod 2775 /data/shared/bpm_manifests
 ```
 
-Optional write test as your normal user:
+Optional write test:
 ```bash
 touch /data/shared/bpm_manifests/.perm_test && rm /data/shared/bpm_manifests/.perm_test
 ```
 
-## 2) Run archive (copy + verify)
-Interactive raw-data archive:
+## 2) Archive runs (copy + verify)
+
+Raw data:
 ```bash
 bpm workflow run archive_rawdata
 ```
 
-Interactive FASTQ archive:
+FASTQ:
 ```bash
 bpm workflow run archive_fastq
 ```
 
-Non-interactive raw-data archive (cron-safe shortcut):
+Cron-safe mode:
 ```bash
 bpm workflow run archive_rawdata --non-interactive true
-```
-
-Non-interactive FASTQ archive (always excludes `*.fastq.gz` and `*.fq.gz`):
-```bash
 bpm workflow run archive_fastq --non-interactive true
 ```
-Default FASTQ archive excludes also include `.pixi`, `work`, `.renv`, `.Rproj.user`, `.nextflow`, `.nextflow.log*`.
-All archive/clean workflows read `/data/shared/bpm_manifests/keep_rules.yaml` by default and skip active keep-protected run IDs.
 
-Typical output files:
+Default keep behavior:
+- All archive/clean workflows read `/data/shared/bpm_manifests/keep_rules.yaml`.
+- Active keep entries are skipped automatically.
+
+Default FASTQ excludes in `archive_fastq`:
+- `*.fastq.gz`
+- `*.fq.gz`
+- `.pixi`
+- `work`
+- `.renv`
+- `.Rproj.user`
+- `.nextflow`
+- `.nextflow.log*`
+
+Typical outputs:
 - `/data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.json`
 - `/data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.log`
 - `/data/shared/bpm_manifests/archive_fastq_YYYYMMDD_HHMMSS.json`
 - `/data/shared/bpm_manifests/archive_fastq_YYYYMMDD_HHMMSS.log`
 
-## 3) Run cleanup from manifest
+## 3) Cleanup from manifest
+
 Dry-run first:
 ```bash
 bpm workflow run archive_cleanup \
@@ -70,44 +76,54 @@ bpm workflow run archive_cleanup \
   --manifest-path /data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.json
 ```
 
-Real-world raw-data sequence (interactive archive + sudo cleanup):
+Typical flow with sudo cleanup:
 ```bash
 bpm workflow run archive_rawdata
 sudo env PATH="$PATH" BPM_CACHE="$BPM_CACHE" bpm workflow run archive_cleanup --manifest-path /data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.json
 ```
 
-If sudo reports `No active BRS`, ensure `BPM_CACHE` is set in your shell first:
+If sudo reports `No active BRS`, verify:
 ```bash
 echo "$BPM_CACHE"
 ```
 
-## 4) Cron examples
-Use full paths and dedicated log files.
+## 4) clean_fastq (no archive)
+
+Dry-run:
+```bash
+bpm workflow run clean_fastq --dry-run true
+```
+
+Real run:
+```bash
+bpm workflow run clean_fastq --non-interactive true
+```
+
+## 5) Cron examples
 
 Edit crontab:
 ```bash
 crontab -e
 ```
 
-Archive raw-data every day at 01:30:
+Archive raw-data at 01:30:
 ```cron
 30 1 * * * /opt/miniforge3/envs/bio/bin/bpm workflow run archive_rawdata --non-interactive true >> /data/shared/bpm_manifests/cron_archive_rawdata.log 2>&1
 ```
 
-Archive FASTQ every day at 02:00:
+Archive FASTQ at 02:00:
 ```cron
 0 2 * * * /opt/miniforge3/envs/bio/bin/bpm workflow run archive_fastq --non-interactive true >> /data/shared/bpm_manifests/cron_archive_fastq.log 2>&1
 ```
 
-Cleanup every day at 03:00 using latest manifest (wrapper script pattern below):
+Cleanup at 03:00 (wrapper script):
 ```cron
 0 3 * * * /usr/local/bin/archive_cleanup_latest.sh >> /data/shared/bpm_manifests/cron_archive_cleanup.log 2>&1
 ```
 
-## 5) Sudo cleanup pattern (recommended)
-Keep archive unprivileged. If deletion needs elevated rights, run only cleanup via sudo.
+## 6) Recommended sudo wrapper for cleanup
 
-Create `/usr/local/bin/archive_cleanup_latest.sh`:
+`/usr/local/bin/archive_cleanup_latest.sh`:
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -119,102 +135,23 @@ LATEST_MANIFEST="$(ls -1 ${MANIFEST_DIR}/archive_rawdata_*.json ${MANIFEST_DIR}/
   --allowed-source-roots /data/raw,/data/fastq
 ```
 
-Make executable:
 ```bash
 sudo chmod 755 /usr/local/bin/archive_cleanup_latest.sh
 ```
 
-Allow only this command in sudoers (`visudo`):
+Sudoers (minimal scope):
 ```sudoers
 ckuo ALL=(root) NOPASSWD: /usr/local/bin/archive_cleanup_latest.sh
 ```
 
-Then cron entry can call:
-```cron
-0 3 * * * sudo /usr/local/bin/archive_cleanup_latest.sh >> /data/shared/bpm_manifests/cron_archive_cleanup.log 2>&1
-```
+## 7) Refresh BRS cache after local changes
 
-## 6) Update BRS cache before running new workflow code
-If BPM runs from `~/.bpm_cache/brs/...`, update the resource after changes:
 ```bash
 bpm resource update UKA_GF_BRS
 ```
 
-## 7) Direct clean without archiving (`clean_fastq`)
-Dry-run:
-```bash
-bpm workflow run clean_fastq --dry-run true
-```
-
-Real run:
-```bash
-bpm workflow run clean_fastq --non-interactive true
-```
-
-Default clean patterns:
-- `*.fastq.gz`
-- `*.fq.gz`
-- `.pixi`
-- `work`
-- `.renv`
-- `.Rproj.user`
-- `.nextflow`
-- `.nextflow.log*`
-
 ## Notes
-- `archive_cleanup` only deletes records that are `copied_verified` with `copy_status=ok` and `verify_status=ok`.
-- `archive_fastq` excludes `*.fastq.gz` and `*.fq.gz` from archive copy/verify.
+- `archive_cleanup` only processes records with `status=copied_verified`, `copy_status=ok`, `verify_status=ok`.
 - For `archive_fastq` manifests, `archive_cleanup` uses `cleanup_mode=non_fastq_only` and preserves FASTQ files while removing archived non-FASTQ content.
-- `archive_rawdata`, `archive_fastq`, `clean_fastq`, and `archive_cleanup` all honor active keep-rules entries.
-- Cleanup writes status back into the same manifest (`cleanup_status`, `cleanup_error`, `cleanup_attempted_at`).
-- On first permission-denied failure, `archive_cleanup` prints an inline sudo re-run hint with the exact `--manifest-path`.
-- Always run cleanup dry-run first after workflow updates.
-
-## Manifest retention policy
-Recommended housekeeping:
-- Keep manifest JSON files for 12-24 months (audit/recovery trail).
-- Gzip workflow and cron logs older than 30 days.
-- Delete compressed logs older than 6-12 months.
-
-Example housekeeping commands:
-```bash
-# Compress old logs
-find /data/shared/bpm_manifests -maxdepth 1 -type f -name "*.log" -mtime +30 -exec gzip -f {} \;
-
-# Remove very old compressed logs
-find /data/shared/bpm_manifests -maxdepth 1 -type f -name "*.log.gz" -mtime +365 -delete
-
-# Remove very old manifests (keep 24 months)
-find /data/shared/bpm_manifests -maxdepth 1 -type f -name "*.json" -mtime +730 -delete
-```
-
-## Keep-rules maintenance
-List keep rules:
-```bash
-bpm workflow run keep_rules --action list
-```
-
-Open TUI keep-rules browser (default):
-```bash
-bpm workflow run keep_rules
-```
-
-Open TUI on raw-data path:
-```bash
-bpm workflow run keep_rules --browse-root /data/raw
-```
-
-Add run to keep rules:
-```bash
-bpm workflow run keep_rules --action add --run-id 241120_A01742_0328_AHYC2WDMXY
-```
-
-Prune stale entries (preview):
-```bash
-bpm workflow run keep_rules --action prune
-```
-
-Prune stale entries (apply):
-```bash
-bpm workflow run keep_rules --action prune --apply true --yes true
-```
+- Cleanup status is written back into the same manifest (`cleanup_status`, `cleanup_error`, `cleanup_attempted_at`).
+- Run cleanup dry-run after workflow updates before destructive cleanup.

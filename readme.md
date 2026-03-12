@@ -60,10 +60,12 @@ cd /path/to/output
 - keep_rules: [workflows/keep_rules/README.md](workflows/keep_rules/README.md) (manage keep-rules file with list/add/remove/prune actions)
 
 ## Docs
+- Docs index: [docs/index.md](docs/index.md)
 - Install BPM: [docs/install_bpm.md](docs/install_bpm.md)
 - Add this BRS: [docs/add_brs.md](docs/add_brs.md)
 - Update this BRS: [docs/update_brs.md](docs/update_brs.md)
 - Archiving: [docs/archiving.md](docs/archiving.md)
+- Keep rules: [docs/keep_rules.md](docs/keep_rules.md)
 - Demultiplexing: [docs/demultiplexing.md](docs/demultiplexing.md)
 - Basic analysis: [docs/basic_analysis.md](docs/basic_analysis.md)
 
