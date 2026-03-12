@@ -420,21 +420,25 @@ def _interactive_overrides(
     return source_root, target_root, retention_days, instruments, skip_runs
 
 
-def _prompt_additional_skips(candidates: list[RunCandidate], skip_runs: set[str]) -> set[str]:
+def _prompt_additional_skips(candidates: list[RunCandidate], skip_runs: set[str]) -> tuple[set[str], bool]:
     if not candidates:
-        return skip_runs
+        return skip_runs, False
     print("\n" + _title("Optional: enter additional run IDs to skip from this plan."))
     entered = input(_title("Additional skips (comma-separated, or Enter for none): ")).strip()
     if not entered:
-        return skip_runs
+        return skip_runs, False
 
     planned_ids = {c.run_id for c in candidates}
+    changed = False
     for run_id in _split_csv(entered):
         if run_id in planned_ids:
+            before = len(skip_runs)
             skip_runs.add(run_id)
+            if len(skip_runs) != before:
+                changed = True
         else:
             print(_warn(f"[warning] Run ID not in current plan, ignored: {run_id}"))
-    return skip_runs
+    return skip_runs, changed
 
 
 def _ensure_target_free_space(target_root: Path, required_bytes: int, min_free_gb: int) -> None:
@@ -734,24 +738,28 @@ def main() -> None:
         for note in keep_notes:
             print(_warn(f"- {note}"))
 
+    printed_plan = False
     if interactive and sys.stdin.isatty():
         _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
-        skip_runs = _prompt_additional_skips(candidates, skip_runs)
-        candidates, issues2 = _discover_candidates(
-            source_root=source_root_path,
-            target_root=target_root_path,
-            instruments=instruments,
-            retention_days=retention_days,
-            skip_runs=skip_runs,
-            keep_run_ids=keep_run_ids,
-            exclude_patterns=exclude_patterns,
-        )
-        if issues2:
-            _print_section("Discovery Notes (After Skip Updates)")
-            for issue in issues2:
-                print(_warn(f"- {issue}"))
-
-    _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
+        printed_plan = True
+        skip_runs, skip_changed = _prompt_additional_skips(candidates, skip_runs)
+        if skip_changed:
+            candidates, issues2 = _discover_candidates(
+                source_root=source_root_path,
+                target_root=target_root_path,
+                instruments=instruments,
+                retention_days=retention_days,
+                skip_runs=skip_runs,
+                keep_run_ids=keep_run_ids,
+                exclude_patterns=exclude_patterns,
+            )
+            if issues2:
+                _print_section("Discovery Notes (After Skip Updates)")
+                for issue in issues2:
+                    print(_warn(f"- {issue}"))
+            _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
+    if not printed_plan:
+        _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
 
     if not candidates:
         print(_warn("\nNothing to archive. Exiting."))
