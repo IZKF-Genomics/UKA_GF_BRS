@@ -44,58 +44,6 @@ write_table <- function(df, path) {
   invisible(path)
 }
 
-validate_config_schema <- function(cfg) {
-  for (section in c("project", "input", "groups", "dmp", "dmr", "enrichment", "drilldown")) {
-    if (is.null(cfg[[section]])) log_error("Missing config section [", section, "]")
-  }
-  valid_arrays <- c("450K", "EPIC", "EPIC_V2", "AUTO", "MIXED")
-  if (!(cfg$project$array_type %in% valid_arrays)) log_error("Unsupported project.array_type:", cfg$project$array_type)
-  if (!(cfg$dmp$adjust_method %in% p.adjust.methods)) {
-    log_error("Unsupported dmp.adjust_method:", cfg$dmp$adjust_method)
-  }
-  has_runs_file <- !is.null(cfg$input$input_runs_file) && nzchar(trimws(as.character(cfg$input$input_runs_file)))
-  has_fallback_dir <- !is.null(cfg$input$processed_results_dir) && nzchar(trimws(as.character(cfg$input$processed_results_dir)))
-  if (!has_runs_file && !has_fallback_dir) {
-    log_error("Configure either input.input_runs_file or input.processed_results_dir")
-  }
-  invisible(TRUE)
-}
-
-validate_samples_schema <- function(samples, cfg) {
-  missing <- setdiff(c("sample_id", cfg$groups$primary_group_col), names(samples))
-  if (length(missing) > 0) log_error("samples.csv missing required columns:", paste(missing, collapse = ", "))
-  dup_ids <- samples$sample_id[duplicated(samples$sample_id)]
-  if (length(dup_ids) > 0) log_error("Duplicate sample_id values:", paste(unique(dup_ids), collapse = ", "))
-  invisible(TRUE)
-}
-
-validate_groups <- function(cfg, samples) {
-  group_col <- cfg$groups$primary_group_col
-  if (!(group_col %in% names(samples))) log_error("groups.primary_group_col not found in samples.csv:", group_col)
-  case_label <- cfg$groups$case
-  control_label <- cfg$groups$control
-  counts <- table(samples[[group_col]])
-  if (!(case_label %in% names(counts))) log_error("Case label not found:", case_label)
-  if (!(control_label %in% names(counts))) log_error("Control label not found:", control_label)
-  if (as.integer(counts[[case_label]]) < 2) log_error("Case group must contain at least 2 samples")
-  if (as.integer(counts[[control_label]]) < 2) log_error("Control group must contain at least 2 samples")
-  invisible(counts)
-}
-
-validate_project <- function(cfg, samples) {
-  validate_config_schema(cfg)
-  validate_samples_schema(samples, cfg)
-  validate_groups(cfg, samples)
-  validate_input_sources(cfg, samples)
-  invisible(TRUE)
-}
-
-save_plot <- function(plot_obj, path, width = 8, height = 5) {
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  ggplot2::ggsave(filename = path, plot = plot_obj, width = width, height = height)
-  invisible(path)
-}
-
 coalesce_chr <- function(x, default = "") {
   if (is.null(x) || length(x) == 0 || is.na(x)) return(default)
   as.character(x[[1]])
@@ -126,19 +74,135 @@ parse_sample_list <- function(x) {
   unique(trimws(out[nzchar(trimws(out))]))
 }
 
-resolve_input_roots <- function(processed_results_dir) {
-  roots <- c(
-    processed_results_dir,
-    file.path("..", processed_results_dir),
-    "../results/rds",
-    "../../results/rds"
+normalize_array_type_for_gometh <- function(array_type) {
+  at <- toupper(trimws(as.character(array_type)))
+  dplyr::case_when(
+    at %in% c("AUTO", "MIXED", "") ~ NA_character_,
+    at %in% c("450K", "HM450", "HUMANMETHYLATION450", "HUMANMETHYLATION450K") ~ "450K",
+    at %in% c("EPIC", "850K", "EPIC850K") ~ "EPIC",
+    at %in% c("EPIC_V2", "EPICV2", "850K_V2") ~ "EPIC_V2",
+    TRUE ~ NA_character_
   )
-  unique(roots[nzchar(trimws(roots))])
+}
+
+normalize_group_value <- function(x) {
+  tolower(gsub("[^a-z0-9]+", "", trimws(as.character(x))))
+}
+
+load_group_map <- function(path = "config/group_map.csv") {
+  p <- resolve_path(path)
+  if (!file.exists(p)) return(NULL)
+  gm <- readr::read_csv(p, show_col_types = FALSE)
+  required <- c("group_raw", "group_compare")
+  missing <- setdiff(required, names(gm))
+  if (length(missing) > 0) {
+    log_error("group_map.csv missing required columns:", paste(missing, collapse = ", "))
+  }
+  if (!("enabled" %in% names(gm))) gm$enabled <- TRUE
+  if (!("run_id" %in% names(gm))) gm$run_id <- ""
+  if (!("dataset_id" %in% names(gm))) gm$dataset_id <- ""
+  gm <- gm[vapply(gm$enabled, parse_bool, logical(1), default = TRUE), , drop = FALSE]
+  gm$key_norm <- normalize_group_value(gm$group_raw)
+  gm
+}
+
+apply_group_map <- function(samples, group_map = NULL, group_col = "group", run_col = "run_id", dataset_col = "dataset_id") {
+  if (is.null(group_map) || nrow(group_map) == 0) return(samples)
+  if (!(group_col %in% names(samples))) return(samples)
+  mapped <- samples
+  mapped$group_raw <- mapped[[group_col]]
+  mapped$group_norm <- normalize_group_value(mapped$group_raw)
+  mapped$group_compare <- NA_character_
+
+  for (i in seq_len(nrow(group_map))) {
+    row <- group_map[i, , drop = FALSE]
+    match_idx <- mapped$group_norm == row$key_norm[[1]]
+    rid <- coalesce_chr(row$run_id, "")
+    did <- coalesce_chr(row$dataset_id, "")
+    if (nzchar(rid) && (run_col %in% names(mapped))) {
+      match_idx <- match_idx & (as.character(mapped[[run_col]]) == rid)
+    }
+    if (nzchar(did) && (dataset_col %in% names(mapped))) {
+      match_idx <- match_idx & (as.character(mapped[[dataset_col]]) == did)
+    }
+    mapped$group_compare[match_idx] <- coalesce_chr(row$group_compare, "")
+  }
+
+  keep_raw <- is.na(mapped$group_compare) | trimws(mapped$group_compare) == ""
+  mapped$group_compare[keep_raw] <- as.character(mapped$group_raw[keep_raw])
+  mapped[[group_col]] <- mapped$group_compare
+  mapped$group_norm <- NULL
+  mapped
+}
+
+standardize_run_table <- function(df, source_label) {
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  if (!("processed_results_dir" %in% names(df))) {
+    log_error(source_label, "must include 'processed_results_dir'")
+  }
+  if (!("run_id" %in% names(df))) df$run_id <- paste0("run", seq_len(nrow(df)))
+  if (!("enabled" %in% names(df))) df$enabled <- TRUE
+  if (!("include_samples" %in% names(df))) df$include_samples <- ""
+  if (!("exclude_samples" %in% names(df))) df$exclude_samples <- ""
+  if (!("array_type" %in% names(df))) df$array_type <- ""
+  if (!("dataset_id" %in% names(df))) df$dataset_id <- ""
+  if (!("process_template" %in% names(df))) df$process_template <- ""
+  if (!("genome_build" %in% names(df))) df$genome_build <- ""
+  if (!("samples_file" %in% names(df))) df$samples_file <- ""
+  df
+}
+
+load_input_runs <- function(path = "config/input_runs.csv") {
+  p <- resolve_path(path)
+  if (!file.exists(p)) return(NULL)
+  df <- readr::read_csv(p, show_col_types = FALSE)
+  standardize_run_table(df, "input_runs.csv")
+}
+
+load_input_registry <- function(path = "config/input_registry.csv") {
+  p <- resolve_path(path)
+  if (!file.exists(p)) return(NULL)
+  df <- readr::read_csv(p, show_col_types = FALSE)
+  standardize_run_table(df, "input_registry.csv")
+}
+
+resolve_run_table <- function(cfg) {
+  registry_file <- coalesce_chr(cfg$input$input_registry_file, "")
+  runs_file <- coalesce_chr(cfg$input$input_runs_file, "")
+  runs_df <- NULL
+  source <- ""
+
+  if (nzchar(registry_file)) {
+    runs_df <- load_input_registry(registry_file)
+    if (!is.null(runs_df) && nrow(runs_df) > 0) {
+      source <- "input_registry"
+      return(list(runs = runs_df, source = source, path = registry_file))
+    }
+  }
+
+  if (nzchar(runs_file)) {
+    runs_df <- load_input_runs(runs_file)
+    if (!is.null(runs_df) && nrow(runs_df) > 0) {
+      source <- "input_runs"
+      return(list(runs = runs_df, source = source, path = runs_file))
+    }
+  }
+
+  list(runs = NULL, source = "fallback", path = "")
+}
+
+resolve_input_roots <- function(processed_results_dir) {
+  p <- coalesce_chr(processed_results_dir, "")
+  if (!nzchar(p)) return(character(0))
+  cands <- unique(c(p, resolve_path(p)))
+  cands[nzchar(trimws(cands))]
 }
 
 find_upstream_rds <- function(processed_results_dir) {
   obj_names <- c("adjustedset.rds", "filteredset.rds", "normset.rds", "rgset.rds")
-  for (root in resolve_input_roots(processed_results_dir)) {
+  roots <- resolve_input_roots(processed_results_dir)
+  if (length(roots) == 0) return(NULL)
+  for (root in roots) {
     for (nm in obj_names) {
       p <- file.path(root, nm)
       if (file.exists(p)) return(list(path = p, root = root))
@@ -147,58 +211,125 @@ find_upstream_rds <- function(processed_results_dir) {
   NULL
 }
 
-load_input_runs <- function(path = "config/input_runs.csv") {
-  p <- resolve_path(path)
-  if (!file.exists(p)) return(NULL)
-  df <- readr::read_csv(p, show_col_types = FALSE)
-  if (!("processed_results_dir" %in% names(df))) {
-    log_error("input_runs.csv must include 'processed_results_dir'")
+validate_config_schema <- function(cfg) {
+  for (section in c("project", "input", "groups", "dmp", "dmr", "enrichment", "drilldown")) {
+    if (is.null(cfg[[section]])) log_error("Missing config section [", section, "]")
   }
-  if (!("run_id" %in% names(df))) df$run_id <- paste0("run", seq_len(nrow(df)))
-  if (!("enabled" %in% names(df))) df$enabled <- TRUE
-  if (!("include_samples" %in% names(df))) df$include_samples <- ""
-  if (!("exclude_samples" %in% names(df))) df$exclude_samples <- ""
-  if (!("array_type" %in% names(df))) df$array_type <- ""
-  df
+  valid_arrays <- c("450K", "EPIC", "EPIC_V2", "AUTO", "MIXED")
+  if (!(cfg$project$array_type %in% valid_arrays)) log_error("Unsupported project.array_type:", cfg$project$array_type)
+  if (!(cfg$dmp$adjust_method %in% p.adjust.methods)) {
+    log_error("Unsupported dmp.adjust_method:", cfg$dmp$adjust_method)
+  }
+  has_registry <- !is.null(cfg$input$input_registry_file) && nzchar(trimws(as.character(cfg$input$input_registry_file)))
+  has_runs_file <- !is.null(cfg$input$input_runs_file) && nzchar(trimws(as.character(cfg$input$input_runs_file)))
+  has_fallback_dir <- !is.null(cfg$input$processed_results_dir) && nzchar(trimws(as.character(cfg$input$processed_results_dir)))
+  if (!has_registry && !has_runs_file && !has_fallback_dir) {
+    log_error("Configure either input.input_registry_file, input.input_runs_file, or input.processed_results_dir")
+  }
+  invisible(TRUE)
+}
+
+validate_samples_schema <- function(samples, cfg) {
+  missing <- setdiff(c("sample_id", cfg$groups$primary_group_col), names(samples))
+  if (length(missing) > 0) log_error("samples.csv missing required columns:", paste(missing, collapse = ", "))
+  dup_ids <- samples$sample_id[duplicated(samples$sample_id)]
+  if (length(dup_ids) > 0) log_error("Duplicate sample_id values:", paste(unique(dup_ids), collapse = ", "))
+  invisible(TRUE)
+}
+
+validate_groups <- function(cfg, samples) {
+  group_col <- cfg$groups$primary_group_col
+  if (!(group_col %in% names(samples))) log_error("groups.primary_group_col not found in samples.csv:", group_col)
+  case_label <- cfg$groups$case
+  control_label <- cfg$groups$control
+  counts <- table(samples[[group_col]])
+  if (!(case_label %in% names(counts))) log_error("Case label not found:", case_label)
+  if (!(control_label %in% names(counts))) log_error("Control label not found:", control_label)
+  if (as.integer(counts[[case_label]]) < 2) log_error("Case group must contain at least 2 samples")
+  if (as.integer(counts[[control_label]]) < 2) log_error("Control group must contain at least 2 samples")
+  invisible(counts)
 }
 
 validate_input_sources <- function(cfg, samples) {
-  input_runs_file <- coalesce_chr(cfg$input$input_runs_file, "")
-  runs_df <- if (nzchar(input_runs_file)) load_input_runs(input_runs_file) else NULL
+  run_info <- resolve_run_table(cfg)
+  runs_df <- run_info$runs
+
   if (!is.null(runs_df) && nrow(runs_df) > 0) {
     enabled <- vapply(runs_df$enabled, parse_bool, logical(1), default = TRUE)
-    if (!any(enabled)) log_error("No enabled rows in", input_runs_file)
-    bad_dirs <- runs_df$processed_results_dir[enabled & !nzchar(trimws(as.character(runs_df$processed_results_dir)))]
-    if (length(bad_dirs) > 0) log_error("Enabled rows in input_runs.csv require processed_results_dir")
-    if ("sample_id" %in% names(samples)) {
-      all_ids <- unique(samples$sample_id)
-      for (i in which(enabled)) {
-        missing_includes <- setdiff(parse_sample_list(runs_df$include_samples[[i]]), all_ids)
+    if (!any(enabled)) log_error("No enabled rows in", run_info$path)
+
+    for (i in which(enabled)) {
+      row <- runs_df[i, , drop = FALSE]
+      run_id <- coalesce_chr(row$run_id, paste0("run", i))
+      pdir <- coalesce_chr(row$processed_results_dir, "")
+      if (!nzchar(pdir)) {
+        log_error("Enabled run", run_id, "is missing processed_results_dir")
+      }
+      hit <- find_upstream_rds(pdir)
+      if (is.null(hit)) {
+        log_error("No upstream methylation object found for run", run_id, "under:", pdir,
+                  "(checked only configured path and its resolved project-relative form)")
+      }
+
+      at <- normalize_array_type_for_gometh(coalesce_chr(row$array_type, ""))
+      if (is.na(at) && nzchar(coalesce_chr(row$array_type, ""))) {
+        log_warn("run", run_id,
+                 "has unsupported array_type:", coalesce_chr(row$array_type, ""),
+                 "(supported: 450K, EPIC, EPIC_V2)")
+      }
+
+      sf <- coalesce_chr(row$samples_file, "")
+      if (nzchar(sf) && !file.exists(resolve_path(sf))) {
+        log_error("Run", run_id, "samples_file does not exist:", sf)
+      }
+
+      if ("sample_id" %in% names(samples)) {
+        all_ids <- unique(samples$sample_id)
+        missing_includes <- setdiff(parse_sample_list(row$include_samples[[1]]), all_ids)
         if (length(missing_includes) > 0) {
-          log_warn("run", coalesce_chr(runs_df$run_id[[i]], paste0("run", i)),
+          log_warn("run", run_id,
                    "include_samples not found in samples.csv:",
                    paste(missing_includes, collapse = ", "))
         }
       }
     }
-    for (i in which(enabled)) {
-      at <- normalize_array_type_for_gometh(coalesce_chr(runs_df$array_type[[i]], ""))
-      if (is.na(at) && nzchar(coalesce_chr(runs_df$array_type[[i]], ""))) {
-        log_warn("run", coalesce_chr(runs_df$run_id[[i]], paste0("run", i)),
-                 "has unsupported array_type in input_runs.csv:", coalesce_chr(runs_df$array_type[[i]], ""),
-                 "(supported: 450K, EPIC, EPIC_V2)")
-      }
-    }
     return(invisible(TRUE))
   }
+
   fallback_dir <- coalesce_chr(cfg$input$processed_results_dir, "")
   if (!nzchar(fallback_dir)) {
-    log_error("No input_runs file and no fallback input.processed_results_dir configured")
+    log_error("No input run table available and no fallback input.processed_results_dir configured")
+  }
+  hit <- find_upstream_rds(fallback_dir)
+  if (is.null(hit)) {
+    log_error("No upstream methylation object found under fallback input.processed_results_dir:", fallback_dir)
   }
   invisible(TRUE)
 }
 
-load_single_input <- function(run_id, processed_results_dir, configured_array_type = "") {
+validate_project <- function(cfg, samples) {
+  validate_config_schema(cfg)
+  gm <- load_group_map(coalesce_chr(cfg$input$group_map_file, ""))
+  samples_norm <- apply_group_map(samples, gm, group_col = cfg$groups$primary_group_col)
+  validate_samples_schema(samples_norm, cfg)
+  validate_groups(cfg, samples_norm)
+  validate_input_sources(cfg, samples_norm)
+  invisible(TRUE)
+}
+
+save_plot <- function(plot_obj, path, width = 8, height = 5) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  ggplot2::ggsave(filename = path, plot = plot_obj, width = width, height = height)
+  invisible(path)
+}
+
+load_single_input <- function(run_id,
+                              processed_results_dir,
+                              configured_array_type = "",
+                              dataset_id = "",
+                              process_template = "",
+                              genome_build = "",
+                              samples_file = "") {
   hit <- find_upstream_rds(processed_results_dir)
   if (is.null(hit)) {
     log_error("No upstream methylation object found for run", run_id, "under:", processed_results_dir)
@@ -212,6 +343,10 @@ load_single_input <- function(run_id, processed_results_dir, configured_array_ty
   if (!("Name" %in% names(ann))) ann$Name <- rownames(beta)
   list(
     run_id = run_id,
+    dataset_id = coalesce_chr(dataset_id, ""),
+    process_template = coalesce_chr(process_template, ""),
+    genome_build = coalesce_chr(genome_build, ""),
+    samples_file = coalesce_chr(samples_file, ""),
     source_dir = hit$root,
     object_path = hit$path,
     configured_array_type = coalesce_chr(configured_array_type, ""),
@@ -256,12 +391,22 @@ combine_inputs <- function(runs) {
   beta <- do.call(cbind, lapply(runs, `[[`, "beta"))
   mval <- do.call(cbind, lapply(runs, `[[`, "m"))
   pdata <- dplyr::bind_rows(lapply(runs, function(x) {
-    dplyr::mutate(x$pdata, run_id = x$run_id, input_source = x$source_dir)
+    dplyr::mutate(
+      x$pdata,
+      run_id = x$run_id,
+      dataset_id = x$dataset_id,
+      process_template = x$process_template,
+      run_genome_build = x$genome_build,
+      input_source = x$source_dir
+    )
   }))
   ann <- runs[[1]]$annotation
   ann <- ann[match(common_probes, ann$Name), , drop = FALSE]
   summary_tbl <- tibble::tibble(
     run_id = vapply(runs, `[[`, character(1), "run_id"),
+    dataset_id = vapply(runs, `[[`, character(1), "dataset_id"),
+    process_template = vapply(runs, `[[`, character(1), "process_template"),
+    run_genome_build = vapply(runs, `[[`, character(1), "genome_build"),
     source_dir = vapply(runs, `[[`, character(1), "source_dir"),
     object_path = vapply(runs, `[[`, character(1), "object_path"),
     configured_array_type = vapply(runs, `[[`, character(1), "configured_array_type"),
@@ -276,48 +421,137 @@ combine_inputs <- function(runs) {
   )
 }
 
+build_runs_from_table <- function(runs_df, allowed_samples = character(0)) {
+  enabled <- vapply(runs_df$enabled, parse_bool, logical(1), default = TRUE)
+  runs_df <- runs_df[enabled, , drop = FALSE]
+  runs <- lapply(seq_len(nrow(runs_df)), function(i) {
+    row <- runs_df[i, , drop = FALSE]
+    run_id <- coalesce_chr(row$run_id, paste0("run", i))
+    run <- load_single_input(
+      run_id = run_id,
+      processed_results_dir = coalesce_chr(row$processed_results_dir),
+      configured_array_type = coalesce_chr(row$array_type, ""),
+      dataset_id = coalesce_chr(row$dataset_id, ""),
+      process_template = coalesce_chr(row$process_template, ""),
+      genome_build = coalesce_chr(row$genome_build, ""),
+      samples_file = coalesce_chr(row$samples_file, "")
+    )
+    run <- subset_run_samples(
+      run,
+      include_samples = row$include_samples[[1]],
+      exclude_samples = row$exclude_samples[[1]],
+      allowed_samples = allowed_samples
+    )
+    if (ncol(run$beta) == 0) {
+      log_warn("No samples left after filtering for run", run_id, "- skipping run.")
+      return(NULL)
+    }
+    run
+  })
+  Filter(Negate(is.null), runs)
+}
+
 load_analysis_inputs <- function(cfg, samples = NULL) {
-  require_sheet <- parse_bool(cfg$input$require_samples_in_sheet, default = TRUE)
+  require_sheet <- parse_bool(cfg$input$require_samples_in_sheet, default = FALSE)
   allowed_samples <- character(0)
   if (!is.null(samples) && "sample_id" %in% names(samples) && isTRUE(require_sheet)) {
     allowed_samples <- unique(samples$sample_id)
   }
-  input_runs_file <- coalesce_chr(cfg$input$input_runs_file, "")
-  runs_df <- if (nzchar(input_runs_file)) load_input_runs(input_runs_file) else NULL
-  if (!is.null(runs_df) && nrow(runs_df) > 0) {
-    enabled <- vapply(runs_df$enabled, parse_bool, logical(1), default = TRUE)
-    runs_df <- runs_df[enabled, , drop = FALSE]
-    runs <- lapply(seq_len(nrow(runs_df)), function(i) {
-      row <- runs_df[i, , drop = FALSE]
-      run_id <- coalesce_chr(row$run_id, paste0("run", i))
-      run <- load_single_input(
-        run_id = run_id,
-        processed_results_dir = coalesce_chr(row$processed_results_dir),
-        configured_array_type = coalesce_chr(row$array_type, "")
-      )
-      run <- subset_run_samples(
-        run,
-        include_samples = row$include_samples[[1]],
-        exclude_samples = row$exclude_samples[[1]],
-        allowed_samples = allowed_samples
-      )
-      if (ncol(run$beta) == 0) {
-        log_warn("No samples left after filtering for run", run_id, "- skipping run.")
-        return(NULL)
-      }
-      run
-    })
-    runs <- Filter(Negate(is.null), runs)
+
+  run_info <- resolve_run_table(cfg)
+  if (!is.null(run_info$runs) && nrow(run_info$runs) > 0) {
+    runs <- build_runs_from_table(run_info$runs, allowed_samples = allowed_samples)
     return(combine_inputs(runs))
   }
+
   fallback <- coalesce_chr(cfg$input$processed_results_dir, "")
   if (!nzchar(fallback)) {
     log_error("No input runs configured and no input.processed_results_dir fallback set")
   }
-  run <- load_single_input(run_id = "run1", processed_results_dir = fallback, configured_array_type = coalesce_chr(cfg$project$array_type, ""))
+  run <- load_single_input(
+    run_id = "run1",
+    processed_results_dir = fallback,
+    configured_array_type = coalesce_chr(cfg$project$array_type, "")
+  )
   run <- subset_run_samples(run, include_samples = "", exclude_samples = "", allowed_samples = allowed_samples)
   if (ncol(run$beta) == 0) log_error("No samples left after filtering for fallback input.processed_results_dir")
   combine_inputs(list(run))
+}
+
+sync_samples_from_inputs <- function(cfg,
+                                     output_file = "config/samples.csv",
+                                     include_existing_columns = TRUE) {
+  run_info <- resolve_run_table(cfg)
+  if (is.null(run_info$runs) || nrow(run_info$runs) == 0) {
+    log_error("sync_samples_from_inputs requires input_registry or input_runs entries")
+  }
+
+  runs <- build_runs_from_table(run_info$runs, allowed_samples = character(0))
+  if (length(runs) == 0) {
+    log_error("No runs with usable samples found while syncing sample sheet")
+  }
+
+  synced <- dplyr::bind_rows(lapply(runs, function(run) {
+    pd <- run$pdata
+    if (!("sample_id" %in% names(pd))) pd$sample_id <- colnames(run$beta)
+    group_raw <- if ("group" %in% names(pd)) as.character(pd$group) else NA_character_
+    pd <- dplyr::mutate(
+      pd,
+      run_id = run$run_id,
+      dataset_id = run$dataset_id,
+      process_template = run$process_template,
+      array_type = run$configured_array_type,
+      group_raw = group_raw,
+      group = group_raw,
+      input_source = run$source_dir,
+      input_object = run$object_path,
+      sample_uid = paste0(run$run_id, "::", .data$sample_id)
+    )
+
+    sf <- coalesce_chr(run$samples_file, "")
+    if (nzchar(sf) && file.exists(resolve_path(sf))) {
+      ext <- readr::read_csv(resolve_path(sf), show_col_types = FALSE)
+      if ("sample_id" %in% names(ext)) {
+        pd <- dplyr::left_join(pd, ext, by = "sample_id", suffix = c("", ".sheet"))
+      }
+    }
+
+    pd
+  }))
+
+  gm <- load_group_map(coalesce_chr(cfg$input$group_map_file, "config/group_map.csv"))
+  group_col <- coalesce_chr(cfg$groups$primary_group_col, "group")
+  if (!(group_col %in% names(synced))) {
+    synced[[group_col]] <- synced$group
+  }
+  synced <- apply_group_map(synced, gm, group_col = group_col, run_col = "run_id", dataset_col = "dataset_id")
+
+  if (file.exists(output_file) && include_existing_columns) {
+    existing <- readr::read_csv(output_file, show_col_types = FALSE)
+    if ("sample_id" %in% names(existing)) {
+      synced <- dplyr::left_join(synced, existing, by = "sample_id", suffix = c("", ".existing"))
+      existing_cols <- names(synced)[grepl("\\.existing$", names(synced))]
+      for (ec in existing_cols) {
+        base <- sub("\\.existing$", "", ec)
+        if (!(base %in% names(synced))) {
+          synced[[base]] <- synced[[ec]]
+        } else {
+          missing_base <- is.na(synced[[base]]) | trimws(as.character(synced[[base]])) == ""
+          synced[[base]][missing_base] <- synced[[ec]][missing_base]
+        }
+      }
+      synced <- synced[, setdiff(names(synced), existing_cols), drop = FALSE]
+    }
+  }
+
+  first_cols <- c("sample_uid", "sample_id", group_col, "group_raw", "run_id", "dataset_id", "process_template", "array_type", "input_source", "input_object")
+  first_cols <- unique(first_cols[first_cols %in% names(synced)])
+  other_cols <- setdiff(names(synced), first_cols)
+  synced <- synced[, c(first_cols, other_cols), drop = FALSE]
+
+  write_table(synced, output_file)
+  log_info("Synced", nrow(synced), "samples into", output_file)
+  invisible(synced)
 }
 
 get_beta_matrix <- function(obj) {
@@ -344,17 +578,6 @@ get_annotation_df <- function(obj) {
   ann_df <- as.data.frame(ann)
   ann_df$Name <- rownames(ann_df)
   as_tibble(ann_df)
-}
-
-normalize_array_type_for_gometh <- function(array_type) {
-  at <- toupper(trimws(as.character(array_type)))
-  dplyr::case_when(
-    at %in% c("AUTO", "MIXED", "") ~ NA_character_,
-    at %in% c("450K", "HM450", "HUMANMETHYLATION450", "HUMANMETHYLATION450K") ~ "450K",
-    at %in% c("EPIC", "850K", "EPIC850K") ~ "EPIC",
-    at %in% c("EPIC_V2", "EPICV2", "850K_V2") ~ "EPIC_V2",
-    TRUE ~ NA_character_
-  )
 }
 
 infer_gometh_array_type <- function(project_array_type, run_array_types = character(0)) {

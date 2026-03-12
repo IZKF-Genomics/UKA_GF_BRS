@@ -38,6 +38,8 @@ cd /path/to/output
 - dgea: [templates/dgea/README.md](templates/dgea/README.md)
 - export: [templates/export/README.md](templates/export/README.md) (report_links-based mapping table; remote links supported, host prefixes allowed)
 - hello_world: [templates/hello_world/README.md](templates/hello_world/README.md)
+- illumina_methylation_process: [templates/illumina_methylation_process/README.md](templates/illumina_methylation_process/README.md)
+- illumina_methylation_compare: [templates/illumina_methylation_compare/README.md](templates/illumina_methylation_compare/README.md)
 - ercc: [templates/ercc/README.md](templates/ercc/README.md)
 - nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)
 - nfcore_cutandrun: [templates/nfcore_cutandrun/README.md](templates/nfcore_cutandrun/README.md)
@@ -93,6 +95,7 @@ cd /path/to/output
 - clean_fastq workflow removes pattern-matched files/directories directly from `/data/fastq` without archiving, with retention and manifest logging.
 - keep_rules workflow manages `/data/shared/bpm_manifests/keep_rules.yaml`, including `prune` to remove stale run entries no longer present in source roots.
 - keep_rules now defaults to a keyboard TUI for bulk keep/unkeep management (`Space` toggle, `u` keep_until, `s` save) with browse root `/data/fastq`.
+- illumina_methylation_compare now supports registry-driven multi-run input management (`config/input_registry.csv`), strict upstream object path resolution, group harmonization via `config/group_map.csv`, and `pixi run sync-samples` for rebuilding compare sample sheets from enabled process runs.
 
 ## Agent Readability
 

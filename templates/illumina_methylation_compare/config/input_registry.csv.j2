@@ -1,0 +1,6 @@
+run_id,dataset_id,process_template,array_type,genome_build,processed_results_dir,samples_file,enabled,include_samples,exclude_samples
+process_450k,geo_450k,illumina_methylation_process,450K,hg38,../process_450k/results/rds,../process_450k/samples.csv,false,,
+process_epic_geo_schwannoma_core_n50,geo_epic_core,illumina_methylation_process,EPIC,hg38,../process_epic_geo_schwannoma_core_n50/results/rds,../process_epic_geo_schwannoma_core_n50/samples.csv,false,,
+process_epic_internal_tumor_panel_n37,internal_epic_panel,illumina_methylation_process,EPIC,hg38,../process_epic_internal_tumor_panel_n37/results/rds,../process_epic_internal_tumor_panel_n37/samples.csv,false,,
+process_epic_mini_mixed_n6,internal_epic_mini,illumina_methylation_process,EPIC,hg38,../process_epic_mini_mixed_n6/results/rds,../process_epic_mini_mixed_n6/samples.csv,false,,
+run1,default,illumina_methylation_process,EPIC,hg38,{{ ctx.params.process_results_dir }},,true,,

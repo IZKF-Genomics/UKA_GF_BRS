@@ -28,11 +28,13 @@ go <- read_if("../results/tables/go_terms.csv")
 dmr <- read_if("../results/tables/dmr_table.csv")
 run_summary <- read_if("../results/tables/input_run_summary.csv")
 summary_tbl <- tibble::tibble(
-  metric = c("project_name", "array_type", "input_runs_file", "fallback_input_results_dir", "configured_input_runs", "run_array_types", "significant_cpgs", "dmr_rows"),
+  metric = c("project_name", "array_type", "input_registry_file", "input_runs_file", "group_map_file", "fallback_input_results_dir", "configured_input_runs", "run_array_types", "significant_cpgs", "dmr_rows"),
   value = c(
     cfg$project$name,
     cfg$project$array_type,
+    cfg$input$input_registry_file,
     cfg$input$input_runs_file,
+    cfg$input$group_map_file,
     cfg$input$processed_results_dir,
     if (is.null(run_summary)) NA else nrow(run_summary),
     if (is.null(run_summary) || !("configured_array_type" %in% names(run_summary))) NA else paste(unique(run_summary$configured_array_type), collapse = ","),

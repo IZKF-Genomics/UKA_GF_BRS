@@ -61,9 +61,12 @@ render:
     - run.sh.j2 -> run.sh
     - .gitignore -> .gitignore
     - config/project.toml.j2 -> config/project.toml
+    - config/input_registry.csv.j2 -> config/input_registry.csv
     - config/input_runs.csv.j2 -> config/input_runs.csv
+    - config/group_map.csv -> config/group_map.csv
     - config/samples.csv -> config/samples.csv
     - common.R -> common.R
+    - scripts/sync_samples_from_inputs.R -> scripts/sync_samples_from_inputs.R
     - steps/01_dmp.qmd.j2 -> steps/01_dmp.qmd
     - steps/02_dmr.qmd.j2 -> steps/02_dmr.qmd
     - steps/03_enrichment.qmd.j2 -> steps/03_enrichment.qmd

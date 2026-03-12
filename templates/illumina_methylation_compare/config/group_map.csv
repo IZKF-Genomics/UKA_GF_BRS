@@ -1,0 +1,7 @@
+run_id,dataset_id,group_raw,group_compare,enabled
+,,plexNfib,plexiform neurofibroma,true
+,,schwannoma nf2mut,schwannoma,true
+,,schwannoma sox10mut,schwannoma,true
+,,schwannoma htra1mut,schwannoma,true
+,,HPNST-Nfib,HPNST,true
+,,HPNST-SC,HPNST-SC,true

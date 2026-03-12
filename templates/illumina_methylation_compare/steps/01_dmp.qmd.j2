@@ -23,6 +23,8 @@ source("../common.R")
 ensure_dirs("..")
 cfg <- load_config("../config/project.toml")
 samples <- load_samples("../config/samples.csv")
+group_map <- load_group_map(coalesce_chr(cfg$input$group_map_file, "../config/group_map.csv"))
+samples <- apply_group_map(samples, group_map, group_col = cfg$groups$primary_group_col)
 if (!isTRUE(cfg$dmp$enabled)) {
   cat("DMP step disabled in config.\n")
   knitr::knit_exit()
