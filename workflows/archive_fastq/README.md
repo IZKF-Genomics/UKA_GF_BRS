@@ -24,6 +24,8 @@ optional_params:
 - manifest_dir
 - exclude_patterns
 - keep_rules_path
+- investigate
+- investigate_top
 cli_flags:
   source_root: --source-root
   target_root: --target-root
@@ -35,6 +37,8 @@ cli_flags:
   dry_run: --dry-run
   exclude_patterns: --exclude-patterns
   keep_rules_path: --keep-rules-path
+  investigate: --investigate
+  investigate_top: --investigate-top
 run_entry: run.py
 tools_required:
 - python
@@ -71,6 +75,12 @@ bpm workflow run archive_fastq --skip-runs 251030_A01742_0532_BH5MKFDRX7,260105_
 
 # Plan only (no copy)
 bpm workflow run archive_fastq --dry-run true
+
+# Investigate one run's included/excluded size details (no copy)
+bpm workflow run archive_fastq --investigate 250818_LH00452_0279_B22YHHTLT4_6
+
+# Investigate with wider top lists
+bpm workflow run archive_fastq --investigate 250818_LH00452_0279_B22YHHTLT4_6 --investigate-top 50
 ```
 
 ## Output manifest
@@ -107,3 +117,4 @@ Use `archive_cleanup` to consume this manifest and perform deletion safely, opti
 - Uses ANSI colors for headings, prompts, warnings, and final status in interactive terminals.
 - Set `NO_COLOR=1` to disable colors.
 - Archive plan table includes an `Owner` column (source run directory owner username) to help pre-check cleanup permissions.
+- `--investigate <RUN_ID>` prints detailed included/excluded size breakdown (patterns, top-level paths, and top files) and exits without archive/copy/verify.

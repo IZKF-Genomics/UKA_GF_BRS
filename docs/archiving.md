@@ -54,6 +54,12 @@ Default FASTQ excludes in `archive_fastq`:
 - `.nextflow`
 - `.nextflow.log*`
 
+Investigate one FASTQ run before archiving (report-only):
+```bash
+bpm workflow run archive_fastq --investigate 250818_LH00452_0279_B22YHHTLT4_6
+```
+This prints total/included/excluded sizes, excluded-by-pattern totals, and top included/excluded files.
+
 Typical outputs:
 - `/data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.json`
 - `/data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.log`

@@ -263,8 +263,93 @@ def _dir_size_excluding(path: Path, exclude_patterns: list[str]) -> int:
     return total
 
 
+def _match_exclude_pattern(file_path: Path, run_dir: Path, exclude_patterns: list[str]) -> str | None:
+    name = file_path.name
+    rel = str(file_path.relative_to(run_dir))
+    for pat in exclude_patterns:
+        if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(rel, pat):
+            return pat
+    return None
+
+
 def _compute_cutoff(retention_days: int) -> date:
     return date.today() - timedelta(days=retention_days)
+
+
+def _investigate_run(source_root: Path, run_id: str, exclude_patterns: list[str], top_n: int) -> None:
+    run_dir = source_root / run_id
+    if not run_dir.exists() or not run_dir.is_dir():
+        raise SystemExit(f"Investigate run not found or not a directory: {run_dir}")
+
+    total_bytes = 0
+    excluded_bytes = 0
+    included_bytes = 0
+    included_files: list[tuple[int, str]] = []
+    excluded_files: list[tuple[int, str, str]] = []
+    by_pattern: dict[str, int] = {}
+    by_top_included: dict[str, int] = {}
+    by_top_excluded: dict[str, int] = {}
+
+    for root, _, files in os.walk(run_dir):
+        root_path = Path(root)
+        for name in files:
+            file_path = root_path / name
+            try:
+                size = file_path.stat().st_size
+            except OSError:
+                continue
+            rel = str(file_path.relative_to(run_dir))
+            top = rel.split("/", 1)[0] if "/" in rel else "."
+            total_bytes += size
+            pat = _match_exclude_pattern(file_path, run_dir, exclude_patterns)
+            if pat is not None:
+                excluded_bytes += size
+                excluded_files.append((size, rel, pat))
+                by_pattern[pat] = by_pattern.get(pat, 0) + size
+                by_top_excluded[top] = by_top_excluded.get(top, 0) + size
+            else:
+                included_bytes += size
+                included_files.append((size, rel))
+                by_top_included[top] = by_top_included.get(top, 0) + size
+
+    def _top_items(items: list[tuple[int, str]], n: int) -> list[tuple[int, str]]:
+        return sorted(items, key=lambda x: x[0], reverse=True)[:n]
+
+    _print_section("Investigate Run")
+    print(f"Run: {run_id}")
+    print(f"Path: {run_dir}")
+    print(f"Exclude patterns: {', '.join(exclude_patterns) if exclude_patterns else '(none)'}")
+    print("\nSummary:")
+    print(_ok(f"- Total size: {_format_bytes(total_bytes)}"))
+    print(_warn(f"- Excluded by patterns: {_format_bytes(excluded_bytes)}"))
+    print(_ok(f"- Included (archive size): {_format_bytes(included_bytes)}"))
+
+    if by_pattern:
+        print("\nExcluded size by pattern:")
+        for pat, size in sorted(by_pattern.items(), key=lambda kv: kv[1], reverse=True):
+            print(f"  {pat:<20} {_format_bytes(size):>12}")
+
+    if by_top_included:
+        print("\nTop-level included paths:")
+        for name, size in sorted(by_top_included.items(), key=lambda kv: kv[1], reverse=True)[:top_n]:
+            print(f"  {name:<36} {_format_bytes(size):>12}")
+
+    if by_top_excluded:
+        print("\nTop-level excluded paths:")
+        for name, size in sorted(by_top_excluded.items(), key=lambda kv: kv[1], reverse=True)[:top_n]:
+            print(f"  {name:<36} {_format_bytes(size):>12}")
+
+    top_inc = _top_items(included_files, top_n)
+    if top_inc:
+        print("\nTop included files:")
+        for size, rel in top_inc:
+            print(f"  {_format_bytes(size):>12}  {rel}")
+
+    top_exc = sorted(excluded_files, key=lambda x: x[0], reverse=True)[:top_n]
+    if top_exc:
+        print("\nTop excluded files:")
+        for size, rel, pat in top_exc:
+            print(f"  {_format_bytes(size):>12}  {rel}  {_dim(f'({pat})')}")
 
 
 def _owner_user(path: Path) -> str:
@@ -642,6 +727,8 @@ def _parse_params() -> dict[str, Any]:
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--exclude-patterns", default=",".join(DEFAULT_EXCLUDE_PATTERNS))
     parser.add_argument("--keep-rules-path", default=DEFAULT_KEEP_RULES_PATH)
+    parser.add_argument("--investigate", default="")
+    parser.add_argument("--investigate-top", type=int, default=20)
 
     if params:
         return params
@@ -663,6 +750,8 @@ def _parse_params() -> dict[str, Any]:
         "manifest_dir": args.manifest_dir,
         "exclude_patterns": args.exclude_patterns,
         "keep_rules_path": args.keep_rules_path,
+        "investigate": args.investigate,
+        "investigate_top": args.investigate_top,
     }
 
 
@@ -687,12 +776,16 @@ def main() -> None:
     manifest_dir = Path(str(params.get("manifest_dir") or DEFAULT_MANIFEST_DIR)).expanduser().resolve()
     exclude_patterns = _split_csv(params.get("exclude_patterns") or ",".join(DEFAULT_EXCLUDE_PATTERNS))
     keep_rules_path = Path(str(params.get("keep_rules_path") or DEFAULT_KEEP_RULES_PATH)).expanduser().resolve()
+    investigate_run_id = str(params.get("investigate") or "").strip()
+    investigate_top = _parse_int(params.get("investigate_top"), 20)
     for mandatory in DEFAULT_EXCLUDE_PATTERNS:
         if mandatory not in exclude_patterns:
             exclude_patterns.append(mandatory)
 
     if retention_days < 0:
         raise SystemExit("retention_days must be >= 0")
+    if investigate_top <= 0:
+        raise SystemExit("investigate_top must be > 0")
 
     if cleanup_requested:
         print(_warn("[warning] cleanup in archive_fastq is deprecated and ignored. Use archive_cleanup workflow."))
@@ -701,6 +794,9 @@ def main() -> None:
         interactive = False
         yes = True
         print(_dim("[mode] non_interactive=true -> interactive disabled, global confirmation auto-approved"))
+
+    if investigate_run_id:
+        interactive = False
 
     if interactive and sys.stdin.isatty():
         source_root, target_root, retention_days, instruments, skip_runs = _interactive_overrides(
@@ -716,6 +812,9 @@ def main() -> None:
 
     if not source_root_path.exists() or not source_root_path.is_dir():
         raise SystemExit(f"Source root not found or not a directory: {source_root_path}")
+    if investigate_run_id:
+        _investigate_run(source_root_path, investigate_run_id, exclude_patterns, investigate_top)
+        return
     if not target_root_path.exists() or not target_root_path.is_dir():
         raise SystemExit(f"Target root not found or not a directory: {target_root_path}")
     keep_run_ids, keep_notes = _load_active_keep_runs(keep_rules_path)
