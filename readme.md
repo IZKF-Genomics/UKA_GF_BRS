@@ -57,6 +57,7 @@ cd /path/to/output
 - export_demux: [workflows/export_demux/README.md](workflows/export_demux/README.md) (report_links-based spec)
 - export_status: [workflows/export_status/README.md](workflows/export_status/README.md)
 - hello_world: [workflows/hello_world/README.md](workflows/hello_world/README.md)
+- keep_rules: [workflows/keep_rules/README.md](workflows/keep_rules/README.md) (manage keep-rules file with list/add/remove/prune actions)
 
 ## Docs
 - Install BPM: [docs/install_bpm.md](docs/install_bpm.md)
@@ -88,6 +89,8 @@ cd /path/to/output
 - archive_cleanup now resolves the latest manifest by file modification time across `archive_rawdata_*.json` and `archive_fastq_*.json` (not by filename ordering).
 - export_demux workflow config now exposes `include_in_report`, `include_in_report_fastq`, and `include_in_report_multiqc` parameters used by the run script.
 - clean_fastq workflow removes pattern-matched files/directories directly from `/data/fastq` without archiving, with retention and manifest logging.
+- keep_rules workflow manages `/data/shared/bpm_manifests/keep_rules.yaml`, including `prune` to remove stale run entries no longer present in source roots.
+- keep_rules now defaults to a keyboard TUI for bulk keep/unkeep management (`Space` toggle, `u` keep_until, `s` save) with browse root `/data/fastq`.
 
 ## Agent Readability
 

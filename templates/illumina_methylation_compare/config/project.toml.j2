@@ -1,0 +1,43 @@
+[project]
+name = "{{ ctx.params.study_name }}"
+array_type = "{{ ctx.params.array_type }}"    # "AUTO" | "450K" | "EPIC" | "EPIC_V2"
+genome_build = "{{ ctx.params.genome_build }}"
+outdir = "reports"
+
+[input]
+input_runs_file = "config/input_runs.csv"
+require_samples_in_sheet = true
+processed_results_dir = "{{ ctx.params.process_results_dir }}" # fallback if input_runs_file is missing
+
+[groups]
+primary_group_col = "{{ ctx.params.group_col }}"
+case = "{{ ctx.params.case_label }}"
+control = "{{ ctx.params.control_label }}"
+
+[dmp]
+enabled = true
+use_m_values = true
+adjust_method = "BH"
+alpha = 0.05
+delta_beta_min = 0.10
+covariates = ["age", "sex_reported"]
+
+[dmr]
+enabled = false
+method = "DMRcate"
+alpha = 0.05
+
+[enrichment]
+enabled = true
+method = "missMethyl_gometh"
+collections = ["GO", "KEGG"]
+ontologies = ["BP", "MF", "CC"]
+top_n = 30
+
+[drilldown]
+enabled = true
+cpg_ids = ["cg00000029"]
+loci = ["chr1:1000000-1010000"]
+genes = ["BRCA1"]
+max_cpgs_per_locus = 200
+heatmap_top_var = 100

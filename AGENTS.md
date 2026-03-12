@@ -24,6 +24,10 @@
 
 ## Documentation
 - Always update `/data/shared/repos/UKA_GF_BRS/readme.md` when adding a new template or workflow, and when making changes that affect existing templates or workflows.
+- Keep documentation consistent with every implementation change. When behavior, defaults, parameters, outputs, or UX change, update the relevant docs in the same implementation (workflow README(s), `docs/*.md`, and repo `readme.md` as applicable).
+
+## Git workflow
+- After each implementation is complete and validated, run `git add` and create a commit for the completed change set unless the user explicitly asks not to commit.
 
 ## Quality bar
 - Keep changes small and reviewable.

@@ -20,6 +20,7 @@ optional_params:
 - dry_run
 - manifest_path
 - manifest_dir
+- keep_rules_path
 cli_flags:
   source_root: --source-root
   retention_days: --retention-days
@@ -28,6 +29,7 @@ cli_flags:
   non_interactive: --non-interactive
   yes: --yes
   dry_run: --dry-run
+  keep_rules_path: --keep-rules-path
 run_entry: run.py
 tools_required:
 - python
@@ -40,6 +42,7 @@ Remove pattern-matched files/directories directly from `/data/fastq` run folders
 ## Default behavior
 - Source root: `/data/fastq`
 - Source layout: flat run directories directly under source root
+- Keep rules: `/data/shared/bpm_manifests/keep_rules.yaml` (active keep entries are auto-skipped)
 - Retention reference: prefer `bpm.meta.yaml -> export.last_exported_at`, fallback to run directory name prefix `YYMMDD_`
 - Retention: keep recent 90 days; clean only runs strictly older than cutoff based on the retention reference
 - Default clean patterns:
@@ -78,4 +81,5 @@ bpm workflow run clean_fastq --skip-runs 250704_A01742_0465_AH227MDSXF,250818_LH
 - Global confirmation required unless `yes=true`.
 - Supports `non_interactive=true` for cron-safe execution.
 - Uses retention-days filtering and explicit skip-runs.
+- Automatically excludes run IDs protected by active keep-rules entries.
 - Default clean patterns are always enforced.

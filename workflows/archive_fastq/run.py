@@ -20,6 +20,7 @@ DEFAULT_SOURCE_ROOT = "/data/fastq"
 DEFAULT_TARGET_ROOT = "/mnt/nextgen2/archive/fastq"
 DEFAULT_RETENTION_DAYS = 90
 DEFAULT_MANIFEST_DIR = "/data/shared/bpm_manifests"
+DEFAULT_KEEP_RULES_PATH = "/data/shared/bpm_manifests/keep_rules.yaml"
 DEFAULT_EXCLUDE_PATTERNS = [
     "*.fastq.gz",
     "*.fq.gz",
@@ -165,6 +166,47 @@ def _parse_exported_at_date(value: Any) -> date | None:
         return None
 
 
+def _load_active_keep_runs(keep_rules_path: Path) -> tuple[set[str], list[str]]:
+    if not keep_rules_path.exists():
+        return set(), []
+    try:
+        payload = yaml.safe_load(keep_rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001
+        return set(), [f"Failed to parse keep_rules file {keep_rules_path}: {exc}"]
+    if not isinstance(payload, dict):
+        return set(), [f"Invalid keep_rules format in {keep_rules_path}: expected mapping"]
+
+    runs = payload.get("runs") or {}
+    if not isinstance(runs, dict):
+        return set(), [f"Invalid keep_rules.runs format in {keep_rules_path}: expected mapping"]
+
+    today = date.today()
+    active: set[str] = set()
+    notes: list[str] = []
+    for run_id, rec in runs.items():
+        run_id_s = str(run_id).strip()
+        if not run_id_s:
+            continue
+        if not isinstance(rec, dict):
+            notes.append(f"Invalid keep_rules record for run_id={run_id_s}: expected mapping")
+            continue
+        if rec.get("keep", True) is False:
+            continue
+        keep_until_raw = rec.get("keep_until")
+        if keep_until_raw in (None, ""):
+            active.add(run_id_s)
+            continue
+        try:
+            keep_until = date.fromisoformat(str(keep_until_raw))
+        except ValueError:
+            notes.append(f"Invalid keep_until in keep_rules for run_id={run_id_s}: {keep_until_raw}")
+            active.add(run_id_s)
+            continue
+        if keep_until >= today:
+            active.add(run_id_s)
+    return active, notes
+
+
 def _get_retention_reference(run_dir: Path, run_date: date) -> tuple[date, str]:
     meta_path = run_dir / "bpm.meta.yaml"
     if not meta_path.exists():
@@ -229,6 +271,7 @@ def _discover_candidates(
     instruments: list[str],
     retention_days: int,
     skip_runs: set[str],
+    keep_run_ids: set[str],
     exclude_patterns: list[str],
 ) -> tuple[list[RunCandidate], list[str]]:
     # /data/fastq is a flat run layout (no instrument-level folders).
@@ -248,6 +291,8 @@ def _discover_candidates(
         if ref_date >= cutoff:
             continue
         if entry.name in skip_runs:
+            continue
+        if entry.name in keep_run_ids:
             continue
         try:
             total_size_bytes = _du_size_bytes(entry)
@@ -284,6 +329,7 @@ def _print_plan(
     candidates: list[RunCandidate],
     retention_days: int,
     skip_runs: set[str],
+    keep_run_ids: set[str],
     exclude_patterns: list[str],
 ) -> None:
     cutoff = _compute_cutoff(retention_days)
@@ -292,6 +338,7 @@ def _print_plan(
     print(f"Archive runs older than: {cutoff.isoformat()} (strictly before this date)")
     print("Retention reference: export.last_exported_at -> run-name YYMMDD prefix")
     print(f"Runs skipped by user: {', '.join(sorted(skip_runs)) if skip_runs else '(none)'}")
+    print(f"Runs protected by keep_rules: {len(keep_run_ids)}")
     print(f"Exclude patterns: {', '.join(exclude_patterns) if exclude_patterns else '(none)'}")
 
     if not candidates:
@@ -573,6 +620,7 @@ def _parse_params() -> dict[str, Any]:
     parser.add_argument("--manifest-path", default="")
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--exclude-patterns", default=",".join(DEFAULT_EXCLUDE_PATTERNS))
+    parser.add_argument("--keep-rules-path", default=DEFAULT_KEEP_RULES_PATH)
 
     if params:
         return params
@@ -593,6 +641,7 @@ def _parse_params() -> dict[str, Any]:
         "manifest_path": args.manifest_path,
         "manifest_dir": args.manifest_dir,
         "exclude_patterns": args.exclude_patterns,
+        "keep_rules_path": args.keep_rules_path,
     }
 
 
@@ -616,6 +665,7 @@ def main() -> None:
     manifest_path_raw = str(params.get("manifest_path") or "").strip()
     manifest_dir = Path(str(params.get("manifest_dir") or DEFAULT_MANIFEST_DIR)).expanduser().resolve()
     exclude_patterns = _split_csv(params.get("exclude_patterns") or ",".join(DEFAULT_EXCLUDE_PATTERNS))
+    keep_rules_path = Path(str(params.get("keep_rules_path") or DEFAULT_KEEP_RULES_PATH)).expanduser().resolve()
     for mandatory in DEFAULT_EXCLUDE_PATTERNS:
         if mandatory not in exclude_patterns:
             exclude_patterns.append(mandatory)
@@ -647,6 +697,7 @@ def main() -> None:
         raise SystemExit(f"Source root not found or not a directory: {source_root_path}")
     if not target_root_path.exists() or not target_root_path.is_dir():
         raise SystemExit(f"Target root not found or not a directory: {target_root_path}")
+    keep_run_ids, keep_notes = _load_active_keep_runs(keep_rules_path)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     default_manifest_path = manifest_dir / f"archive_fastq_{timestamp}.json"
@@ -657,6 +708,8 @@ def main() -> None:
     print(f"Source root: {source_root_path}")
     print(f"Target root: {target_root_path}")
     print("Source layout: flat run directories (no instrument folders)")
+    print(f"Keep rules path: {keep_rules_path}")
+    print(f"Protected runs from keep rules: {len(keep_run_ids)}")
     print(f"Manifest path: {manifest_path}")
     print(f"Log path: {log_path}")
     print(f"Rsync exclude patterns: {', '.join(exclude_patterns) if exclude_patterns else '(none)'}")
@@ -670,16 +723,19 @@ def main() -> None:
         instruments=instruments,
         retention_days=retention_days,
         skip_runs=skip_runs,
+        keep_run_ids=keep_run_ids,
         exclude_patterns=exclude_patterns,
     )
 
-    if issues:
+    if issues or keep_notes:
         _print_section("Discovery Notes")
         for issue in issues:
             print(_warn(f"- {issue}"))
+        for note in keep_notes:
+            print(_warn(f"- {note}"))
 
     if interactive and sys.stdin.isatty():
-        _print_plan(candidates, retention_days, skip_runs, exclude_patterns)
+        _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
         skip_runs = _prompt_additional_skips(candidates, skip_runs)
         candidates, issues2 = _discover_candidates(
             source_root=source_root_path,
@@ -687,6 +743,7 @@ def main() -> None:
             instruments=instruments,
             retention_days=retention_days,
             skip_runs=skip_runs,
+            keep_run_ids=keep_run_ids,
             exclude_patterns=exclude_patterns,
         )
         if issues2:
@@ -694,7 +751,7 @@ def main() -> None:
             for issue in issues2:
                 print(_warn(f"- {issue}"))
 
-    _print_plan(candidates, retention_days, skip_runs, exclude_patterns)
+    _print_plan(candidates, retention_days, skip_runs, keep_run_ids, exclude_patterns)
 
     if not candidates:
         print(_warn("\nNothing to archive. Exiting."))
@@ -720,6 +777,8 @@ def main() -> None:
         "retention_days": retention_days,
         "instrument_folders": instruments,
         "skip_runs": sorted(skip_runs),
+        "keep_rules_path": str(keep_rules_path),
+        "keep_protected_runs": sorted(keep_run_ids),
         "dry_run": dry_run,
         "cleanup_in_archive": False,
         "archive_exclude_patterns": exclude_patterns,

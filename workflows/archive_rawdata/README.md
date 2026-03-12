@@ -22,6 +22,7 @@ optional_params:
 - min_free_gb
 - manifest_path
 - manifest_dir
+- keep_rules_path
 cli_flags:
   source_root: --source-root
   target_root: --target-root
@@ -31,6 +32,7 @@ cli_flags:
   non_interactive: --non-interactive
   yes: --yes
   dry_run: --dry-run
+  keep_rules_path: --keep-rules-path
 run_entry: run.py
 tools_required:
 - python
@@ -46,6 +48,7 @@ This workflow does not delete source data. Cleanup is delegated to `archive_clea
 - Source root: `/data/raw`
 - Target root: `/mnt/nextgen2/archive/raw`
 - Manifest dir: `/data/shared/bpm_manifests`
+- Keep rules: `/data/shared/bpm_manifests/keep_rules.yaml` (active keep entries are auto-skipped)
 - Instrument allowlist:
   - `miseq1_M00818`
   - `miseq2_M04404`
@@ -91,6 +94,7 @@ Use `archive_cleanup` to consume this manifest and perform deletion safely, opti
 - Uses `rsync -a --human-readable --info=progress2 --no-inc-recursive --partial` for a single aggregated progress line (percent + ETA) per run.
 - Verifies each copied run with `rsync -avhn --delete`.
 - Uses lock file `/tmp/archive_rawdata.lock` to prevent concurrent runs.
+- Automatically excludes run IDs protected by active keep-rules entries.
 
 ## CLI output
 - Uses ANSI colors for headings, prompts, warnings, and final status in interactive terminals.

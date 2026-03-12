@@ -10,8 +10,10 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import yaml
 
 DEFAULT_MANIFEST_DIR = "/data/shared/bpm_manifests"
+DEFAULT_KEEP_RULES_PATH = "/data/shared/bpm_manifests/keep_rules.yaml"
 DEFAULT_ALLOWED_ROOTS = "/data/raw,/data/fastq"
 DEFAULT_INSTRUMENTS = [
     "miseq1_M00818",
@@ -86,6 +88,49 @@ def _parse_bool(value: Any, default: bool) -> bool:
 def _normalize_patterns(value: Any) -> list[str]:
     pats = _split_csv(value)
     return [p for p in pats if p]
+
+
+def _load_active_keep_runs(keep_rules_path: Path) -> tuple[set[str], list[str]]:
+    if not keep_rules_path.exists():
+        return set(), []
+    try:
+        payload = yaml.safe_load(keep_rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001
+        return set(), [f"Failed to parse keep_rules file {keep_rules_path}: {exc}"]
+    if not isinstance(payload, dict):
+        return set(), [f"Invalid keep_rules format in {keep_rules_path}: expected mapping"]
+
+    runs = payload.get("runs") or {}
+    if not isinstance(runs, dict):
+        return set(), [f"Invalid keep_rules.runs format in {keep_rules_path}: expected mapping"]
+
+    from datetime import date
+
+    today = date.today()
+    active: set[str] = set()
+    notes: list[str] = []
+    for run_id, rec in runs.items():
+        run_id_s = str(run_id).strip()
+        if not run_id_s:
+            continue
+        if not isinstance(rec, dict):
+            notes.append(f"Invalid keep_rules record for run_id={run_id_s}: expected mapping")
+            continue
+        if rec.get("keep", True) is False:
+            continue
+        keep_until_raw = rec.get("keep_until")
+        if keep_until_raw in (None, ""):
+            active.add(run_id_s)
+            continue
+        try:
+            keep_until = date.fromisoformat(str(keep_until_raw))
+        except ValueError:
+            notes.append(f"Invalid keep_until in keep_rules for run_id={run_id_s}: {keep_until_raw}")
+            active.add(run_id_s)
+            continue
+        if keep_until >= today:
+            active.add(run_id_s)
+    return active, notes
 
 
 def _first_error_line(exc: Exception) -> str:
@@ -284,6 +329,7 @@ def _parse_params() -> dict[str, Any]:
     parser = argparse.ArgumentParser(description="Cleanup archived run folders from archive_rawdata/archive_fastq manifests.")
     parser.add_argument("--manifest-path", default="")
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
+    parser.add_argument("--keep-rules-path", default=DEFAULT_KEEP_RULES_PATH)
     parser.add_argument("--allowed-source-roots", default=DEFAULT_ALLOWED_ROOTS)
     parser.add_argument("--instrument-folders", default=",".join(DEFAULT_INSTRUMENTS))
     parser.add_argument("--non-interactive", nargs="?", const="true", default="false")
@@ -298,6 +344,7 @@ def _parse_params() -> dict[str, Any]:
     return {
         "manifest_path": args.manifest_path,
         "manifest_dir": args.manifest_dir,
+        "keep_rules_path": args.keep_rules_path,
         "allowed_source_roots": args.allowed_source_roots,
         "instrument_folders": args.instrument_folders,
         "non_interactive": args.non_interactive,
@@ -312,6 +359,7 @@ def main() -> None:
 
     manifest_path_raw = str(params.get("manifest_path") or "").strip()
     manifest_dir = Path(str(params.get("manifest_dir") or DEFAULT_MANIFEST_DIR)).expanduser().resolve()
+    keep_rules_path = Path(str(params.get("keep_rules_path") or DEFAULT_KEEP_RULES_PATH)).expanduser().resolve()
     allowed_roots = [Path(p).expanduser().resolve() for p in _split_csv(params.get("allowed_source_roots") or DEFAULT_ALLOWED_ROOTS)]
     allowed_instruments = set(_split_csv(params.get("instrument_folders") or ",".join(DEFAULT_INSTRUMENTS)))
     non_interactive = _parse_bool(params.get("non_interactive"), False)
@@ -331,6 +379,7 @@ def main() -> None:
 
     if not manifest_path.exists() or not manifest_path.is_file():
         raise SystemExit(f"Manifest not found: {manifest_path}")
+    keep_run_ids, keep_notes = _load_active_keep_runs(keep_rules_path)
 
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     records = payload.get("records")
@@ -338,7 +387,14 @@ def main() -> None:
         raise SystemExit("Manifest has invalid format: missing list field 'records'")
 
     eligible_indexes: list[int] = []
+    keep_filtered = 0
     for i, rec in enumerate(records):
+        run_id = str(rec.get("run_id") or "").strip()
+        if run_id and run_id in keep_run_ids:
+            rec["cleanup_status"] = "skipped_keep_rules"
+            rec["cleanup_error"] = f"run protected by keep_rules ({keep_rules_path})"
+            keep_filtered += 1
+            continue
         status = str(rec.get("status") or "")
         copy_status = str(rec.get("copy_status") or "")
         verify_status = str(rec.get("verify_status") or "")
@@ -350,9 +406,15 @@ def main() -> None:
 
     _print_section("archive_cleanup")
     print(f"Manifest: {manifest_path}")
+    print(f"Keep rules path: {keep_rules_path}")
+    print(f"Protected runs from keep rules: {len(keep_run_ids)}")
     print(f"Allowed roots: {', '.join(str(p) for p in allowed_roots)}")
     print(f"Allowed instruments: {', '.join(sorted(allowed_instruments))}")
+    print(f"Filtered by keep rules: {keep_filtered}")
     print(f"Eligible runs: {len(eligible_indexes)}")
+    if keep_notes:
+        for note in keep_notes:
+            print(_warn(f"- {note}"))
     if dry_run:
         print(_warn("Dry-run enabled: no source data will be deleted."))
 

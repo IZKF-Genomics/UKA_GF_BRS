@@ -73,6 +73,12 @@ params:
     required: false
     default: "/data/shared/bpm_manifests"
     description: "Directory used for default manifest/log output when manifest_path is not set."
+  keep_rules_path:
+    type: str
+    cli: "--keep-rules-path"
+    required: false
+    default: "/data/shared/bpm_manifests/keep_rules.yaml"
+    description: "YAML keep-rules file; active keep entries are excluded from archive selection."
   exclude_patterns:
     type: str
     cli: "--exclude-patterns"

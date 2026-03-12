@@ -15,6 +15,12 @@ params:
     required: false
     default: "/data/shared/bpm_manifests"
     description: "If manifest_path is omitted, pick latest archive_rawdata/archive_fastq manifest from this directory."
+  keep_rules_path:
+    type: str
+    cli: "--keep-rules-path"
+    required: false
+    default: "/data/shared/bpm_manifests/keep_rules.yaml"
+    description: "YAML keep-rules file; eligible records with active keep entries are skipped."
   allowed_source_roots:
     type: str
     required: false

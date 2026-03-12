@@ -17,6 +17,7 @@ import yaml
 DEFAULT_SOURCE_ROOT = "/data/fastq"
 DEFAULT_RETENTION_DAYS = 90
 DEFAULT_MANIFEST_DIR = "/data/shared/bpm_manifests"
+DEFAULT_KEEP_RULES_PATH = "/data/shared/bpm_manifests/keep_rules.yaml"
 DEFAULT_CLEAN_PATTERNS = [
     "*.fastq.gz",
     "*.fq.gz",
@@ -151,6 +152,47 @@ def _parse_exported_at_date(value: Any) -> date | None:
         return None
 
 
+def _load_active_keep_runs(keep_rules_path: Path) -> tuple[set[str], list[str]]:
+    if not keep_rules_path.exists():
+        return set(), []
+    try:
+        payload = yaml.safe_load(keep_rules_path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:  # noqa: BLE001
+        return set(), [f"Failed to parse keep_rules file {keep_rules_path}: {exc}"]
+    if not isinstance(payload, dict):
+        return set(), [f"Invalid keep_rules format in {keep_rules_path}: expected mapping"]
+
+    runs = payload.get("runs") or {}
+    if not isinstance(runs, dict):
+        return set(), [f"Invalid keep_rules.runs format in {keep_rules_path}: expected mapping"]
+
+    today = date.today()
+    active: set[str] = set()
+    notes: list[str] = []
+    for run_id, rec in runs.items():
+        run_id_s = str(run_id).strip()
+        if not run_id_s:
+            continue
+        if not isinstance(rec, dict):
+            notes.append(f"Invalid keep_rules record for run_id={run_id_s}: expected mapping")
+            continue
+        if rec.get("keep", True) is False:
+            continue
+        keep_until_raw = rec.get("keep_until")
+        if keep_until_raw in (None, ""):
+            active.add(run_id_s)
+            continue
+        try:
+            keep_until = date.fromisoformat(str(keep_until_raw))
+        except ValueError:
+            notes.append(f"Invalid keep_until in keep_rules for run_id={run_id_s}: {keep_until_raw}")
+            active.add(run_id_s)
+            continue
+        if keep_until >= today:
+            active.add(run_id_s)
+    return active, notes
+
+
 def _get_retention_reference(run_dir: Path, run_date: date) -> tuple[date, str]:
     meta_path = run_dir / "bpm.meta.yaml"
     if not meta_path.exists():
@@ -189,7 +231,12 @@ def _compute_cutoff(retention_days: int) -> date:
     return date.today() - timedelta(days=retention_days)
 
 
-def _discover_candidates(source_root: Path, retention_days: int, skip_runs: set[str]) -> tuple[list[RunCandidate], list[str]]:
+def _discover_candidates(
+    source_root: Path,
+    retention_days: int,
+    skip_runs: set[str],
+    keep_run_ids: set[str],
+) -> tuple[list[RunCandidate], list[str]]:
     issues: list[str] = []
     cutoff = _compute_cutoff(retention_days)
     candidates: list[RunCandidate] = []
@@ -204,6 +251,8 @@ def _discover_candidates(source_root: Path, retention_days: int, skip_runs: set[
         if ref_date >= cutoff:
             continue
         if entry.name in skip_runs:
+            continue
+        if entry.name in keep_run_ids:
             continue
         try:
             total_size_bytes = _du_size_bytes(entry)
@@ -234,13 +283,20 @@ def _print_section(title: str) -> None:
     print(_title("=" * 80))
 
 
-def _print_plan(candidates: list[RunCandidate], retention_days: int, skip_runs: set[str], patterns: list[str]) -> None:
+def _print_plan(
+    candidates: list[RunCandidate],
+    retention_days: int,
+    skip_runs: set[str],
+    keep_run_ids: set[str],
+    patterns: list[str],
+) -> None:
     cutoff = _compute_cutoff(retention_days)
     _print_section("Clean Plan")
     print(f"Retention days: {retention_days}")
     print(f"Clean runs older than: {cutoff.isoformat()} (strictly before this date)")
     print("Retention reference: export.last_exported_at -> run-name YYMMDD prefix")
     print(f"Runs skipped by user: {', '.join(sorted(skip_runs)) if skip_runs else '(none)'}")
+    print(f"Runs protected by keep_rules: {len(keep_run_ids)}")
     print(f"Clean patterns: {', '.join(patterns) if patterns else '(none)'}")
 
     if not candidates:
@@ -473,6 +529,7 @@ def _parse_params() -> dict[str, Any]:
     parser.add_argument("--dry-run", nargs="?", const="true", default="false")
     parser.add_argument("--manifest-path", default="")
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
+    parser.add_argument("--keep-rules-path", default=DEFAULT_KEEP_RULES_PATH)
 
     if params:
         return params
@@ -489,6 +546,7 @@ def _parse_params() -> dict[str, Any]:
         "dry_run": args.dry_run,
         "manifest_path": args.manifest_path,
         "manifest_dir": args.manifest_dir,
+        "keep_rules_path": args.keep_rules_path,
     }
 
 
@@ -509,6 +567,7 @@ def main() -> None:
     dry_run = _parse_bool(params.get("dry_run"), False)
     manifest_path_raw = str(params.get("manifest_path") or "").strip()
     manifest_dir = Path(str(params.get("manifest_dir") or DEFAULT_MANIFEST_DIR)).expanduser().resolve()
+    keep_rules_path = Path(str(params.get("keep_rules_path") or DEFAULT_KEEP_RULES_PATH)).expanduser().resolve()
 
     if retention_days < 0:
         raise SystemExit("retention_days must be >= 0")
@@ -529,6 +588,7 @@ def main() -> None:
     source_root_path = Path(source_root).expanduser().resolve()
     if not source_root_path.exists() or not source_root_path.is_dir():
         raise SystemExit(f"Source root not found or not a directory: {source_root_path}")
+    keep_run_ids, keep_notes = _load_active_keep_runs(keep_rules_path)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     default_manifest_path = manifest_dir / f"clean_fastq_{timestamp}.json"
@@ -538,24 +598,28 @@ def main() -> None:
     _print_section("Path Confirmation")
     print(f"Source root: {source_root_path}")
     print(f"Source layout: flat run directories")
+    print(f"Keep rules path: {keep_rules_path}")
+    print(f"Protected runs from keep rules: {len(keep_run_ids)}")
     print(f"Manifest path: {manifest_path}")
     print(f"Log path: {log_path}")
 
     _preflight_manifest_paths(manifest_path, log_path)
 
-    candidates, issues = _discover_candidates(source_root_path, retention_days, skip_runs)
+    candidates, issues = _discover_candidates(source_root_path, retention_days, skip_runs, keep_run_ids)
     for c in candidates:
         reclaim, after, pct = _estimate_cleanup_impact(c.source_path, c.total_size_bytes, clean_patterns)
         c.estimated_reclaim_bytes = reclaim
         c.estimated_after_bytes = after
         c.estimated_reclaim_pct = pct
 
-    if issues:
+    if issues or keep_notes:
         _print_section("Discovery Notes")
         for issue in issues:
             print(_warn(f"- {issue}"))
+        for note in keep_notes:
+            print(_warn(f"- {note}"))
 
-    _print_plan(candidates, retention_days, skip_runs, clean_patterns)
+    _print_plan(candidates, retention_days, skip_runs, keep_run_ids, clean_patterns)
     if not candidates:
         print(_warn("\nNothing to clean. Exiting."))
         return
@@ -579,6 +643,8 @@ def main() -> None:
         "retention_days": retention_days,
         "clean_patterns": clean_patterns,
         "skip_runs": sorted(skip_runs),
+        "keep_rules_path": str(keep_rules_path),
+        "keep_protected_runs": sorted(keep_run_ids),
         "dry_run": dry_run,
         "log_path": str(log_path),
         "records": [],

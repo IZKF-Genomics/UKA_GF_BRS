@@ -1,0 +1,8 @@
+reports/
+results/
+.Rhistory
+.RData
+.quarto/
+
+/.quarto/
+**/*.quarto_ipynb

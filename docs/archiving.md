@@ -8,6 +8,10 @@ This guide covers the two-step archive workflow pair:
 Additional direct-clean workflow:
 - `clean_fastq`: remove pattern-matched content in `/data/fastq` without archiving.
 
+Keep-rules management workflow:
+- `keep_rules`: manage `/data/shared/bpm_manifests/keep_rules.yaml` (list/add/remove/prune).
+- Dedicated guide: [keep_rules.md](./keep_rules.md)
+
 ## 1) Prepare manifest directory
 Use a shared writable manifest path for both workflows.
 
@@ -43,6 +47,7 @@ Non-interactive FASTQ archive (always excludes `*.fastq.gz` and `*.fq.gz`):
 bpm workflow run archive_fastq --non-interactive true
 ```
 Default FASTQ archive excludes also include `.pixi`, `work`, `.renv`, `.Rproj.user`, `.nextflow`, `.nextflow.log*`.
+All archive/clean workflows read `/data/shared/bpm_manifests/keep_rules.yaml` by default and skip active keep-protected run IDs.
 
 Typical output files:
 - `/data/shared/bpm_manifests/archive_rawdata_YYYYMMDD_HHMMSS.json`
@@ -160,6 +165,7 @@ Default clean patterns:
 - `archive_cleanup` only deletes records that are `copied_verified` with `copy_status=ok` and `verify_status=ok`.
 - `archive_fastq` excludes `*.fastq.gz` and `*.fq.gz` from archive copy/verify.
 - For `archive_fastq` manifests, `archive_cleanup` uses `cleanup_mode=non_fastq_only` and preserves FASTQ files while removing archived non-FASTQ content.
+- `archive_rawdata`, `archive_fastq`, `clean_fastq`, and `archive_cleanup` all honor active keep-rules entries.
 - Cleanup writes status back into the same manifest (`cleanup_status`, `cleanup_error`, `cleanup_attempted_at`).
 - On first permission-denied failure, `archive_cleanup` prints an inline sudo re-run hint with the exact `--manifest-path`.
 - Always run cleanup dry-run first after workflow updates.
@@ -180,4 +186,35 @@ find /data/shared/bpm_manifests -maxdepth 1 -type f -name "*.log.gz" -mtime +365
 
 # Remove very old manifests (keep 24 months)
 find /data/shared/bpm_manifests -maxdepth 1 -type f -name "*.json" -mtime +730 -delete
+```
+
+## Keep-rules maintenance
+List keep rules:
+```bash
+bpm workflow run keep_rules --action list
+```
+
+Open TUI keep-rules browser (default):
+```bash
+bpm workflow run keep_rules
+```
+
+Open TUI on raw-data path:
+```bash
+bpm workflow run keep_rules --browse-root /data/raw
+```
+
+Add run to keep rules:
+```bash
+bpm workflow run keep_rules --action add --run-id 241120_A01742_0328_AHYC2WDMXY
+```
+
+Prune stale entries (preview):
+```bash
+bpm workflow run keep_rules --action prune
+```
+
+Prune stale entries (apply):
+```bash
+bpm workflow run keep_rules --action prune --apply true --yes true
 ```

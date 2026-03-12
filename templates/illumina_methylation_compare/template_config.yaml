@@ -1,0 +1,74 @@
+id: illumina_methylation_compare
+description: "Illumina methylation array comparison analysis (DMP/DMR/enrichment/drilldown) from preprocessed inputs."
+required_templates:
+  - illumina_methylation_process
+
+params:
+  study_name:
+    type: str
+    cli: "--study-name"
+    required: false
+    default: "MyStudyCompare"
+    description: "Project/report name written into config/project.toml"
+  authors:
+    type: str
+    cli: "--authors"
+    required: false
+    default: "unknown"
+    description: "Author name shown in step reports"
+  array_type:
+    type: str
+    cli: "--array-type"
+    required: false
+    default: "AUTO"
+    description: "Array type for enrichment mapping. Use AUTO for mixed 450K/EPIC inputs."
+  genome_build:
+    type: str
+    cli: "--genome-build"
+    required: false
+    default: "hg38"
+    description: "Genome build used for annotation and reporting"
+  process_results_dir:
+    type: str
+    cli: "--process-results-dir"
+    required: false
+    default: "../illumina_methylation_process/results/rds"
+    description: "Path to upstream process template results/rds directory"
+  group_col:
+    type: str
+    cli: "--group-col"
+    required: false
+    default: "group"
+    description: "Primary grouping column in config/samples.csv"
+  case_label:
+    type: str
+    cli: "--case"
+    required: false
+    default: "case"
+    description: "Case label in the primary grouping column"
+  control_label:
+    type: str
+    cli: "--control"
+    required: false
+    default: "control"
+    description: "Control label in the primary grouping column"
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+    - pixi.toml -> pixi.toml
+    - run.sh.j2 -> run.sh
+    - .gitignore -> .gitignore
+    - config/project.toml.j2 -> config/project.toml
+    - config/input_runs.csv.j2 -> config/input_runs.csv
+    - config/samples.csv -> config/samples.csv
+    - common.R -> common.R
+    - steps/01_dmp.qmd.j2 -> steps/01_dmp.qmd
+    - steps/02_dmr.qmd.j2 -> steps/02_dmr.qmd
+    - steps/03_enrichment.qmd.j2 -> steps/03_enrichment.qmd
+    - steps/04_drilldown.qmd.j2 -> steps/04_drilldown.qmd
+    - steps/00_index.qmd.j2 -> steps/00_index.qmd
+
+run:
+  entry: "run.sh"

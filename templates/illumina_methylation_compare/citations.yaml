@@ -1,0 +1,7 @@
+citations:
+  - id: r-base
+    text: "R Core Team. R: A language and environment for statistical computing."
+    url: "https://www.r-project.org/"
+  - id: quarto
+    text: "Quarto publishing system."
+    url: "https://quarto.org/"

@@ -1,0 +1,72 @@
+---
+title: "00 Compare Index"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
+    theme: lumen
+---
+
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+source("../common.R")
+ensure_dirs("..")
+cfg <- load_config("../config/project.toml")
+read_if <- function(path) if (file.exists(path)) readr::read_csv(path, show_col_types = FALSE) else NULL
+dmp_sig <- read_if("../results/tables/dmp_significant.csv")
+go <- read_if("../results/tables/go_terms.csv")
+dmr <- read_if("../results/tables/dmr_table.csv")
+run_summary <- read_if("../results/tables/input_run_summary.csv")
+summary_tbl <- tibble::tibble(
+  metric = c("project_name", "array_type", "input_runs_file", "fallback_input_results_dir", "configured_input_runs", "run_array_types", "significant_cpgs", "dmr_rows"),
+  value = c(
+    cfg$project$name,
+    cfg$project$array_type,
+    cfg$input$input_runs_file,
+    cfg$input$processed_results_dir,
+    if (is.null(run_summary)) NA else nrow(run_summary),
+    if (is.null(run_summary) || !("configured_array_type" %in% names(run_summary))) NA else paste(unique(run_summary$configured_array_type), collapse = ","),
+    if (is.null(dmp_sig)) NA else nrow(dmp_sig),
+    if (is.null(dmr)) NA else nrow(dmr)
+  )
+)
+```
+
+## Summary
+
+```{r}
+knitr::kable(as.data.frame(summary_tbl), format = "html")
+```
+
+## Reports
+
+- [01 DMP](01_dmp.html)
+- [02 DMR](02_dmr.html)
+- [03 Enrichment](03_enrichment.html)
+- [04 Drilldown](04_drilldown.html)
+
+## Input runs (if available)
+
+```{r}
+if (!is.null(run_summary)) {
+  knitr::kable(as.data.frame(run_summary), format = "html")
+} else {
+  cat("Input run summary not found yet.\n")
+}
+```
+
+## Top GO terms (if available)
+
+```{r}
+if (!is.null(go)) head(go, cfg$enrichment$top_n) else cat("No GO results found yet.\n")
+```

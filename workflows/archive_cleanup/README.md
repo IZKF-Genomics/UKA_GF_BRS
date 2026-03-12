@@ -12,6 +12,7 @@ required_params: []
 optional_params:
 - manifest_path
 - manifest_dir
+- keep_rules_path
 - allowed_source_roots
 - instrument_folders
 - non_interactive
@@ -20,6 +21,7 @@ optional_params:
 - dry_run
 cli_flags:
   manifest_path: --manifest-path
+  keep_rules_path: --keep-rules-path
   instrument_folders: --instrument-folders
   non_interactive: --non-interactive
   yes: --yes
@@ -56,6 +58,7 @@ sudo env PATH="$PATH" BPM_CACHE="$BPM_CACHE" bpm workflow run archive_cleanup --
 
 ## Safety model
 - Only deletes entries with `status=copied_verified`, `copy_status=ok`, `verify_status=ok`.
+- Respects `/data/shared/bpm_manifests/keep_rules.yaml` by default and marks protected records as `skipped_keep_rules`.
 - If a manifest record contains `cleanup_mode=non_fastq_only`, cleanup removes archived non-FASTQ content and preserves `cleanup_preserve_patterns` (for example `*.fastq.gz`, `*.fq.gz`).
 - Backward compatibility: if a record contains `cleanup_patterns`, only matching files are removed.
 - Enforces deletion allowlist by source roots and instrument folders.
