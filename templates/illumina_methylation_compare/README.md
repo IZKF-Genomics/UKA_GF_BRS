@@ -81,7 +81,6 @@ Notes:
 
 ```bash
 bpm template render illumina_methylation_compare \
-  --param study_name=MyStudyCompare \
   --param process_results_dir=../illumina_methylation_process/results/rds \
   --param array_type=AUTO \
   --param group_col=group \
@@ -89,6 +88,8 @@ bpm template render illumina_methylation_compare \
   --param control_label=HPNST-SC \
   --dir /path/to/project
 ```
+
+`study_name` is optional; if omitted, the rendered template id is used as project/report name.
 
 After render, adjust:
 - `config/input_registry.csv` to combine runs / filter samples.

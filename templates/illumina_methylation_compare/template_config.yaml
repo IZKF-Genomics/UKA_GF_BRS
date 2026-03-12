@@ -8,8 +8,8 @@ params:
     type: str
     cli: "--study-name"
     required: false
-    default: "MyStudyCompare"
-    description: "Project/report name written into config/project.toml"
+    default: ""
+    description: "Optional project/report name; defaults to rendered template id when omitted"
   authors:
     type: str
     cli: "--authors"

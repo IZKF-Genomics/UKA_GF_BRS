@@ -96,6 +96,7 @@ cd /path/to/output
 - keep_rules workflow manages `/data/shared/bpm_manifests/keep_rules.yaml`, including `prune` to remove stale run entries no longer present in source roots.
 - keep_rules now defaults to a keyboard TUI for bulk keep/unkeep management (`Space` toggle, `u` keep_until, `s` save) with browse root `/data/fastq`.
 - illumina_methylation_compare now supports registry-driven multi-run input management (`config/input_registry.csv`), strict upstream object path resolution, group harmonization via `config/group_map.csv`, and `pixi run sync-samples` for rebuilding compare sample sheets from enabled process runs.
+- illumina_methylation_compare no longer requires explicitly passing `study_name`; when omitted, the rendered template id is used as the project/report name.
 
 ## Agent Readability
 

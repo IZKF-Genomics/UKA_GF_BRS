@@ -1,5 +1,5 @@
 [project]
-name = "{{ ctx.params.study_name }}"
+name = "{{ ctx.params.study_name | default(ctx.template.id, true) }}"
 array_type = "{{ ctx.params.array_type }}"    # "AUTO" | "450K" | "EPIC" | "EPIC_V2"
 genome_build = "{{ ctx.params.genome_build }}"
 outdir = "reports"

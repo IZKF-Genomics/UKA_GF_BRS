@@ -19,7 +19,7 @@ if [[ ! -f config/input_registry.csv && ! -f config/input_runs.csv ]]; then
   exit 1
 fi
 
-echo "[INFO] Running Illumina methylation COMPARE pipeline for {{ ctx.params.study_name | default('study') }}" | tee -a "$LOG_FILE"
+echo "[INFO] Running Illumina methylation COMPARE pipeline for {{ ctx.params.study_name | default(ctx.template.id, true) }}" | tee -a "$LOG_FILE"
 echo "[INFO] Root: $ROOT_DIR" | tee -a "$LOG_FILE"
 
 if command -v pixi >/dev/null 2>&1; then
