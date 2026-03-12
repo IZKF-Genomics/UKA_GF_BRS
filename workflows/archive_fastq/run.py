@@ -5,6 +5,7 @@ import argparse
 import fnmatch
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -75,6 +76,7 @@ def _dim(text: str) -> str:
 @dataclass
 class RunCandidate:
     run_id: str
+    owner_user: str
     run_date: date
     retention_reference_date: date
     retention_reference_source: str
@@ -265,6 +267,14 @@ def _compute_cutoff(retention_days: int) -> date:
     return date.today() - timedelta(days=retention_days)
 
 
+def _owner_user(path: Path) -> str:
+    try:
+        uid = path.stat().st_uid
+        return pwd.getpwuid(uid).pw_name
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def _discover_candidates(
     source_root: Path,
     target_root: Path,
@@ -304,6 +314,7 @@ def _discover_candidates(
         candidates.append(
             RunCandidate(
                 run_id=entry.name,
+                owner_user=_owner_user(entry),
                 run_date=run_date,
                 retention_reference_date=ref_date,
                 retention_reference_source=ref_source,
@@ -346,14 +357,19 @@ def _print_plan(
         return
 
     run_col = max(38, min(54, max(len(c.run_id) for c in candidates) + 2))
+    owner_col = max(8, min(14, max(len(c.owner_user) for c in candidates) + 2))
     total_col = 14
     arch_col = 24
-    row_fmt = f"{{no:>4}}  {{run:<{run_col}}}{{total:>{total_col}}}  {{arch:>{arch_col}}}"
+    row_fmt = (
+        f"{{no:>4}}  {{run:<{run_col}}}{{owner:<{owner_col}}}"
+        f"{{total:>{total_col}}}  {{arch:>{arch_col}}}"
+    )
 
     print("\nSelected runs:")
     header = row_fmt.format(
         no="No.",
         run="Run ID",
+        owner="Owner",
         total="Total Size",
         arch="Archive Size (after excludes)",
     )
@@ -364,6 +380,7 @@ def _print_plan(
             row_fmt.format(
                 no=f"{idx}.",
                 run=item.run_id,
+                owner=item.owner_user,
                 total=_format_bytes(item.total_size_bytes),
                 arch=_format_bytes(item.archive_size_bytes),
             )
@@ -807,6 +824,7 @@ def main() -> None:
         for candidate in candidates:
             rec: dict[str, Any] = {
                 "run_id": candidate.run_id,
+                "owner_user": candidate.owner_user,
                 "run_date": candidate.run_date.isoformat(),
                 "retention_reference_date": candidate.retention_reference_date.isoformat(),
                 "retention_reference_source": candidate.retention_reference_source,

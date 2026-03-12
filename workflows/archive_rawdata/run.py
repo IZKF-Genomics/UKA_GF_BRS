@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -65,6 +66,7 @@ def _dim(text: str) -> str:
 class RunCandidate:
     instrument: str
     run_id: str
+    owner_user: str
     run_date: date
     retention_reference_date: date
     retention_reference_source: str
@@ -238,6 +240,14 @@ def _compute_cutoff(retention_days: int) -> date:
     return date.today() - timedelta(days=retention_days)
 
 
+def _owner_user(path: Path) -> str:
+    try:
+        uid = path.stat().st_uid
+        return pwd.getpwuid(uid).pw_name
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def _discover_candidates(
     source_root: Path,
     target_root: Path,
@@ -281,6 +291,7 @@ def _discover_candidates(
                 RunCandidate(
                     instrument=instrument,
                     run_id=entry.name,
+                    owner_user=_owner_user(entry),
                     run_date=run_date,
                     retention_reference_date=ref_date,
                     retention_reference_source=ref_source,
@@ -315,10 +326,21 @@ def _print_plan(candidates: list[RunCandidate], retention_days: int, skip_runs: 
         return
 
     print("\nSelected runs:")
+    run_col = max(32, min(50, max(len(c.run_id) for c in candidates) + 2))
+    owner_col = max(8, min(14, max(len(c.owner_user) for c in candidates) + 2))
+    row_fmt = f"{{no:>4}}  {{inst:<24}} {{run:<{run_col}}}{{owner:<{owner_col}}}{{size:>12}}"
+    header = row_fmt.format(no="No.", inst="Instrument", run="Run ID", owner="Owner", size="Size")
+    print(_dim(header))
+    print(_dim("-" * len(header)))
     for idx, item in enumerate(candidates, start=1):
         print(
-            f"{_dim(f'{idx:>3}.')} {item.instrument:<24} {item.run_id:<34} "
-            f"{_format_bytes(item.size_bytes):>10}"
+            row_fmt.format(
+                no=f"{idx}.",
+                inst=item.instrument,
+                run=item.run_id,
+                owner=item.owner_user,
+                size=_format_bytes(item.size_bytes),
+            )
         )
 
     total = sum(c.size_bytes for c in candidates)
@@ -748,6 +770,7 @@ def main() -> None:
             rec: dict[str, Any] = {
                 "instrument": candidate.instrument,
                 "run_id": candidate.run_id,
+                "owner_user": candidate.owner_user,
                 "run_date": candidate.run_date.isoformat(),
                 "retention_reference_date": candidate.retention_reference_date.isoformat(),
                 "retention_reference_source": candidate.retention_reference_source,

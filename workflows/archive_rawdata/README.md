@@ -99,3 +99,4 @@ Use `archive_cleanup` to consume this manifest and perform deletion safely, opti
 ## CLI output
 - Uses ANSI colors for headings, prompts, warnings, and final status in interactive terminals.
 - Set `NO_COLOR=1` to disable colors.
+- Archive plan table includes an `Owner` column (source run directory owner username) to help pre-check cleanup permissions.

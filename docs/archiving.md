@@ -153,5 +153,6 @@ bpm resource update UKA_GF_BRS
 ## Notes
 - `archive_cleanup` only processes records with `status=copied_verified`, `copy_status=ok`, `verify_status=ok`.
 - For `archive_fastq` manifests, `archive_cleanup` uses `cleanup_mode=non_fastq_only` and preserves FASTQ files while removing archived non-FASTQ content.
+- Archive plan tables include source run directory owner usernames (`Owner`) for permission visibility before cleanup.
 - Cleanup status is written back into the same manifest (`cleanup_status`, `cleanup_error`, `cleanup_attempted_at`).
 - Run cleanup dry-run after workflow updates before destructive cleanup.
