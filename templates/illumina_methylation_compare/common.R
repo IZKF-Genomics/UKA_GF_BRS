@@ -152,13 +152,6 @@ standardize_run_table <- function(df, source_label) {
   df
 }
 
-load_input_runs <- function(path = "config/input_runs.csv") {
-  p <- resolve_path(path)
-  if (!file.exists(p)) return(NULL)
-  df <- readr::read_csv(p, show_col_types = FALSE)
-  standardize_run_table(df, "input_runs.csv")
-}
-
 load_input_registry <- function(path = "config/input_registry.csv") {
   p <- resolve_path(path)
   if (!file.exists(p)) return(NULL)
@@ -168,27 +161,32 @@ load_input_registry <- function(path = "config/input_registry.csv") {
 
 resolve_run_table <- function(cfg) {
   registry_file <- coalesce_chr(cfg$input$input_registry_file, "")
-  runs_file <- coalesce_chr(cfg$input$input_runs_file, "")
-  runs_df <- NULL
-  source <- ""
-
   if (nzchar(registry_file)) {
     runs_df <- load_input_registry(registry_file)
     if (!is.null(runs_df) && nrow(runs_df) > 0) {
-      source <- "input_registry"
-      return(list(runs = runs_df, source = source, path = registry_file))
+      return(list(runs = runs_df, source = "input_registry", path = registry_file))
     }
   }
+  list(runs = NULL, source = "input_registry", path = registry_file)
+}
 
-  if (nzchar(runs_file)) {
-    runs_df <- load_input_runs(runs_file)
-    if (!is.null(runs_df) && nrow(runs_df) > 0) {
-      source <- "input_runs"
-      return(list(runs = runs_df, source = source, path = runs_file))
-    }
-  }
+load_comparisons <- function(path = "config/comparisons.csv") {
+  p <- resolve_path(path)
+  if (!file.exists(p)) return(NULL)
+  df <- readr::read_csv(p, show_col_types = FALSE)
+  required <- c("comparison_id", "base_group", "target_group")
+  missing <- setdiff(required, names(df))
+  if (length(missing) > 0) log_error("comparisons.csv missing required columns:", paste(missing, collapse = ", "))
+  if (!("name" %in% names(df))) df$name <- df$comparison_id
+  if (!("enabled" %in% names(df))) df$enabled <- TRUE
+  if (!("covariates" %in% names(df))) df$covariates <- ""
+  if (!("alpha" %in% names(df))) df$alpha <- NA_real_
+  if (!("delta_beta_min" %in% names(df))) df$delta_beta_min <- NA_real_
+  df
+}
 
-  list(runs = NULL, source = "fallback", path = "")
+sanitize_id <- function(x) {
+  gsub("[^A-Za-z0-9._-]+", "_", trimws(as.character(x)))
 }
 
 resolve_input_roots <- function(processed_results_dir) {
@@ -212,7 +210,7 @@ find_upstream_rds <- function(processed_results_dir) {
 }
 
 validate_config_schema <- function(cfg) {
-  for (section in c("project", "input", "groups", "dmp", "dmr", "enrichment", "drilldown")) {
+  for (section in c("project", "input", "groups", "comparisons", "dmp", "dmr", "enrichment", "drilldown")) {
     if (is.null(cfg[[section]])) log_error("Missing config section [", section, "]")
   }
   valid_arrays <- c("450K", "EPIC", "EPIC_V2", "AUTO", "MIXED")
@@ -221,10 +219,12 @@ validate_config_schema <- function(cfg) {
     log_error("Unsupported dmp.adjust_method:", cfg$dmp$adjust_method)
   }
   has_registry <- !is.null(cfg$input$input_registry_file) && nzchar(trimws(as.character(cfg$input$input_registry_file)))
-  has_runs_file <- !is.null(cfg$input$input_runs_file) && nzchar(trimws(as.character(cfg$input$input_runs_file)))
-  has_fallback_dir <- !is.null(cfg$input$processed_results_dir) && nzchar(trimws(as.character(cfg$input$processed_results_dir)))
-  if (!has_registry && !has_runs_file && !has_fallback_dir) {
-    log_error("Configure either input.input_registry_file, input.input_runs_file, or input.processed_results_dir")
+  has_comp <- !is.null(cfg$comparisons$comparisons_file) && nzchar(trimws(as.character(cfg$comparisons$comparisons_file)))
+  if (!has_registry) {
+    log_error("Configure input.input_registry_file")
+  }
+  if (!has_comp) {
+    log_error("Configure comparisons.comparisons_file")
   }
   invisible(TRUE)
 }
@@ -240,14 +240,29 @@ validate_samples_schema <- function(samples, cfg) {
 validate_groups <- function(cfg, samples) {
   group_col <- cfg$groups$primary_group_col
   if (!(group_col %in% names(samples))) log_error("groups.primary_group_col not found in samples.csv:", group_col)
-  case_label <- cfg$groups$case
-  control_label <- cfg$groups$control
+  invisible(table(samples[[group_col]]))
+}
+
+validate_comparisons <- function(cfg, samples) {
+  comp_file <- coalesce_chr(cfg$comparisons$comparisons_file, "config/comparisons.csv")
+  cmp <- load_comparisons(comp_file)
+  if (is.null(cmp) || nrow(cmp) == 0) log_error("No rows found in comparisons file:", comp_file)
+  enabled <- vapply(cmp$enabled, parse_bool, logical(1), default = TRUE)
+  cmp <- cmp[enabled, , drop = FALSE]
+  if (nrow(cmp) == 0) log_error("No enabled comparisons in", comp_file)
+  bad <- cmp$comparison_id[duplicated(cmp$comparison_id)]
+  if (length(bad) > 0) log_error("Duplicate comparison_id values:", paste(unique(bad), collapse = ", "))
+  group_col <- cfg$groups$primary_group_col
   counts <- table(samples[[group_col]])
-  if (!(case_label %in% names(counts))) log_error("Case label not found:", case_label)
-  if (!(control_label %in% names(counts))) log_error("Control label not found:", control_label)
-  if (as.integer(counts[[case_label]]) < 2) log_error("Case group must contain at least 2 samples")
-  if (as.integer(counts[[control_label]]) < 2) log_error("Control group must contain at least 2 samples")
-  invisible(counts)
+  for (i in seq_len(nrow(cmp))) {
+    base <- as.character(cmp$base_group[[i]])
+    target <- as.character(cmp$target_group[[i]])
+    if (!(base %in% names(counts))) log_error("Comparison", cmp$comparison_id[[i]], "base_group not found:", base)
+    if (!(target %in% names(counts))) log_error("Comparison", cmp$comparison_id[[i]], "target_group not found:", target)
+    if (as.integer(counts[[base]]) < 2) log_error("Comparison", cmp$comparison_id[[i]], "base_group requires >=2 samples:", base)
+    if (as.integer(counts[[target]]) < 2) log_error("Comparison", cmp$comparison_id[[i]], "target_group requires >=2 samples:", target)
+  }
+  invisible(cmp)
 }
 
 validate_input_sources <- function(cfg, samples) {
@@ -296,15 +311,7 @@ validate_input_sources <- function(cfg, samples) {
     return(invisible(TRUE))
   }
 
-  fallback_dir <- coalesce_chr(cfg$input$processed_results_dir, "")
-  if (!nzchar(fallback_dir)) {
-    log_error("No input run table available and no fallback input.processed_results_dir configured")
-  }
-  hit <- find_upstream_rds(fallback_dir)
-  if (is.null(hit)) {
-    log_error("No upstream methylation object found under fallback input.processed_results_dir:", fallback_dir)
-  }
-  invisible(TRUE)
+  log_error("No enabled runs found in", run_info$path)
 }
 
 validate_project <- function(cfg, samples) {
@@ -313,6 +320,7 @@ validate_project <- function(cfg, samples) {
   samples_norm <- apply_group_map(samples, gm, group_col = cfg$groups$primary_group_col)
   validate_samples_schema(samples_norm, cfg)
   validate_groups(cfg, samples_norm)
+  validate_comparisons(cfg, samples_norm)
   validate_input_sources(cfg, samples_norm)
   invisible(TRUE)
 }
@@ -463,19 +471,7 @@ load_analysis_inputs <- function(cfg, samples = NULL) {
     runs <- build_runs_from_table(run_info$runs, allowed_samples = allowed_samples)
     return(combine_inputs(runs))
   }
-
-  fallback <- coalesce_chr(cfg$input$processed_results_dir, "")
-  if (!nzchar(fallback)) {
-    log_error("No input runs configured and no input.processed_results_dir fallback set")
-  }
-  run <- load_single_input(
-    run_id = "run1",
-    processed_results_dir = fallback,
-    configured_array_type = coalesce_chr(cfg$project$array_type, "")
-  )
-  run <- subset_run_samples(run, include_samples = "", exclude_samples = "", allowed_samples = allowed_samples)
-  if (ncol(run$beta) == 0) log_error("No samples left after filtering for fallback input.processed_results_dir")
-  combine_inputs(list(run))
+  log_error("No enabled input runs found in", run_info$path)
 }
 
 sync_samples_from_inputs <- function(cfg,
@@ -483,7 +479,7 @@ sync_samples_from_inputs <- function(cfg,
                                      include_existing_columns = TRUE) {
   run_info <- resolve_run_table(cfg)
   if (is.null(run_info$runs) || nrow(run_info$runs) == 0) {
-    log_error("sync_samples_from_inputs requires input_registry or input_runs entries")
+    log_error("sync_samples_from_inputs requires enabled input_registry entries")
   }
 
   runs <- build_runs_from_table(run_info$runs, allowed_samples = character(0))
@@ -601,4 +597,48 @@ infer_gometh_array_type <- function(project_array_type, run_array_types = charac
   }
   if (!is.na(inferred)) return(inferred)
   configured
+}
+
+resolve_enabled_comparisons <- function(cfg, samples) {
+  comp_file <- coalesce_chr(cfg$comparisons$comparisons_file, "config/comparisons.csv")
+  cmp <- load_comparisons(comp_file)
+  if (is.null(cmp) || nrow(cmp) == 0) log_error("No comparisons configured in", comp_file)
+  cmp <- cmp[vapply(cmp$enabled, parse_bool, logical(1), default = TRUE), , drop = FALSE]
+  if (nrow(cmp) == 0) log_error("No enabled comparisons in", comp_file)
+  group_col <- cfg$groups$primary_group_col
+  if (!(group_col %in% names(samples))) log_error("Group column not found in samples:", group_col)
+  out <- lapply(seq_len(nrow(cmp)), function(i) {
+    row <- cmp[i, , drop = FALSE]
+    covars_raw <- parse_sample_list(coalesce_chr(row$covariates, ""))
+    tibble::tibble(
+      comparison_id = sanitize_id(coalesce_chr(row$comparison_id, paste0("cmp", i))),
+      comparison_name = coalesce_chr(row$name, coalesce_chr(row$comparison_id, paste0("cmp", i))),
+      base_group = coalesce_chr(row$base_group, ""),
+      target_group = coalesce_chr(row$target_group, ""),
+      covariates = I(list(covars_raw)),
+      alpha = suppressWarnings(as.numeric(coalesce_chr(row$alpha, NA))),
+      delta_beta_min = suppressWarnings(as.numeric(coalesce_chr(row$delta_beta_min, NA)))
+    )
+  })
+  dplyr::bind_rows(out)
+}
+
+merge_input_metadata <- function(beta, pdata, samples) {
+  meta <- tibble::as_tibble(pdata)
+  if (!("sample_id" %in% names(meta))) {
+    meta$sample_id <- colnames(beta)
+  }
+  meta$sample_col <- colnames(beta)
+  meta <- dplyr::left_join(meta, samples, by = "sample_id", suffix = c("", ".sheet"))
+  sheet_cols <- names(meta)[grepl("\\.sheet$", names(meta))]
+  for (sc in sheet_cols) {
+    base <- sub("\\.sheet$", "", sc)
+    if (!(base %in% names(meta))) {
+      meta[[base]] <- meta[[sc]]
+    } else {
+      missing_base <- is.na(meta[[base]]) | trimws(as.character(meta[[base]])) == ""
+      meta[[base]][missing_base] <- meta[[sc]][missing_base]
+    }
+  }
+  meta[, setdiff(names(meta), sheet_cols), drop = FALSE]
 }

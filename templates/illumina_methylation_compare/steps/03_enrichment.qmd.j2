@@ -17,7 +17,6 @@ format:
     theme: lumen
 ---
 
-
 ```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
 source("../common.R")
 ensure_dirs("..")
@@ -26,8 +25,10 @@ if (!isTRUE(cfg$enrichment$enabled)) {
   cat("Enrichment step disabled in config.\n")
   knitr::knit_exit()
 }
-dmp <- read_rds("../results/rds/dmp_table.rds")
 if (!requireNamespace("missMethyl", quietly = TRUE)) log_error("Package 'missMethyl' is required")
+if (!file.exists("../results/rds/dmp_by_comparison.rds")) log_error("Missing DMP results. Run step 01 first.")
+
+dmp_by_cmp <- read_rds("../results/rds/dmp_by_comparison.rds")
 run_summary <- if (file.exists("../results/tables/input_run_summary.csv")) {
   readr::read_csv("../results/tables/input_run_summary.csv", show_col_types = FALSE)
 } else {
@@ -36,117 +37,100 @@ run_summary <- if (file.exists("../results/tables/input_run_summary.csv")) {
 run_array_types <- if ("configured_array_type" %in% names(run_summary)) run_summary$configured_array_type else character(0)
 array_for_gometh <- infer_gometh_array_type(cfg$project$array_type, run_array_types = run_array_types)
 if (is.na(array_for_gometh)) {
-  log_warn("Skipping gometh: unable to infer supported array type. Set project.array_type or input_runs.csv:array_type.")
-  go_tbl <- tibble::tibble(note = "Skipped due to unknown/unsupported array type for gometh in current environment")
-  write_table(go_tbl, "../results/tables/go_terms.csv")
-  save_rds(go_tbl, "../results/rds/enrichment_go.rds")
+  log_warn("Skipping gometh: unable to infer supported array type. Set project.array_type or input_registry.csv:array_type.")
   knitr::knit_exit()
 }
-# missMethyl::gometh requires array/build-compatible annotation packages.
+
 genome_build <- tolower(trimws(as.character(cfg$project$genome_build)))
 anno_pkg <- dplyr::case_when(
-  array_for_gometh == "450K" && genome_build == "hg19" ~ "IlluminaHumanMethylation450kanno.ilmn12.hg19",
-  array_for_gometh == "450K" && genome_build == "hg38" ~ "IlluminaHumanMethylation450kanno.ilmn12.hg19",
-  array_for_gometh == "EPIC" && genome_build == "hg19" ~ "IlluminaHumanMethylationEPICanno.ilm10b4.hg19",
-  array_for_gometh == "EPIC" && genome_build == "hg38" ~ "IlluminaHumanMethylationEPICanno.ilm10b4.hg19",
+  array_for_gometh == "450K" && genome_build %in% c("hg19", "hg38") ~ "IlluminaHumanMethylation450kanno.ilmn12.hg19",
+  array_for_gometh == "EPIC" && genome_build %in% c("hg19", "hg38") ~ "IlluminaHumanMethylationEPICanno.ilm10b4.hg19",
   array_for_gometh == "EPIC_V2" && genome_build == "hg38" ~ "IlluminaHumanMethylationEPICv2anno.20a1.hg38",
   TRUE ~ NA_character_
 )
-if (array_for_gometh %in% c("450K", "EPIC") && genome_build == "hg38") {
-  log_warn("Using hg19 annotation package for", array_for_gometh, "enrichment while project.genome_build=hg38.")
-}
 if (is.na(anno_pkg)) {
-  log_warn("Skipping gometh: unsupported array/build combination for annotation package:",
-           paste(array_for_gometh, cfg$project$genome_build, sep = "/"),
-           "(supported: 450K/hg19|hg38, EPIC/hg19|hg38, EPIC_V2/hg38)")
-  go_tbl <- tibble::tibble(note = paste("Skipped: unsupported array/build", paste(array_for_gometh, cfg$project$genome_build, sep = "/")))
-  kegg_tbl <- tibble::tibble(note = paste("Skipped: unsupported array/build", paste(array_for_gometh, cfg$project$genome_build, sep = "/")))
-  write_table(go_tbl, "../results/tables/go_terms.csv")
-  write_table(kegg_tbl, "../results/tables/kegg_terms.csv")
-  save_rds(go_tbl, "../results/rds/enrichment_go.rds")
-  save_rds(kegg_tbl, "../results/rds/enrichment_kegg.rds")
+  log_warn("Skipping gometh: unsupported array/build combination:", paste(array_for_gometh, genome_build, sep = "/"))
   knitr::knit_exit()
 }
-if (!is.na(anno_pkg)) {
-  ok_anno <- requireNamespace(anno_pkg, quietly = TRUE)
-  if (!ok_anno) {
-    log_warn("Skipping gometh: required annotation package not available for array type:", anno_pkg)
-    go_tbl <- tibble::tibble(note = paste("Skipped: missing annotation package", anno_pkg))
-    kegg_tbl <- tibble::tibble(note = paste("Skipped: missing annotation package", anno_pkg))
-    write_table(go_tbl, "../results/tables/go_terms.csv")
-    write_table(kegg_tbl, "../results/tables/kegg_terms.csv")
-    save_rds(go_tbl, "../results/rds/enrichment_go.rds")
-    save_rds(kegg_tbl, "../results/rds/enrichment_kegg.rds")
-    knitr::knit_exit()
-  }
-  suppressWarnings(suppressPackageStartupMessages(
-    library(anno_pkg, character.only = TRUE)
-  ))
-}
-sig <- dplyr::filter(dmp, adj.P.Val <= cfg$dmp$alpha, abs(delta_beta) >= cfg$dmp$delta_beta_min)
-all_cpg <- dmp$CpG
-sig_cpg <- sig$CpG
-write_table(tibble::tibble(metric = c("all_cpg", "sig_cpg"), value = c(length(all_cpg), length(sig_cpg))), "../results/tables/enrichment_input_summary.csv")
-if (length(sig_cpg) == 0) {
-  log_warn("No significant CpGs passed thresholds; enrichment will be skipped.")
-  go_tbl <- tibble::tibble(note = "No significant CpGs for enrichment")
-  kegg_tbl <- tibble::tibble(note = "No significant CpGs for enrichment")
-  write_table(go_tbl, "../results/tables/go_terms.csv")
-  write_table(kegg_tbl, "../results/tables/kegg_terms.csv")
-  save_rds(go_tbl, "../results/rds/enrichment_go.rds")
-  save_rds(kegg_tbl, "../results/rds/enrichment_kegg.rds")
+if (!requireNamespace(anno_pkg, quietly = TRUE)) {
+  log_warn("Skipping gometh: required annotation package not available:", anno_pkg)
   knitr::knit_exit()
 }
-res_go_all <- list()
+suppressWarnings(suppressPackageStartupMessages(library(anno_pkg, character.only = TRUE)))
+
 safe_gometh <- function(...) {
   tryCatch(
     missMethyl::gometh(...),
-    error = function(e) {
-      tibble::tibble(note = paste("gometh failed:", conditionMessage(e)))
+    error = function(e) tibble::tibble(note = paste("gometh failed:", conditionMessage(e)))
+  )
+}
+
+go_summary <- list()
+kegg_summary <- list()
+for (cmp_id in names(dmp_by_cmp)) {
+  dmp <- dmp_by_cmp[[cmp_id]]
+  sig <- dplyr::filter(dmp, significant)
+  all_cpg <- dmp$CpG
+  sig_cpg <- sig$CpG
+
+  cmp_tbl_dir <- file.path("../results/tables/comparisons", cmp_id)
+  dir.create(cmp_tbl_dir, recursive = TRUE, showWarnings = FALSE)
+
+  if (length(sig_cpg) == 0) {
+    go_tbl <- tibble::tibble(comparison_id = cmp_id, note = "No significant CpGs for enrichment")
+    kegg_tbl <- tibble::tibble(comparison_id = cmp_id, note = "No significant CpGs for enrichment")
+  } else {
+    if ("GO" %in% unlist(cfg$enrichment$collections)) {
+      go <- safe_gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "GO", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+      go_tbl <- tibble::as_tibble(go)
+      ont_col <- intersect(c("Ont", "ONTOLOGY", "ontology"), names(go_tbl))[1]
+      if (!is.na(ont_col) && !is.null(ont_col)) {
+        go_tbl <- dplyr::filter(go_tbl, .data[[ont_col]] %in% unlist(cfg$enrichment$ontologies))
+      }
+      go_tbl$comparison_id <- cmp_id
+    } else {
+      go_tbl <- tibble::tibble(comparison_id = cmp_id, note = "GO not requested")
     }
-  )
-}
-if ("GO" %in% unlist(cfg$enrichment$collections)) {
-  go <- safe_gometh(
-    sig.cpg = sig_cpg,
-    all.cpg = all_cpg,
-    collection = "GO",
-    array.type = array_for_gometh,
-    plot.bias = FALSE,
-    prior.prob = TRUE
-  )
-  go_tbl_raw <- tibble::as_tibble(go)
-  ont_col <- intersect(c("Ont", "ONTOLOGY", "ontology"), names(go_tbl_raw))[1]
-  if (!is.na(ont_col) && !is.null(ont_col)) {
-    requested_onts <- unlist(cfg$enrichment$ontologies)
-    go_tbl_raw <- dplyr::filter(go_tbl_raw, .data[[ont_col]] %in% requested_onts)
-  } else if (length(unlist(cfg$enrichment$ontologies)) > 0) {
-    log_warn("GO ontology filter requested but ontology column was not found in gometh output; keeping all GO results.")
+
+    if ("KEGG" %in% unlist(cfg$enrichment$collections)) {
+      kegg <- safe_gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "KEGG", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+      kegg_tbl <- tibble::as_tibble(kegg)
+      kegg_tbl$comparison_id <- cmp_id
+    } else {
+      kegg_tbl <- tibble::tibble(comparison_id = cmp_id, note = "KEGG not requested")
+    }
   }
-  res_go_all[["GO"]] <- go_tbl_raw
+
+  write_table(go_tbl, file.path(cmp_tbl_dir, "go_terms.csv"))
+  write_table(kegg_tbl, file.path(cmp_tbl_dir, "kegg_terms.csv"))
+  go_summary[[cmp_id]] <- go_tbl
+  kegg_summary[[cmp_id]] <- kegg_tbl
 }
-go_tbl <- dplyr::bind_rows(res_go_all)
-if (nrow(go_tbl) == 0) go_tbl <- tibble::tibble(note = "GO not requested or no results")
-write_table(go_tbl, "../results/tables/go_terms.csv")
-save_rds(go_tbl, "../results/rds/enrichment_go.rds")
-if ("KEGG" %in% unlist(cfg$enrichment$collections)) {
-  kegg <- safe_gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "KEGG", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
-  kegg_tbl <- tibble::as_tibble(kegg)
-  write_table(kegg_tbl, "../results/tables/kegg_terms.csv")
-  save_rds(kegg_tbl, "../results/rds/enrichment_kegg.rds")
-} else {
-  kegg_tbl <- tibble::tibble(note = "KEGG not requested")
+
+go_all <- dplyr::bind_rows(go_summary)
+kegg_all <- dplyr::bind_rows(kegg_summary)
+write_table(go_all, "../results/tables/go_terms.csv")
+write_table(kegg_all, "../results/tables/kegg_terms.csv")
+save_rds(go_all, "../results/rds/enrichment_go.rds")
+save_rds(kegg_all, "../results/rds/enrichment_kegg.rds")
+```
+
+## GO Terms (Top by Comparison)
+
+```{r}
+for (cmp_id in names(go_summary)) {
+  cat("\n### ", cmp_id, "\n\n", sep = "")
+  tbl <- go_summary[[cmp_id]]
+  print(knitr::kable(as.data.frame(head(tbl, cfg$enrichment$top_n)), format = "html"))
 }
 ```
 
-## GO terms
+## KEGG Terms (Top by Comparison)
 
 ```{r}
-knitr::kable(as.data.frame(head(go_tbl, cfg$enrichment$top_n)), format = "html")
-```
-
-## KEGG terms
-
-```{r}
-knitr::kable(as.data.frame(head(kegg_tbl, cfg$enrichment$top_n)), format = "html")
+for (cmp_id in names(kegg_summary)) {
+  cat("\n### ", cmp_id, "\n\n", sep = "")
+  tbl <- kegg_summary[[cmp_id]]
+  print(knitr::kable(as.data.frame(head(tbl, cfg$enrichment$top_n)), format = "html"))
+}
 ```

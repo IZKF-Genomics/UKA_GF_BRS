@@ -1,0 +1,2 @@
+comparison_id,name,base_group,target_group,enabled,covariates,alpha,delta_beta_min
+annubp_vs_neurofibroma,ANNUBP vs neurofibroma,neurofibroma,ANNUBP,true,age;sex_reported,0.05,0.10

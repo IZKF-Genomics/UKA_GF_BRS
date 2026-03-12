@@ -17,25 +17,42 @@ format:
     theme: lumen
 ---
 
-
 ```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
 source("../common.R")
 ensure_dirs("..")
 cfg <- load_config("../config/project.toml")
-samples <- load_samples("../config/samples.csv")
 if (!isTRUE(cfg$dmr$enabled)) {
   cat("DMR step disabled in config.\n")
   knitr::knit_exit()
 }
-obj <- load_analysis_inputs(cfg, samples)
-dmp <- read_rds("../results/rds/dmp_table.rds")
+
+if (!file.exists("../results/rds/dmp_by_comparison.rds")) {
+  log_error("Missing DMP results. Run step 01 first.")
+}
+
+dmp_by_cmp <- read_rds("../results/rds/dmp_by_comparison.rds")
 method <- cfg$dmr$method
-log_warn("DMR step is a scaffold. Implement method-specific workflows in this template (DMRcate/bumphunter).")
-dmr_tbl <- tibble::tibble(method = method, note = "Scaffold placeholder", n_input_cpg = nrow(dmp))
-save_rds(dmr_tbl, "../results/rds/dmr_table.rds")
-write_table(dmr_tbl, "../results/tables/dmr_table.csv")
+log_warn("DMR step is currently scaffold-level and emits per-comparison placeholders.")
+
+dmr_rows <- lapply(names(dmp_by_cmp), function(cmp_id) {
+  dmp <- dmp_by_cmp[[cmp_id]]
+  cmp_dir <- file.path("../results/tables/comparisons", cmp_id)
+  dir.create(cmp_dir, recursive = TRUE, showWarnings = FALSE)
+  dmr_tbl <- tibble::tibble(
+    comparison_id = cmp_id,
+    method = method,
+    note = "Scaffold placeholder",
+    n_input_cpg = nrow(dmp)
+  )
+  write_table(dmr_tbl, file.path(cmp_dir, "dmr_table.csv"))
+  dmr_tbl
+})
+
+dmr_summary <- dplyr::bind_rows(dmr_rows)
+save_rds(dmr_summary, "../results/rds/dmr_table.rds")
+write_table(dmr_summary, "../results/tables/dmr_table.csv")
 ```
 
 ```{r}
-knitr::kable(as.data.frame(dmr_tbl), format = "html")
+knitr::kable(as.data.frame(dmr_summary), format = "html")
 ```

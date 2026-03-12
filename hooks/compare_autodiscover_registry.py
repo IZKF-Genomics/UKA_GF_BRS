@@ -138,7 +138,7 @@ def main(ctx: Any) -> str:
         row["process_template"] = "illumina_methylation_process"
         row["array_type"] = str((ctx.params or {}).get("array_type", "EPIC")).strip() or "EPIC"
         row["genome_build"] = str((ctx.params or {}).get("genome_build", "hg38")).strip() or "hg38"
-        row["processed_results_dir"] = str((ctx.params or {}).get("process_results_dir", "../illumina_methylation_process/results/rds")).strip() or "../illumina_methylation_process/results/rds"
+        row["processed_results_dir"] = "../illumina_methylation_process/results/rds"
         row["samples_file"] = ""
         row["enabled"] = "true"
         row["include_samples"] = ""

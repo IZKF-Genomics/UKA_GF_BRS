@@ -6,16 +6,15 @@ outdir = "reports"
 
 [input]
 input_registry_file = "config/input_registry.csv"
-input_runs_file = "config/input_runs.csv"
 group_map_file = "config/group_map.csv"
 require_samples_in_sheet = false
 sync_samples_on_run = true
-processed_results_dir = "{{ ctx.params.process_results_dir }}" # fallback if input_runs_file is missing
 
 [groups]
 primary_group_col = "{{ ctx.params.group_col }}"
-case = "{{ ctx.params.case_label }}"
-control = "{{ ctx.params.control_label }}"
+
+[comparisons]
+comparisons_file = "config/comparisons.csv"
 
 [dmp]
 enabled = true

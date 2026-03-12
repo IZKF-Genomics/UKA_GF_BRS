@@ -1,5 +1,5 @@
 id: illumina_methylation_compare
-description: "Illumina methylation array comparison analysis (DMP/DMR/enrichment/drilldown) from preprocessed inputs."
+description: "Illumina methylation array multi-comparison analysis (DMP/DMR/enrichment/drilldown) from preprocessed inputs."
 required_templates:
   - illumina_methylation_process
 
@@ -28,30 +28,12 @@ params:
     required: false
     default: "hg38"
     description: "Genome build used for annotation and reporting"
-  process_results_dir:
-    type: str
-    cli: "--process-results-dir"
-    required: false
-    default: "../illumina_methylation_process/results/rds"
-    description: "Path to upstream process template results/rds directory"
   group_col:
     type: str
     cli: "--group-col"
     required: false
     default: "group"
     description: "Primary grouping column in config/samples.csv"
-  case_label:
-    type: str
-    cli: "--case"
-    required: false
-    default: "case"
-    description: "Case label in the primary grouping column"
-  control_label:
-    type: str
-    cli: "--control"
-    required: false
-    default: "control"
-    description: "Control label in the primary grouping column"
   auto_discover_inputs:
     type: bool
     cli: "--auto-discover-inputs"
@@ -68,7 +50,7 @@ render:
     - .gitignore -> .gitignore
     - config/project.toml.j2 -> config/project.toml
     - config/input_registry.csv.j2 -> config/input_registry.csv
-    - config/input_runs.csv.j2 -> config/input_runs.csv
+    - config/comparisons.csv -> config/comparisons.csv
     - config/group_map.csv -> config/group_map.csv
     - config/samples.csv -> config/samples.csv
     - common.R -> common.R

@@ -14,8 +14,12 @@ for f in "${required[@]}"; do
     exit 1
   fi
 done
-if [[ ! -f config/input_registry.csv && ! -f config/input_runs.csv ]]; then
-  echo "ERROR: missing input run configuration (config/input_registry.csv or config/input_runs.csv)" >&2
+if [[ ! -f config/input_registry.csv ]]; then
+  echo "ERROR: missing input run configuration (config/input_registry.csv)" >&2
+  exit 1
+fi
+if [[ ! -f config/comparisons.csv ]]; then
+  echo "ERROR: missing comparisons definition (config/comparisons.csv)" >&2
   exit 1
 fi
 
@@ -31,7 +35,7 @@ fi
 
 pixi install 2>&1 | tee -a "$LOG_FILE"
 SYNC_ON_RUN="$(pixi run Rscript -e 'cfg <- RcppTOML::parseTOML(\"config/project.toml\"); v <- TRUE; if (!is.null(cfg$input$sync_samples_on_run)) v <- cfg$input$sync_samples_on_run; cat(tolower(as.character(v)))' 2>/dev/null || echo true)"
-if [[ \"$SYNC_ON_RUN\" =~ ^(true|t|1|yes|y)$ ]]; then
+if [[ "$SYNC_ON_RUN" =~ ^(true|t|1|yes|y)$ ]]; then
   pixi run sync-samples 2>&1 | tee -a "$LOG_FILE"
 fi
 pixi run check 2>&1 | tee -a "$LOG_FILE"
