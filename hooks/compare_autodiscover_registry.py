@@ -32,6 +32,13 @@ def _has_rds_artifact(results_rds: Path) -> bool:
     return any((results_rds / nm).exists() for nm in RDS_CANDIDATES)
 
 
+def _is_default_fallback_row(row: dict[str, str]) -> bool:
+    run_id = str(row.get("run_id", "")).strip()
+    proc_tpl = str(row.get("process_template", "")).strip()
+    pdir = str(row.get("processed_results_dir", "")).strip()
+    return run_id == "run1" and proc_tpl == "illumina_methylation_process" and pdir == "../illumina_methylation_process/results/rds"
+
+
 def main(ctx: Any) -> str:
     auto_flag = str((ctx.params or {}).get("auto_discover_inputs", "true")).strip().lower()
     if auto_flag in {"false", "0", "no", "n"}:
@@ -107,14 +114,41 @@ def main(ctx: Any) -> str:
 
         discovered_rows.append(row)
 
-    # Keep non-process/manual rows from existing registry.
     discovered_ids = {r["run_id"] for r in discovered_rows}
     extras = [r for rid, r in existing_by_run.items() if rid not in discovered_ids]
+    preserved_extra = 0
+
+    # Keep non-process/manual rows from existing registry.
     for r in extras:
+        if discovered_ids and _is_default_fallback_row(r):
+            continue
         row = {k: str(r.get(k, "")) for k in fieldnames}
         if not row.get("enabled"):
             row["enabled"] = "false"
         discovered_rows.append(row)
+        preserved_extra += 1
+
+    # If no process runs were discovered, ensure a fallback run1 row exists.
+    fallback_added = False
+    if not discovered_ids:
+        fallback = existing_by_run.get("run1", {})
+        row = {k: "" for k in fieldnames}
+        row["run_id"] = "run1"
+        row["dataset_id"] = "default"
+        row["process_template"] = "illumina_methylation_process"
+        row["array_type"] = str((ctx.params or {}).get("array_type", "EPIC")).strip() or "EPIC"
+        row["genome_build"] = str((ctx.params or {}).get("genome_build", "hg38")).strip() or "hg38"
+        row["processed_results_dir"] = str((ctx.params or {}).get("process_results_dir", "../illumina_methylation_process/results/rds")).strip() or "../illumina_methylation_process/results/rds"
+        row["samples_file"] = ""
+        row["enabled"] = "true"
+        row["include_samples"] = ""
+        row["exclude_samples"] = ""
+        if fallback:
+            for k in fieldnames:
+                if str(fallback.get(k, "")).strip():
+                    row[k] = str(fallback.get(k, ""))
+        discovered_rows.append(row)
+        fallback_added = True
 
     discovered_rows.sort(key=lambda r: r.get("run_id", ""))
     with out_csv.open("w", encoding="utf-8", newline="") as fh:
@@ -124,5 +158,5 @@ def main(ctx: Any) -> str:
 
     return (
         "[hook:compare_autodiscover_registry] wrote "
-        f"{out_csv} (discovered={len(discovered_ids)}, preserved_extra={len(extras)})"
+        f"{out_csv} (discovered={len(discovered_ids)}, preserved_extra={preserved_extra}, fallback_added={fallback_added})"
     )

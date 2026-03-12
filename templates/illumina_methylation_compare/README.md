@@ -96,6 +96,8 @@ bpm template render illumina_methylation_compare \
 
 On render, a post-render hook auto-discovers active `illumina_methylation_process` runs from
 `project.yaml` and writes `config/input_registry.csv`.
+If at least one process run is discovered, the default fallback row (`run1`) is omitted.
+If none are discovered, a single fallback `run1` row is kept/created.
 Disable this behavior with:
 ```bash
 bpm template render illumina_methylation_compare --param auto_discover_inputs=false --dir /path/to/project

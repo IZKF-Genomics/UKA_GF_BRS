@@ -97,7 +97,7 @@ cd /path/to/output
 - keep_rules now defaults to a keyboard TUI for bulk keep/unkeep management (`Space` toggle, `u` keep_until, `s` save) with browse root `/data/fastq`.
 - illumina_methylation_compare now supports registry-driven multi-run input management (`config/input_registry.csv`), strict upstream object path resolution, group harmonization via `config/group_map.csv`, and `pixi run sync-samples` for rebuilding compare sample sheets from enabled process runs.
 - illumina_methylation_compare no longer requires explicitly passing `study_name`; when omitted, the rendered template id is used as the project/report name.
-- illumina_methylation_compare now auto-discovers active `illumina_methylation_process` runs from project.yaml via post-render hook and populates `config/input_registry.csv` (can be disabled with `--auto-discover-inputs false`).
+- illumina_methylation_compare now auto-discovers active `illumina_methylation_process` runs from project.yaml via post-render hook and populates `config/input_registry.csv` (can be disabled with `--auto-discover-inputs false`); fallback `run1` is only kept when no process runs are discovered.
 
 ## Agent Readability
 
