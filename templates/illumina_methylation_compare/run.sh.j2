@@ -33,6 +33,54 @@ else
   exit 1
 fi
 
+PROJECT_YAML="$ROOT_DIR/../project.yaml"
+AUTHOR_METADATA="config/quarto_authors.yml"
+python3 - "$PROJECT_YAML" "$AUTHOR_METADATA" <<'PY'
+from pathlib import Path
+import sys
+
+project_yaml = Path(sys.argv[1])
+output_yaml = Path(sys.argv[2])
+names = []
+
+if project_yaml.exists():
+    in_authors = False
+    current_item_indent = None
+    for raw_line in project_yaml.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if not in_authors:
+            if stripped == "authors:":
+                in_authors = True
+            continue
+        if indent == 0 and not stripped.startswith("- ") and stripped != "authors:":
+            break
+        if stripped.startswith("- "):
+            current_item_indent = indent
+            remainder = stripped[2:].strip()
+            if remainder.startswith("name:"):
+                value = remainder.split(":", 1)[1].strip().strip("'\"")
+                if value:
+                    names.append(value)
+            continue
+        if current_item_indent is not None and indent > current_item_indent and stripped.startswith("name:"):
+            value = stripped.split(":", 1)[1].strip().strip("'\"")
+            if value:
+                names.append(value)
+
+output_yaml.parent.mkdir(parents=True, exist_ok=True)
+with output_yaml.open("w", encoding="utf-8") as fh:
+    if names:
+        fh.write("author:\n")
+        for name in names:
+            fh.write(f"  - {name}\n")
+    else:
+        fh.write("{}\n")
+PY
+
 pixi install 2>&1 | tee -a "$LOG_FILE"
 SYNC_ON_RUN="$(pixi run Rscript -e 'cfg <- RcppTOML::parseTOML(\"config/project.toml\"); v <- TRUE; if (!is.null(cfg$input$sync_samples_on_run)) v <- cfg$input$sync_samples_on_run; cat(tolower(as.character(v)))' 2>/dev/null || echo true)"
 if [[ "$SYNC_ON_RUN" =~ ^(true|t|1|yes|y)$ ]]; then

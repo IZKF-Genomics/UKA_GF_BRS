@@ -10,12 +10,6 @@ params:
     required: false
     default: ""
     description: "Optional project/report name; defaults to rendered template id when omitted"
-  authors:
-    type: str
-    cli: "--authors"
-    required: false
-    default: "unknown"
-    description: "Author name shown in step reports"
   array_type:
     type: str
     cli: "--array-type"

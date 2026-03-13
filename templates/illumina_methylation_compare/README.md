@@ -13,13 +13,11 @@ required_params: []
 optional_params:
 - array_type
 - auto_discover_inputs
-- authors
 - genome_build
 - group_col
 - study_name
 cli_flags:
   study_name: --study-name
-  authors: --authors
   array_type: --array-type
   auto_discover_inputs: --auto-discover-inputs
   genome_build: --genome-build
@@ -82,6 +80,7 @@ bpm template render illumina_methylation_compare \
 ```
 
 `study_name` is optional; default is the rendered template id.
+Report authors are read from the parent project's `project.yaml` at run time.
 
 Disable auto-discovery of input registry:
 

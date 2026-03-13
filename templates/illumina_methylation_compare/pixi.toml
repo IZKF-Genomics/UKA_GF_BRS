@@ -5,7 +5,7 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-render = { cmd = ["bash", "-lc", "quarto render steps/01_dmp.qmd --output-dir reports && quarto render steps/02_dmr.qmd --output-dir reports && quarto render steps/03_enrichment.qmd --output-dir reports && quarto render steps/04_drilldown.qmd --output-dir reports && quarto render steps/00_index.qmd --output-dir reports"] }
+render = { cmd = ["bash", "-lc", "quarto render steps/01_dmp.qmd --metadata-file config/quarto_authors.yml --output-dir reports && quarto render steps/02_dmr.qmd --metadata-file config/quarto_authors.yml --output-dir reports && quarto render steps/03_enrichment.qmd --metadata-file config/quarto_authors.yml --output-dir reports && quarto render steps/04_drilldown.qmd --metadata-file config/quarto_authors.yml --output-dir reports && quarto render steps/00_index.qmd --metadata-file config/quarto_authors.yml --output-dir reports"] }
 clean = { cmd = ["bash", "-lc", "rm -rf reports results"] }
 sync-samples = { cmd = ["Rscript", "scripts/sync_samples_from_inputs.R"] }
 check = { cmd = ["Rscript", "-e", "source('common.R'); cfg <- load_config('config/project.toml'); smp <- load_samples('config/samples.csv'); ensure_dirs('.'); validate_project(cfg, smp)"] }
