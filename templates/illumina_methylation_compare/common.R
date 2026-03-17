@@ -27,6 +27,12 @@ load_samples <- function(path = "config/samples.csv") {
   readr::read_csv(path, show_col_types = FALSE)
 }
 
+load_sample_paths <- function(path = "config/samples_paths.csv") {
+  p <- resolve_path(path)
+  if (!file.exists(p)) return(tibble::tibble(sample_id = character(0)))
+  readr::read_csv(p, show_col_types = FALSE)
+}
+
 save_rds <- function(object, path) {
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   saveRDS(object, path)
@@ -86,13 +92,13 @@ normalize_array_type_for_gometh <- function(array_type) {
 }
 
 normalize_group_value <- function(x) {
-  tolower(gsub("[^a-z0-9]+", "", trimws(as.character(x))))
+  gsub("[^a-z0-9]+", "", tolower(trimws(as.character(x))))
 }
 
 load_group_map <- function(path = "config/group_map.csv") {
   p <- resolve_path(path)
   if (!file.exists(p)) return(NULL)
-  gm <- readr::read_csv(p, show_col_types = FALSE)
+  gm <- readr::read_csv(p, show_col_types = FALSE, comment = "#")
   required <- c("group_raw", "group_compare")
   missing <- setdiff(required, names(gm))
   if (length(missing) > 0) {
@@ -331,6 +337,112 @@ save_plot <- function(plot_obj, path, width = 8, height = 5) {
   invisible(path)
 }
 
+select_report_columns <- function(df, preferred = NULL, max_extra = 0) {
+  if (is.null(preferred) || length(preferred) == 0) return(df)
+  keep <- intersect(preferred, names(df))
+  if (max_extra > 0) {
+    extras <- setdiff(names(df), keep)
+    keep <- c(keep, head(extras, max_extra))
+  }
+  if (length(keep) == 0) return(df)
+  df[, keep, drop = FALSE]
+}
+
+format_report_table <- function(df) {
+  tbl <- as.data.frame(df, stringsAsFactors = FALSE)
+  if (nrow(tbl) == 0) return(tbl)
+
+  for (nm in names(tbl)) {
+    col <- tbl[[nm]]
+    if (!is.numeric(col)) next
+
+    nm_lower <- tolower(nm)
+    if (nm_lower %in% c("p.value", "adj.p.val", "fdr", "qvalue", "q.value", "pvalue", "p_val", "adj_p_val")) {
+      tbl[[nm]] <- ifelse(is.na(col), NA_character_, formatC(col, format = "e", digits = 2))
+      next
+    }
+
+    if (nm_lower %in% c("delta_beta", "logfc", "aveexpr", "estimate", "effect", "mean_beta", "median_beta")) {
+      tbl[[nm]] <- ifelse(is.na(col), NA_character_, formatC(col, format = "f", digits = 3))
+      next
+    }
+
+    if (nm_lower %in% c("pos", "start", "end", "width", "n", "n_samples", "n_common_probes")) {
+      tbl[[nm]] <- ifelse(is.na(col), NA_character_, format(round(col, 0), big.mark = ",", trim = TRUE, scientific = FALSE))
+      next
+    }
+
+    if (all(is.finite(col) | is.na(col)) && max(abs(col), na.rm = TRUE) >= 1000) {
+      tbl[[nm]] <- ifelse(is.na(col), NA_character_, format(round(col, 0), big.mark = ",", trim = TRUE, scientific = FALSE))
+      next
+    }
+
+    tbl[[nm]] <- ifelse(is.na(col), NA_character_, formatC(col, format = "f", digits = 3))
+  }
+
+  tbl
+}
+
+report_asset_href <- function(path) {
+  p <- as.character(path[[1]])
+  if (startsWith(p, "results/")) return(file.path("..", p))
+  p
+}
+
+report_download_link <- function(path, label = "Download CSV") {
+  p <- as.character(path[[1]])
+  htmltools::tags$p(
+    style = "margin: 0.5rem 0 1.5rem;",
+    htmltools::tags$a(
+      href = report_asset_href(p),
+      download = basename(p),
+      paste0(label, ": ", basename(p))
+    )
+  )
+}
+
+render_report_table <- function(df,
+                                preferred = NULL,
+                                page_length = 10,
+                                max_extra = 0,
+                                caption = NULL) {
+  selected <- select_report_columns(df, preferred = preferred, max_extra = max_extra)
+  numeric_cols <- names(selected)[vapply(selected, is.numeric, logical(1))]
+  tbl <- format_report_table(selected)
+  if (requireNamespace("DT", quietly = TRUE)) {
+    use_scroll_x <- ncol(tbl) > 6 || any(nchar(names(tbl)) > 18) || sum(nchar(names(tbl))) > 80
+    table_class <- if (use_scroll_x) "compact stripe hover nowrap" else "compact stripe hover"
+    cap <- NULL
+    if (!is.null(caption) && nzchar(caption)) {
+      cap <- htmltools::tags$caption(
+        style = "caption-side: top; text-align: left; font-weight: 600; padding-bottom: 0.5rem;",
+        caption
+      )
+    }
+    return(DT::datatable(
+      tbl,
+      rownames = FALSE,
+      caption = cap,
+      class = table_class,
+      options = list(
+        pageLength = page_length,
+        lengthMenu = list(c(10, 20, 50, 100), c("10", "20", "50", "100")),
+        scrollX = use_scroll_x,
+        autoWidth = TRUE,
+        dom = "tip",
+        columnDefs = c(
+          list(list(className = "dt-left", targets = "_all")),
+          if (length(numeric_cols) > 0) list(list(className = "dt-right", targets = which(names(tbl) %in% numeric_cols) - 1)) else list()
+        ),
+        initComplete = DT::JS("function(settings){var api=this.api(); $(api.table().header()).find('th').css('text-align','left'); api.columns('.dt-right').header().to$().css('text-align','right'); api.columns.adjust();}"),
+        drawCallback = DT::JS("function(){this.api().columns.adjust();}")
+      ),
+      fillContainer = FALSE
+    ))
+  }
+  knitr::kable(tbl, format = "html", caption = caption)
+}
+
 load_single_input <- function(run_id,
                               processed_results_dir,
                               configured_array_type = "",
@@ -380,8 +492,76 @@ subset_run_samples <- function(run, include_samples, exclude_samples, allowed_sa
   run
 }
 
+normalize_probe_ids_for_compare <- function(probe_ids, array_type = "") {
+  at <- normalize_array_type_for_gometh(array_type)
+  ids <- as.character(probe_ids)
+  if (identical(at, "EPIC_V2")) {
+    ids <- sub("_[A-Za-z]+[0-9]+$", "", ids)
+  }
+  ids
+}
+
+collapse_matrix_rows_by_id <- function(mat, probe_ids) {
+  ids <- as.character(probe_ids)
+  if (length(ids) != nrow(mat)) {
+    log_error("collapse_matrix_rows_by_id received mismatched probe_ids and matrix rows")
+  }
+  if (!anyDuplicated(ids)) {
+    rownames(mat) <- ids
+    return(mat)
+  }
+  sums <- rowsum(mat, group = ids, reorder = FALSE, na.rm = TRUE)
+  counts <- as.numeric(table(ids)[rownames(sums)])
+  collapsed <- sums / counts
+  rownames(collapsed) <- rownames(sums)
+  collapsed
+}
+
+collapse_annotation_by_id <- function(annotation, probe_ids) {
+  ann <- tibble::as_tibble(annotation)
+  probe_map <- tibble::tibble(
+    Name_original = as.character(probe_ids),
+    probe_id_compare = as.character(probe_ids)
+  )
+  if ("Name" %in% names(ann)) {
+    ann$Name_original <- as.character(ann$Name)
+    ann <- dplyr::left_join(ann, probe_map, by = "Name_original")
+    ann <- ann[!is.na(ann$probe_id_compare), , drop = FALSE]
+  } else if (nrow(ann) == nrow(probe_map)) {
+    ann$Name_original <- probe_map$Name_original
+    ann$probe_id_compare <- probe_map$probe_id_compare
+  } else {
+    log_error("Annotation table cannot be aligned to probe IDs for comparison")
+  }
+  ann <- ann[!duplicated(ann$probe_id_compare), , drop = FALSE]
+  ann$Name <- ann$probe_id_compare
+  ann$probe_id_compare <- NULL
+  ann
+}
+
+normalize_run_probes_for_compare <- function(run) {
+  probe_ids <- rownames(run$beta)
+  if (is.null(probe_ids) || length(probe_ids) == 0) {
+    log_error("Input run", run$run_id, "has no probe row names")
+  }
+  probe_ids_norm <- normalize_probe_ids_for_compare(probe_ids, run$configured_array_type)
+  if (all(probe_ids_norm == probe_ids) && !anyDuplicated(probe_ids_norm)) {
+    return(run)
+  }
+
+  dup_n <- sum(duplicated(probe_ids_norm))
+  if (dup_n > 0) {
+    log_info("Collapsing", dup_n, "duplicate normalized probes for run", run$run_id)
+  }
+  run$beta <- collapse_matrix_rows_by_id(run$beta, probe_ids_norm)
+  run$m <- collapse_matrix_rows_by_id(run$m, probe_ids_norm)
+  run$annotation <- collapse_annotation_by_id(run$annotation, probe_ids_norm)
+  run
+}
+
 combine_inputs <- function(runs) {
   if (length(runs) == 0) log_error("No runs left after filtering")
+  runs <- lapply(runs, normalize_run_probes_for_compare)
   common_probes <- Reduce(intersect, lapply(runs, function(x) rownames(x$beta)))
   if (length(common_probes) == 0) log_error("No shared probes across input runs")
   runs <- lapply(runs, function(x) {
@@ -422,7 +602,7 @@ combine_inputs <- function(runs) {
     n_samples = vapply(runs, function(x) ncol(x$beta), integer(1)),
     n_common_probes = length(common_probes)
   )
-  write_table(summary_tbl, "../results/tables/input_run_summary.csv")
+  write_table(summary_tbl, "results/tables/input_run_summary.csv")
   structure(
     list(beta = beta, m = mval, pdata = pdata, annotation = ann, run_summary = summary_tbl),
     class = c("combined_methylation_inputs", "list")
@@ -474,8 +654,62 @@ load_analysis_inputs <- function(cfg, samples = NULL) {
   log_error("No enabled input runs found in", run_info$path)
 }
 
+split_sample_tables <- function(synced, group_col = "group") {
+  tech_exact <- c(
+    "sample_uid", "input_source", "input_object", "SentrixBarcode", "SentrixPosition",
+    "idat_base_dir", "idat_basename", "Basename", "BasenameSource",
+    "EffectiveIdatBaseDir", "filenames"
+  )
+  tech_patterns <- c(
+    "\\.sheet$", "^Sentrix", "^idat_", "^Basename", "^EffectiveIdatBaseDir$", "^filenames$"
+  )
+  is_tech <- names(synced) %in% tech_exact
+  for (pat in tech_patterns) {
+    is_tech <- is_tech | grepl(pat, names(synced))
+  }
+
+  curated_first <- c("sample_id", group_col, "group_raw", "group_compare", "run_id", "dataset_id", "process_template", "array_type")
+  curated_first <- unique(curated_first[curated_first %in% names(synced)])
+  curated_other <- setdiff(names(synced)[!is_tech], curated_first)
+  curated <- synced[, c(curated_first, curated_other), drop = FALSE]
+
+  path_first <- c("sample_id", "sample_uid", "run_id", "dataset_id", "process_template", "array_type", "input_source", "input_object")
+  path_first <- unique(path_first[path_first %in% names(synced)])
+  path_other <- setdiff(names(synced)[is_tech], path_first)
+  sample_paths <- synced[, c(path_first, path_other), drop = FALSE]
+
+  list(samples = curated, sample_paths = sample_paths)
+}
+
+write_group_levels <- function(samples,
+                               group_col = "group",
+                               output_file = "config/group_levels.csv") {
+  if (!(group_col %in% names(samples))) {
+    log_error("Cannot write group levels: missing group column", group_col)
+  }
+
+  group_summary <- samples %>%
+    dplyr::group_by(.data[[group_col]]) %>%
+    dplyr::summarise(n_samples = dplyr::n(), .groups = "drop") %>%
+    dplyr::rename(group = .data[[group_col]]) %>%
+    dplyr::arrange(dplyr::desc(.data$n_samples), .data$group)
+
+  write_table(group_summary, output_file)
+
+  cat(sprintf("[INFO] Observed analysis groups (%s):\n", group_col))
+  for (i in seq_len(nrow(group_summary))) {
+    cat(sprintf("[INFO]   - %s (n=%s)\n", group_summary$group[[i]], group_summary$n_samples[[i]]))
+  }
+  cat(sprintf("[INFO] Wrote group summary to %s\n", output_file))
+  cat("[INFO] Review config/comparisons.csv and set base_group/target_group using the group labels above before running the full compare pipeline.\n")
+
+  invisible(group_summary)
+}
+
 sync_samples_from_inputs <- function(cfg,
                                      output_file = "config/samples.csv",
+                                     paths_output_file = "config/samples_paths.csv",
+                                     groups_output_file = "config/group_levels.csv",
                                      include_existing_columns = TRUE) {
   run_info <- resolve_run_table(cfg)
   if (is.null(run_info$runs) || nrow(run_info$runs) == 0) {
@@ -540,14 +774,13 @@ sync_samples_from_inputs <- function(cfg,
     }
   }
 
-  first_cols <- c("sample_uid", "sample_id", group_col, "group_raw", "run_id", "dataset_id", "process_template", "array_type", "input_source", "input_object")
-  first_cols <- unique(first_cols[first_cols %in% names(synced)])
-  other_cols <- setdiff(names(synced), first_cols)
-  synced <- synced[, c(first_cols, other_cols), drop = FALSE]
-
-  write_table(synced, output_file)
-  log_info("Synced", nrow(synced), "samples into", output_file)
-  invisible(synced)
+  split_tbls <- split_sample_tables(synced, group_col = group_col)
+  write_table(split_tbls$samples, output_file)
+  write_table(split_tbls$sample_paths, paths_output_file)
+  write_group_levels(split_tbls$samples, group_col = group_col, output_file = groups_output_file)
+  log_info("Synced", nrow(split_tbls$samples), "samples into", output_file)
+  log_info("Synced", nrow(split_tbls$sample_paths), "sample paths into", paths_output_file)
+  invisible(split_tbls)
 }
 
 get_beta_matrix <- function(obj) {
@@ -630,6 +863,10 @@ merge_input_metadata <- function(beta, pdata, samples) {
   }
   meta$sample_col <- colnames(beta)
   meta <- dplyr::left_join(meta, samples, by = "sample_id", suffix = c("", ".sheet"))
+  sample_paths <- load_sample_paths()
+  if (!is.null(sample_paths) && nrow(sample_paths) > 0 && "sample_id" %in% names(sample_paths)) {
+    meta <- dplyr::left_join(meta, sample_paths, by = "sample_id", suffix = c("", ".paths"))
+  }
   sheet_cols <- names(meta)[grepl("\\.sheet$", names(meta))]
   for (sc in sheet_cols) {
     base <- sub("\\.sheet$", "", sc)
@@ -640,5 +877,15 @@ merge_input_metadata <- function(beta, pdata, samples) {
       meta[[base]][missing_base] <- meta[[sc]][missing_base]
     }
   }
-  meta[, setdiff(names(meta), sheet_cols), drop = FALSE]
+  path_cols <- names(meta)[grepl("\\.paths$", names(meta))]
+  for (pc in path_cols) {
+    base <- sub("\\.paths$", "", pc)
+    if (!(base %in% names(meta))) {
+      meta[[base]] <- meta[[pc]]
+    } else {
+      missing_base <- is.na(meta[[base]]) | trimws(as.character(meta[[base]])) == ""
+      meta[[base]][missing_base] <- meta[[pc]][missing_base]
+    }
+  }
+  meta[, setdiff(names(meta), c(sheet_cols, path_cols)), drop = FALSE]
 }

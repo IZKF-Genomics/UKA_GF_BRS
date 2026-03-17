@@ -1,5 +1,6 @@
 ---
 title: "04 Drilldown (CpG / Locus / Gene)"
+author: "{{ ctx.params.authors }}"
 date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
 format:
   html:
@@ -17,10 +18,10 @@ format:
 ---
 
 ```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
-source("../common.R")
-ensure_dirs("..")
-cfg <- load_config("../config/project.toml")
-samples <- load_samples("../config/samples.csv")
+source("common.R")
+ensure_dirs(".")
+cfg <- load_config("config/project.toml")
+samples <- load_samples("config/samples.csv")
 if (!isTRUE(cfg$drilldown$enabled)) {
   cat("Drilldown disabled in config.\n")
   knitr::knit_exit()
@@ -29,7 +30,7 @@ obj <- load_analysis_inputs(cfg, samples)
 beta <- get_beta_matrix(obj)
 ann <- get_annotation_df(obj)
 pdata <- get_pdata(obj)
-dmp_by_cmp <- if (file.exists("../results/rds/dmp_by_comparison.rds")) read_rds("../results/rds/dmp_by_comparison.rds") else list()
+dmp_by_cmp <- if (file.exists("results/rds/dmp_by_comparison.rds")) read_rds("results/rds/dmp_by_comparison.rds") else list()
 
 ann2 <- ann
 if (!("Name" %in% names(ann2))) ann2$Name <- rownames(beta)
@@ -45,6 +46,9 @@ ann2 <- dplyr::mutate(ann2, pos = suppressWarnings(as.numeric(pick_first_col(ann
 cpg_ids <- unlist(cfg$drilldown$cpg_ids)
 loci <- unlist(cfg$drilldown$loci)
 genes <- unlist(cfg$drilldown$genes)
+write_table(tibble::tibble(cpg_ids = cpg_ids), "results/tables/drilldown_requested_cpg_ids.csv")
+write_table(tibble::tibble(loci = loci), "results/tables/drilldown_requested_loci.csv")
+write_table(tibble::tibble(genes = genes), "results/tables/drilldown_requested_genes.csv")
 
 # CpG drilldowns over all samples
 for (cpg in cpg_ids) {
@@ -55,7 +59,7 @@ for (cpg in cpg_ids) {
     dmp <- dmp_by_cmp[[cmp_id]]
     df[[paste0("in_dmp_", cmp_id)]] <- cpg %in% dmp$CpG
   }
-  write_table(df, file.path("../results/tables", paste0("drilldown_cpg_", cpg, ".csv")))
+  write_table(df, file.path("results/tables", paste0("drilldown_cpg_", cpg, ".csv")))
 }
 
 # Locus drilldowns
@@ -66,7 +70,7 @@ for (loc in loci) {
   loc_tbl <- ann2 %>% dplyr::filter(.data$chr == chr, .data$pos >= start, .data$pos <= end)
   if (nrow(loc_tbl) > cfg$drilldown$max_cpgs_per_locus) loc_tbl <- dplyr::slice_head(loc_tbl, n = cfg$drilldown$max_cpgs_per_locus)
   tag <- gsub("[^A-Za-z0-9]+", "_", loc)
-  write_table(loc_tbl, file.path("../results/tables", paste0("drilldown_locus_", tag, ".csv")))
+  write_table(loc_tbl, file.path("results/tables", paste0("drilldown_locus_", tag, ".csv")))
 }
 
 # Gene drilldowns
@@ -75,24 +79,41 @@ for (gene in genes) {
   if (length(gene_cols) == 0) break
   gene_tbl <- ann2[Reduce(`|`, lapply(gene_cols, function(col) grepl(gene, ann2[[col]], fixed = TRUE))), , drop = FALSE]
   tag <- gsub("[^A-Za-z0-9]+", "_", gene)
-  write_table(gene_tbl, file.path("../results/tables", paste0("drilldown_gene_", tag, ".csv")))
+  write_table(gene_tbl, file.path("results/tables", paste0("drilldown_gene_", tag, ".csv")))
 }
 ```
 
+## Method
+
+This report is a targeted lookup layer over the combined methylation dataset. It uses the configured CpG IDs, genomic loci, and gene symbols from `project.toml` to extract matching probe annotations and sample-level beta values from the merged analysis object.
+
+Requested CpG IDs are expanded into per-sample beta-value tables so readers can inspect the exact methylation values across the cohort. Requested loci are resolved by genomic overlap against the probe annotation, and requested genes are resolved through the available gene-annotation columns in the methylation manifest.
+
+The drilldown outputs are intended for targeted follow-up rather than hypothesis testing. They provide convenient tables for export and manual review, including whether a requested CpG appeared in any of the comparison-specific DMP result tables already generated in this analysis.
+
 ## Requested CpG IDs
 
-```{r}
-tibble::tibble(cpg_ids = cpg_ids)
+These are the exact CpG targets requested for direct drilldown and per-sample beta-value export.
+
+```{r requested-cpgs}
+render_report_table(tibble::tibble(cpg_ids = cpg_ids), page_length = 20)
+report_download_link("results/tables/drilldown_requested_cpg_ids.csv")
 ```
 
 ## Requested Loci
 
-```{r}
-tibble::tibble(loci = loci)
+These genomic loci are expanded into matching probe sets for targeted locus-level inspection.
+
+```{r requested-loci}
+render_report_table(tibble::tibble(loci = loci), page_length = 20)
+report_download_link("results/tables/drilldown_requested_loci.csv")
 ```
 
 ## Requested Genes
 
-```{r}
-tibble::tibble(genes = genes)
+These gene symbols are used to retrieve annotation-linked probes for targeted gene-centric review.
+
+```{r requested-genes}
+render_report_table(tibble::tibble(genes = genes), page_length = 20)
+report_download_link("results/tables/drilldown_requested_genes.csv")
 ```

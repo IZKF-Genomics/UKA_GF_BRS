@@ -1,0 +1,390 @@
+---
+title: "02 Differentially Methylated Regions (DMR)"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
+    theme: lumen
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+source("common.R")
+ensure_dirs(".")
+cfg <- load_config("config/project.toml")
+if (!isTRUE(cfg$dmr$enabled)) {
+  cat("DMR step disabled in config.\n")
+  knitr::knit_exit()
+}
+
+if (!file.exists("results/rds/dmp_by_comparison.rds")) {
+  log_error("Missing DMP results. Run step 01 first.")
+}
+
+samples <- load_samples("config/samples.csv")
+obj <- load_analysis_inputs(cfg, samples)
+beta <- get_beta_matrix(obj)
+pdata <- get_pdata(obj)
+ann <- get_annotation_df(obj)
+meta <- merge_input_metadata(beta, pdata, samples)
+group_col <- cfg$groups$primary_group_col
+if (!(group_col %in% names(meta))) log_error("Group column not found in merged metadata:", group_col)
+
+dmp_by_cmp <- read_rds("results/rds/dmp_by_comparison.rds")
+method <- coalesce_chr(cfg$dmr$method, "adjacent_significant_cpgs")
+dmr_alpha <- suppressWarnings(as.numeric(coalesce_chr(cfg$dmr$alpha, 0.05)))
+if (!is.finite(dmr_alpha)) dmr_alpha <- 0.05
+dmr_max_gap <- suppressWarnings(as.numeric(coalesce_chr(cfg$dmr$max_gap_bp, 1000)))
+if (!is.finite(dmr_max_gap)) dmr_max_gap <- 1000
+dmr_min_cpgs <- suppressWarnings(as.integer(coalesce_chr(cfg$dmr$min_cpgs, 3)))
+if (!is.finite(dmr_min_cpgs) || dmr_min_cpgs < 1) dmr_min_cpgs <- 3
+dmr_top_n <- suppressWarnings(as.integer(coalesce_chr(cfg$dmr$top_n_regions, 15)))
+if (!is.finite(dmr_top_n) || dmr_top_n < 1) dmr_top_n <- 15
+dmr_heatmap_n <- suppressWarnings(as.integer(coalesce_chr(cfg$dmr$top_n_heatmap_regions, 12)))
+if (!is.finite(dmr_heatmap_n) || dmr_heatmap_n < 1) dmr_heatmap_n <- 12
+
+theme_pub_dmr <- function() {
+  ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 16),
+      plot.subtitle = ggplot2::element_text(color = "#4A4A4A"),
+      axis.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank(),
+      legend.position = "top",
+      legend.title = ggplot2::element_blank()
+    )
+}
+
+extract_gene_labels <- function(x, limit = 3) {
+  vals <- unique(trimws(unlist(strsplit(as.character(x[!is.na(x)]), "[;,]"))))
+  vals <- vals[nzchar(vals)]
+  if (length(vals) == 0) return("")
+  paste(head(vals, limit), collapse = "; ")
+}
+
+dominant_label <- function(x, default = "") {
+  vals <- trimws(as.character(x[!is.na(x)]))
+  vals <- vals[nzchar(vals)]
+  if (length(vals) == 0) return(default)
+  names(sort(table(vals), decreasing = TRUE))[1]
+}
+
+pretty_bp <- function(x) format(round(x, 0), big.mark = ",", scientific = FALSE, trim = TRUE)
+
+build_region_candidates <- function(dmp_tbl, cmp_id, max_gap_bp = 1000, min_cpgs = 3, alpha = 0.05) {
+  ann_tbl <- tibble::as_tibble(ann)
+  if (!("Name" %in% names(ann_tbl))) ann_tbl$Name <- rownames(beta)
+  if (!("chr" %in% names(ann_tbl))) ann_tbl$chr <- ann_tbl[[intersect(c("chr", "CHR"), names(ann_tbl))[1]]]
+  if (!("pos" %in% names(ann_tbl))) ann_tbl$pos <- suppressWarnings(as.numeric(ann_tbl[[intersect(c("pos", "MAPINFO"), names(ann_tbl))[1]]]))
+
+  dmp2 <- tibble::as_tibble(dmp_tbl) %>%
+    dplyr::mutate(
+      chr = dplyr::coalesce(as.character(.data$chr), as.character(ann_tbl$chr[match(.data$CpG, ann_tbl$Name)])),
+      pos = dplyr::coalesce(suppressWarnings(as.numeric(.data$pos)), suppressWarnings(as.numeric(ann_tbl$pos[match(.data$CpG, ann_tbl$Name)]))),
+      gene_label = dplyr::coalesce(as.character(.data$UCSC_RefGene_Name), as.character(ann_tbl$UCSC_RefGene_Name[match(.data$CpG, ann_tbl$Name)])),
+      island_label = dplyr::coalesce(as.character(.data$Relation_to_Island), as.character(ann_tbl$Relation_to_Island[match(.data$CpG, ann_tbl$Name)]))
+    ) %>%
+    dplyr::filter(.data$significant, !is.na(.data$chr), !is.na(.data$pos), .data$adj.P.Val <= alpha) %>%
+    dplyr::mutate(direction = ifelse(.data$delta_beta >= 0, "target_hypermethylated", "base_hypermethylated")) %>%
+    dplyr::arrange(.data$chr, .data$pos)
+
+  if (nrow(dmp2) == 0) {
+    out <- tibble::tibble(
+      comparison_id = cmp_id,
+      method = method,
+      note = "No significant CpGs available for region aggregation"
+    )
+    return(list(table = out, regions = out, region_cpgs = list()))
+  }
+
+  region_idx <- integer(nrow(dmp2))
+  region_idx[1] <- 1L
+  if (nrow(dmp2) > 1) {
+    for (i in 2:nrow(dmp2)) {
+      same_chr <- identical(dmp2$chr[[i]], dmp2$chr[[i - 1]])
+      same_dir <- identical(dmp2$direction[[i]], dmp2$direction[[i - 1]])
+      close_enough <- isTRUE((dmp2$pos[[i]] - dmp2$pos[[i - 1]]) <= max_gap_bp)
+      region_idx[i] <- if (same_chr && same_dir && close_enough) region_idx[i - 1] else region_idx[i - 1] + 1L
+    }
+  }
+  dmp2$region_cluster <- region_idx
+
+  regions <- dmp2 %>%
+    dplyr::group_by(.data$region_cluster, .data$chr, .data$direction) %>%
+    dplyr::summarise(
+      start = min(.data$pos, na.rm = TRUE),
+      end = max(.data$pos, na.rm = TRUE),
+      width_bp = .data$end - .data$start + 1,
+      n_cpg = dplyr::n(),
+      mean_delta_beta = mean(.data$delta_beta, na.rm = TRUE),
+      median_delta_beta = median(.data$delta_beta, na.rm = TRUE),
+      min_p = min(.data$P.Value, na.rm = TRUE),
+      min_adj_p = min(.data$adj.P.Val, na.rm = TRUE),
+      mean_logFC = mean(.data$logFC, na.rm = TRUE),
+      top_cpg = .data$CpG[which.min(.data$adj.P.Val)],
+      genes = extract_gene_labels(.data$gene_label),
+      island_context = dominant_label(.data$island_label, default = "unannotated"),
+      cpgs = list(.data$CpG),
+      .groups = "drop"
+    ) %>%
+    dplyr::filter(.data$n_cpg >= min_cpgs) %>%
+    dplyr::mutate(
+      comparison_id = cmp_id,
+      method = method,
+      region_id = paste0(cmp_id, "_DMR", seq_len(dplyr::n())),
+      rank_score = -log10(pmax(.data$min_adj_p, .Machine$double.xmin)) * pmax(abs(.data$mean_delta_beta), 0.001) * log2(.data$n_cpg + 1),
+      region_label = paste0(.data$chr, ":", pretty_bp(.data$start), "-", pretty_bp(.data$end)),
+      display_label = ifelse(
+        nzchar(.data$genes),
+        paste0(.data$genes, " (", .data$region_label, ")"),
+        .data$region_label
+      )
+    ) %>%
+    dplyr::arrange(dplyr::desc(.data$rank_score), .data$min_adj_p)
+
+  if (nrow(regions) == 0) {
+    out <- tibble::tibble(
+      comparison_id = cmp_id,
+      method = method,
+      note = paste0("No region candidates met min_cpgs=", min_cpgs, " within max_gap_bp=", max_gap_bp)
+    )
+    return(list(table = out, regions = out, region_cpgs = list()))
+  }
+
+  region_cpgs <- stats::setNames(regions$cpgs, regions$region_id)
+  table_out <- regions %>%
+    dplyr::select(
+      .data$comparison_id, .data$region_id, .data$chr, .data$start, .data$end, .data$width_bp,
+      .data$n_cpg, .data$direction, .data$mean_delta_beta, .data$median_delta_beta,
+      .data$min_p, .data$min_adj_p, .data$mean_logFC, .data$top_cpg, .data$genes,
+      .data$island_context, .data$rank_score, .data$method
+    )
+
+  list(table = table_out, regions = regions, region_cpgs = region_cpgs)
+}
+
+build_region_score_plot <- function(region_tbl, cmp_name, out_path, top_n = 15) {
+  if (nrow(region_tbl) == 0 || !("rank_score" %in% names(region_tbl))) return(FALSE)
+  plot_tbl <- dplyr::slice_head(region_tbl, n = min(top_n, nrow(region_tbl)))
+  plot_tbl$display_label <- factor(plot_tbl$display_label, levels = rev(plot_tbl$display_label))
+  p <- ggplot2::ggplot(plot_tbl, ggplot2::aes(x = .data$rank_score, y = .data$display_label, fill = .data$direction)) +
+    ggplot2::geom_col(width = 0.72) +
+    ggplot2::scale_fill_manual(values = c(target_hypermethylated = "#B22222", base_hypermethylated = "#1F5A94")) +
+    ggplot2::labs(
+      title = cmp_name,
+      subtitle = "Top DMR candidates ranked by region score",
+      x = "Region score",
+      y = NULL
+    ) +
+    theme_pub_dmr()
+  save_plot(p, out_path, width = 10, height = 6)
+  TRUE
+}
+
+build_region_heatmap <- function(region_tbl, region_cpgs, cmp_name, out_path, top_n = 12) {
+  if (nrow(region_tbl) == 0 || length(region_cpgs) == 0) return(FALSE)
+  keep_regions <- region_tbl$region_id[seq_len(min(top_n, nrow(region_tbl)))]
+  sample_order <- meta %>%
+    dplyr::select(.data$sample_id, group = .data[[group_col]], .data$run_id) %>%
+    dplyr::arrange(.data$group, .data$run_id, .data$sample_id)
+  heat_df <- lapply(keep_regions, function(region_id) {
+    cpg_ids <- region_cpgs[[region_id]]
+    cpg_ids <- intersect(cpg_ids, rownames(beta))
+    if (length(cpg_ids) == 0) return(NULL)
+    vals <- colMeans(beta[cpg_ids, sample_order$sample_id, drop = FALSE], na.rm = TRUE)
+    tibble::tibble(region_id = region_id, sample_id = sample_order$sample_id, region_beta = as.numeric(vals))
+  }) %>% dplyr::bind_rows()
+  if (nrow(heat_df) == 0) return(FALSE)
+
+  label_map <- stats::setNames(region_tbl$display_label, region_tbl$region_id)
+  heat_df <- heat_df %>%
+    dplyr::left_join(sample_order, by = "sample_id") %>%
+    dplyr::group_by(.data$region_id) %>%
+    dplyr::mutate(region_beta_scaled = ifelse(stats::sd(.data$region_beta, na.rm = TRUE) > 0, as.numeric(scale(.data$region_beta)), 0)) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(
+      region_label = label_map[.data$region_id],
+      sample_id = factor(.data$sample_id, levels = sample_order$sample_id),
+      region_label = factor(.data$region_label, levels = rev(label_map[keep_regions]))
+    )
+
+  p <- ggplot2::ggplot(heat_df, ggplot2::aes(x = .data$sample_id, y = .data$region_label, fill = .data$region_beta_scaled)) +
+    ggplot2::geom_tile() +
+    ggplot2::scale_fill_gradient2(low = "#1F5A94", mid = "#FAFAFA", high = "#B22222", midpoint = 0) +
+    ggplot2::labs(
+      title = cmp_name,
+      subtitle = "Top region candidates across samples (row-scaled mean beta per region)",
+      x = NULL,
+      y = NULL,
+      fill = "z-score"
+    ) +
+    ggplot2::theme_minimal(base_size = 11) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 15),
+      plot.subtitle = ggplot2::element_text(color = "#4A4A4A"),
+      axis.text.x = ggplot2::element_blank(),
+      axis.ticks.x = ggplot2::element_blank(),
+      panel.grid = ggplot2::element_blank()
+    )
+  save_plot(p, out_path, width = 10, height = 6.5)
+  TRUE
+}
+
+dmr_results <- list()
+dmr_summary_rows <- list()
+
+for (cmp_id in names(dmp_by_cmp)) {
+  dmp <- dmp_by_cmp[[cmp_id]]
+  cmp_name <- if ("comparison_name" %in% names(dmp)) unique(dmp$comparison_name)[1] else cmp_id
+  cmp_dir_tbl <- file.path("results/tables/comparisons", cmp_id)
+  cmp_dir_fig <- file.path("results/figures/comparisons", cmp_id)
+  dir.create(cmp_dir_tbl, recursive = TRUE, showWarnings = FALSE)
+  dir.create(cmp_dir_fig, recursive = TRUE, showWarnings = FALSE)
+
+  built <- build_region_candidates(
+    dmp_tbl = dmp,
+    cmp_id = cmp_id,
+    max_gap_bp = dmr_max_gap,
+    min_cpgs = dmr_min_cpgs,
+    alpha = dmr_alpha
+  )
+
+  dmr_tbl <- built$table
+  write_table(dmr_tbl, file.path(cmp_dir_tbl, "dmr_table.csv"))
+
+  if ("region_id" %in% names(dmr_tbl)) {
+    top_tbl <- dplyr::slice_head(dmr_tbl, n = min(dmr_top_n, nrow(dmr_tbl)))
+    write_table(top_tbl, file.path(cmp_dir_tbl, "dmr_top_regions.csv"))
+    build_region_score_plot(
+      built$regions,
+      cmp_name = cmp_name,
+      out_path = file.path(cmp_dir_fig, "dmr_top_regions.png"),
+      top_n = dmr_top_n
+    )
+    build_region_heatmap(
+      built$regions,
+      region_cpgs = built$region_cpgs,
+      cmp_name = cmp_name,
+      out_path = file.path(cmp_dir_fig, "dmr_heatmap.png"),
+      top_n = dmr_heatmap_n
+    )
+    dmr_summary_rows[[cmp_id]] <- tibble::tibble(
+      comparison_id = cmp_id,
+      comparison_name = cmp_name,
+      method = method,
+      n_region_candidates = nrow(dmr_tbl),
+      median_width_bp = stats::median(dmr_tbl$width_bp, na.rm = TRUE),
+      median_cpgs_per_region = stats::median(dmr_tbl$n_cpg, na.rm = TRUE),
+      best_region = dmr_tbl$region_id[[1]],
+      best_region_score = dmr_tbl$rank_score[[1]]
+    )
+  } else {
+    write_table(dmr_tbl, file.path(cmp_dir_tbl, "dmr_top_regions.csv"))
+    dmr_summary_rows[[cmp_id]] <- tibble::tibble(
+      comparison_id = cmp_id,
+      comparison_name = cmp_name,
+      method = method,
+      n_region_candidates = 0,
+      median_width_bp = NA_real_,
+      median_cpgs_per_region = NA_real_,
+      best_region = NA_character_,
+      best_region_score = NA_real_
+    )
+  }
+
+  dmr_results[[cmp_id]] <- built
+}
+
+dmr_summary <- dplyr::bind_rows(dmr_summary_rows)
+write_table(dmr_summary, "results/tables/dmr_table.csv")
+save_rds(dmr_summary, "results/rds/dmr_table.rds")
+save_rds(dmr_results, "results/rds/dmr_by_comparison.rds")
+```
+
+This report aggregates adjacent significant CpGs from the DMP step into region candidates. Regions are formed by merging CpGs on the same chromosome and in the same methylation direction when they fall within the configured gap threshold.
+
+This is a pragmatic DMR summarization layer rather than a permutation-based region caller. It is intended to highlight coherent multi-CpG signals and give readers a region-level view of the strongest comparison-specific methylation changes.
+
+## Method
+
+This report derives region-level candidates from the single-CpG DMP results. It starts from the significant CpGs identified in the DMP step, orders them by genomic position, and then merges adjacent CpGs on the same chromosome when they share the same methylation direction and lie within the configured maximum genomic gap.
+
+Each resulting region candidate is summarized by its genomic span, number of contributing CpGs, mean delta-beta, best adjusted p-value within the region, linked annotation, and a composite region score used for ranking. The top-table and figures in this report are therefore region summaries of nearby significant CpGs rather than independent region tests.
+
+This is a pragmatic DMR summarization layer rather than a permutation-based region caller such as `DMRcate` or `bumphunter`. It is intended to highlight coherent multi-CpG signals and give readers a region-level view of the strongest comparison-specific methylation changes, but the report should be interpreted as an exploratory region aggregation rather than a formal genome-wide DMR significance framework.
+
+## Region Calling Settings
+
+These settings control how significant CpGs are merged into region candidates for this report.
+
+```{r dmr-settings}
+dmr_settings <- tibble::tibble(
+  parameter = c("method", "alpha", "max_gap_bp", "min_cpgs", "top_n_regions", "top_n_heatmap_regions"),
+  value = c(method, dmr_alpha, dmr_max_gap, dmr_min_cpgs, dmr_top_n, dmr_heatmap_n)
+)
+write_table(dmr_settings, "results/tables/dmr_settings.csv")
+render_report_table(dmr_settings, page_length = 10)
+report_download_link("results/tables/dmr_settings.csv")
+```
+
+## Region Summary
+
+This summary table reports how many region candidates were found for each comparison together with basic region-size statistics and the highest-ranked region.
+
+```{r dmr-summary}
+render_report_table(
+  dmr_summary,
+  preferred = c("comparison_id", "comparison_name", "method", "n_region_candidates", "median_width_bp", "median_cpgs_per_region", "best_region", "best_region_score"),
+  page_length = 10
+)
+report_download_link("results/tables/dmr_table.csv")
+```
+
+## Top DMRs Per Comparison
+
+For each comparison, the report shows the leading region candidates, a ranked region-score plot, and a heatmap summarizing sample-level methylation patterns across the strongest regions.
+
+```{r dmr-by-comparison, results='asis'}
+for (cmp_id in names(dmr_results)) {
+  dmr_tbl <- dmr_results[[cmp_id]]$table
+  top_csv <- file.path("results/tables/comparisons", cmp_id, "dmr_top_regions.csv")
+  full_csv <- file.path("results/tables/comparisons", cmp_id, "dmr_table.csv")
+  score_fig <- file.path("results/figures/comparisons", cmp_id, "dmr_top_regions.png")
+  heatmap_fig <- file.path("results/figures/comparisons", cmp_id, "dmr_heatmap.png")
+
+  cat("### ", cmp_id, "\n\n", sep = "")
+  cat("These region candidates summarize clusters of adjacent significant CpGs with consistent methylation direction. The table lists the highest-ranked candidates, followed by figures that summarize region importance and sample-level structure.\n\n")
+
+  print(render_report_table(
+    dplyr::slice_head(dmr_tbl, n = min(dmr_top_n, nrow(dmr_tbl))),
+    preferred = c("region_id", "chr", "start", "end", "width_bp", "n_cpg", "direction", "mean_delta_beta", "min_adj_p", "genes", "rank_score"),
+    page_length = min(dmr_top_n, 20),
+    caption = cmp_id
+  ))
+
+  if (file.exists(score_fig)) {
+    cat("\nThe following figure ranks the strongest region candidates for this comparison using the composite region score.\n\n")
+    print(knitr::include_graphics(file.path("..", score_fig)))
+    cat("\n")
+  }
+
+  if (file.exists(heatmap_fig)) {
+    cat("\nThis heatmap shows the top region candidates across all samples using row-scaled mean beta values, which helps readers assess whether region-level methylation patterns separate the groups of interest.\n\n")
+    print(knitr::include_graphics(file.path("..", heatmap_fig)))
+    cat("\n")
+  }
+
+  print(report_download_link(full_csv))
+  print(report_download_link(top_csv, label = "Download top-region CSV"))
+  cat("\n")
+}
+```

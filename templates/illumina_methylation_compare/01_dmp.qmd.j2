@@ -1,0 +1,275 @@
+---
+title: "01 Differential Methylation (CpG / DMP)"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
+    theme: lumen
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+source("common.R")
+ensure_dirs(".")
+cfg <- load_config("config/project.toml")
+samples <- load_samples("config/samples.csv")
+group_map <- load_group_map(coalesce_chr(cfg$input$group_map_file, "config/group_map.csv"))
+samples <- apply_group_map(samples, group_map, group_col = cfg$groups$primary_group_col)
+if (!isTRUE(cfg$dmp$enabled)) {
+  cat("DMP step disabled in config.\n")
+  knitr::knit_exit()
+}
+if (!requireNamespace("limma", quietly = TRUE)) log_error("Package 'limma' is required")
+if (!requireNamespace("ggrepel", quietly = TRUE)) log_error("Package 'ggrepel' is required")
+
+theme_pub_volcano <- function() {
+  ggplot2::theme_minimal(base_size = 13) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold", size = 17),
+      plot.subtitle = ggplot2::element_text(color = "#4A4A4A", size = 11),
+      axis.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major.x = ggplot2::element_blank(),
+      legend.position = "top",
+      legend.title = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 10)
+    )
+}
+
+build_dmp_volcano_plot <- function(res, cmp_name, base_group, target_group, cmp_alpha, cmp_delta) {
+  plot_df <- dplyr::mutate(
+    res,
+    neg_log10_p = -log10(pmax(P.Value, .Machine$double.xmin)),
+    volcano_group = dplyr::case_when(
+      adj.P.Val <= cmp_alpha & delta_beta >= cmp_delta ~ paste0(target_group, " hypermethylated"),
+      adj.P.Val <= cmp_alpha & delta_beta <= -cmp_delta ~ paste0(base_group, " hypermethylated"),
+      TRUE ~ "Not significant"
+    )
+  )
+
+  label_col <- intersect(c("UCSC_RefGene_Name", "GeneSymbol", "SYMBOL"), names(plot_df))[1]
+  if (is.na(label_col) || length(label_col) == 0) {
+    plot_df$label_text <- plot_df$CpG
+  } else {
+    label_raw <- as.character(plot_df[[label_col]])
+    label_raw[is.na(label_raw) | trimws(label_raw) == ""] <- plot_df$CpG[is.na(label_raw) | trimws(label_raw) == ""]
+    label_raw <- sub(";.*$", "", label_raw)
+    plot_df$label_text <- label_raw
+  }
+
+  label_tbl <- plot_df %>%
+    dplyr::filter(.data$volcano_group != "Not significant") %>%
+    dplyr::arrange(.data$adj.P.Val, -abs(.data$delta_beta)) %>%
+    dplyr::distinct(.data$label_text, .keep_all = TRUE) %>%
+    dplyr::slice_head(n = 12)
+
+  sig_n <- sum(plot_df$volcano_group != "Not significant", na.rm = TRUE)
+  palette_vals <- stats::setNames(
+    c("#C9CED6", "#B22222", "#1F5A94"),
+    c("Not significant", paste0(target_group, " hypermethylated"), paste0(base_group, " hypermethylated"))
+  )
+
+  ggplot2::ggplot(plot_df, ggplot2::aes(x = .data$delta_beta, y = .data$neg_log10_p)) +
+    ggplot2::geom_vline(xintercept = c(-cmp_delta, cmp_delta), linetype = "dashed", linewidth = 0.4, color = "#7F7F7F") +
+    ggplot2::geom_hline(yintercept = -log10(cmp_alpha), linetype = "dashed", linewidth = 0.4, color = "#7F7F7F") +
+    ggplot2::geom_point(
+      data = dplyr::filter(plot_df, .data$volcano_group == "Not significant"),
+      color = palette_vals[["Not significant"]],
+      alpha = 0.55,
+      size = 1.2
+    ) +
+    ggplot2::geom_point(
+      data = dplyr::filter(plot_df, .data$volcano_group != "Not significant"),
+      ggplot2::aes(color = .data$volcano_group),
+      alpha = 0.9,
+      size = 1.6
+    ) +
+    ggrepel::geom_text_repel(
+      data = label_tbl,
+      ggplot2::aes(label = .data$label_text, color = .data$volcano_group),
+      size = 3.3,
+      box.padding = 0.35,
+      point.padding = 0.2,
+      segment.color = "#808080",
+      show.legend = FALSE,
+      max.overlaps = Inf
+    ) +
+    ggplot2::scale_color_manual(values = palette_vals, breaks = names(palette_vals)) +
+    ggplot2::labs(
+      title = cmp_name,
+      subtitle = paste0(target_group, " vs ", base_group, " | significant CpGs: ", format(sig_n, big.mark = ",")),
+      x = paste0("Delta beta (", target_group, " - ", base_group, ")"),
+      y = expression(-log[10](italic(P)))
+    ) +
+    theme_pub_volcano()
+}
+
+obj <- load_analysis_inputs(cfg, samples)
+beta <- get_beta_matrix(obj)
+mval <- get_m_matrix(obj)
+pdata <- get_pdata(obj)
+ann <- get_annotation_df(obj)
+meta <- merge_input_metadata(beta, pdata, samples)
+group_col <- cfg$groups$primary_group_col
+if (!(group_col %in% names(meta))) log_error("Group column not found in merged metadata:", group_col)
+
+comparisons <- resolve_enabled_comparisons(cfg, meta)
+out_summary <- list()
+out_results <- list()
+
+for (i in seq_len(nrow(comparisons))) {
+  cmp <- comparisons[i, , drop = FALSE]
+  cmp_id <- cmp$comparison_id[[1]]
+  cmp_name <- cmp$comparison_name[[1]]
+  base_group <- cmp$base_group[[1]]
+  target_group <- cmp$target_group[[1]]
+  cmp_alpha <- if (is.finite(cmp$alpha[[1]])) cmp$alpha[[1]] else cfg$dmp$alpha
+  cmp_delta <- if (is.finite(cmp$delta_beta_min[[1]])) cmp$delta_beta_min[[1]] else cfg$dmp$delta_beta_min
+  cmp_covars <- cmp$covariates[[1]]
+  if (length(cmp_covars) == 0) cmp_covars <- unlist(cfg$dmp$covariates)
+
+  keep_samples <- meta[[group_col]] %in% c(base_group, target_group)
+  meta2 <- meta[keep_samples, , drop = FALSE]
+  mat_beta <- beta[, keep_samples, drop = FALSE]
+  mat_model <- if (isTRUE(cfg$dmp$use_m_values)) mval[, keep_samples, drop = FALSE] else mat_beta
+
+  meta2[[group_col]] <- factor(meta2[[group_col]], levels = c(base_group, target_group))
+  counts <- table(meta2[[group_col]])
+  if (as.integer(counts[[base_group]]) < 2 || as.integer(counts[[target_group]]) < 2) {
+    log_warn("Skipping comparison", cmp_id, "because one group has <2 samples")
+    next
+  }
+
+  covars <- intersect(cmp_covars, names(meta2))
+  design_vars <- c(group_col, covars)
+  form <- stats::as.formula(paste("~", paste(design_vars, collapse = " + ")))
+  design <- model.matrix(form, data = meta2)
+
+  fit <- limma::lmFit(mat_model, design)
+  fit <- limma::eBayes(fit)
+  coef_name <- paste0(group_col, target_group)
+  if (!(coef_name %in% colnames(fit$coefficients))) {
+    coef_candidates <- colnames(fit$coefficients)[grepl(group_col, colnames(fit$coefficients), fixed = TRUE)]
+    coef_name <- if (length(coef_candidates) > 0) coef_candidates[[1]] else NA_character_
+  }
+  if (is.na(coef_name)) {
+    log_warn("Skipping comparison", cmp_id, "because no limma coefficient was found")
+    next
+  }
+
+  res <- limma::topTable(fit, coef = coef_name, number = Inf, sort.by = "P", adjust.method = cfg$dmp$adjust_method)
+  res$CpG <- rownames(res)
+  delta_beta <- rowMeans(mat_beta[, meta2[[group_col]] == target_group, drop = FALSE], na.rm = TRUE) -
+    rowMeans(mat_beta[, meta2[[group_col]] == base_group, drop = FALSE], na.rm = TRUE)
+  res$delta_beta <- delta_beta[res$CpG]
+
+  if ("Name" %in% names(ann)) {
+    res <- dplyr::left_join(tibble::as_tibble(res), ann, by = c("CpG" = "Name"))
+  } else {
+    res <- tibble::as_tibble(res)
+  }
+
+  res <- dplyr::mutate(
+    res,
+    comparison_id = cmp_id,
+    comparison_name = cmp_name,
+    base_group = base_group,
+    target_group = target_group,
+    alpha = cmp_alpha,
+    delta_beta_min = cmp_delta,
+    significant = adj.P.Val <= cmp_alpha & abs(delta_beta) >= cmp_delta
+  )
+
+  cmp_dir_tbl <- file.path("results/tables/comparisons", cmp_id)
+  cmp_dir_fig <- file.path("results/figures/comparisons", cmp_id)
+  dir.create(cmp_dir_tbl, recursive = TRUE, showWarnings = FALSE)
+  dir.create(cmp_dir_fig, recursive = TRUE, showWarnings = FALSE)
+
+  write_table(res, file.path(cmp_dir_tbl, "dmp_table.csv"))
+  write_table(dplyr::filter(res, significant), file.path(cmp_dir_tbl, "dmp_significant.csv"))
+
+  p <- build_dmp_volcano_plot(res, cmp_name, base_group, target_group, cmp_alpha, cmp_delta)
+  save_plot(p, file.path(cmp_dir_fig, "dmp_volcano.png"), width = 8.6, height = 5.8)
+
+  out_results[[cmp_id]] <- res
+  out_summary[[cmp_id]] <- tibble::tibble(
+    comparison_id = cmp_id,
+    comparison_name = cmp_name,
+    base_group = base_group,
+    target_group = target_group,
+    n_base = as.integer(counts[[base_group]]),
+    n_target = as.integer(counts[[target_group]]),
+    n_total = ncol(mat_beta),
+    n_sig_cpg = sum(res$significant, na.rm = TRUE)
+  )
+}
+
+if (length(out_results) == 0) log_error("No comparisons produced DMP output")
+
+dmp_summary <- dplyr::bind_rows(out_summary)
+dmp_all <- dplyr::bind_rows(out_results)
+
+save_rds(out_results, "results/rds/dmp_by_comparison.rds")
+write_table(dmp_summary, "results/tables/dmp_comparisons_summary.csv")
+write_table(dmp_all, "results/tables/dmp_all_comparisons.csv")
+```
+
+## Method
+
+This report performs differential methylation testing at single-CpG resolution for each enabled comparison. The combined methylation object is restricted to the samples belonging to the current comparison, and the model is fitted on M-values because they are better suited for linear modeling than raw beta values.
+
+For each comparison, the design matrix contains the primary group contrast together with any configured covariates. The analysis is fitted with `limma::lmFit()` followed by empirical Bayes moderation with `limma::eBayes()`, which stabilizes variance estimates across probes and is standard practice for high-dimensional methylation-array data.
+
+The resulting tables report both statistical and effect-size information. `logFC` corresponds to the fitted coefficient on the M-value scale, while `delta_beta` is computed from the mean beta-value difference between the target and base groups to keep the effect size interpretable. Significance calls and volcano-plot highlighting use the configured adjusted p-value threshold and minimum absolute delta-beta threshold.
+
+## Comparison Summary
+
+This summary table reports sample counts and significant CpG counts for each completed differential methylation comparison.
+
+```{r dmp-comparison-summary}
+render_report_table(
+  dmp_summary,
+  preferred = c("comparison_id", "comparison_name", "base_group", "target_group", "n_base", "n_target", "n_sig_cpg"),
+  page_length = 10
+)
+report_download_link("results/tables/dmp_comparisons_summary.csv")
+```
+
+## Top DMPs Per Comparison
+
+For each comparison, the report shows the leading CpGs together with a volcano plot summarizing effect size and statistical significance.
+
+```{r dmp-top-results, results='asis'}
+for (cmp_id in names(out_results)) {
+  tbl <- out_results[[cmp_id]]
+  fig <- resolve_path(file.path("results/figures/comparisons", cmp_id, "dmp_volcano.png"))
+
+  cat("### ", cmp_id, "\n\n", sep = "")
+  cat("This table shows the top-ranked CpGs for the comparison, followed by a volcano plot that summarizes the full test result distribution.\n\n")
+
+  print(render_report_table(
+    head(tbl, 20),
+    preferred = c("CpG", "delta_beta", "P.Value", "adj.P.Val", "logFC", "chr", "pos", "strand", "UCSC_RefGene_Name", "Relation_to_Island", "significant"),
+    page_length = 20,
+    caption = cmp_id
+  ))
+
+  if (file.exists(fig)) {
+    cat("\n")
+    print(knitr::include_graphics(normalizePath(fig, winslash = "/", mustWork = TRUE)))
+    cat("\n")
+  }
+  print(report_download_link(file.path("results/tables/comparisons", cmp_id, "dmp_table.csv")))
+  print(report_download_link(file.path("results/tables/comparisons", cmp_id, "dmp_significant.csv"), label = "Download significant CSV"))
+  cat("\n")
+}
+```

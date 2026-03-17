@@ -7,6 +7,8 @@ outdir = "reports"
 [input]
 input_registry_file = "config/input_registry.csv"
 group_map_file = "config/group_map.csv"
+samples_file = "config/samples.csv"
+samples_paths_file = "config/samples_paths.csv"
 require_samples_in_sheet = false
 sync_samples_on_run = true
 
@@ -22,12 +24,16 @@ use_m_values = true
 adjust_method = "BH"
 alpha = 0.05
 delta_beta_min = 0.10
-covariates = ["age", "sex_reported"]
+covariates = []
 
 [dmr]
-enabled = false
+enabled = true
 method = "DMRcate"
 alpha = 0.05
+max_gap_bp = 1000
+min_cpgs = 3
+top_n_regions = 15
+top_n_heatmap_regions = 12
 
 [enrichment]
 enabled = true

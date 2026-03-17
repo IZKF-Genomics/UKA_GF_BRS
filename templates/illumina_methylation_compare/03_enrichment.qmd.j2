@@ -1,0 +1,268 @@
+---
+title: "03 Enrichment"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
+    theme: lumen
+---
+
+```{r setup, echo=TRUE, warning=FALSE, message=FALSE}
+source("common.R")
+ensure_dirs(".")
+cfg <- load_config("config/project.toml")
+if (!isTRUE(cfg$enrichment$enabled)) {
+  cat("Enrichment step disabled in config.\n")
+  knitr::knit_exit()
+}
+if (!requireNamespace("missMethyl", quietly = TRUE)) log_error("Package 'missMethyl' is required")
+if (!file.exists("results/rds/dmp_by_comparison.rds")) log_error("Missing DMP results. Run step 01 first.")
+
+dmp_by_cmp <- read_rds("results/rds/dmp_by_comparison.rds")
+run_summary <- if (file.exists("results/tables/input_run_summary.csv")) {
+  readr::read_csv("results/tables/input_run_summary.csv", show_col_types = FALSE)
+} else {
+  tibble::tibble()
+}
+run_array_types <- if ("configured_array_type" %in% names(run_summary)) run_summary$configured_array_type else character(0)
+array_for_gometh <- infer_gometh_array_type(cfg$project$array_type, run_array_types = run_array_types)
+if (is.na(array_for_gometh)) {
+  log_warn("Skipping gometh: unable to infer supported array type. Set project.array_type or input_registry.csv:array_type.")
+  knitr::knit_exit()
+}
+
+genome_build <- tolower(trimws(as.character(cfg$project$genome_build)))
+anno_pkg <- dplyr::case_when(
+  array_for_gometh == "450K" && genome_build %in% c("hg19", "hg38") ~ "IlluminaHumanMethylation450kanno.ilmn12.hg19",
+  array_for_gometh == "EPIC" && genome_build %in% c("hg19", "hg38") ~ "IlluminaHumanMethylationEPICanno.ilm10b4.hg19",
+  array_for_gometh == "EPIC_V2" && genome_build == "hg38" ~ "IlluminaHumanMethylationEPICv2anno.20a1.hg38",
+  TRUE ~ NA_character_
+)
+if (is.na(anno_pkg)) {
+  log_warn("Skipping gometh: unsupported array/build combination:", paste(array_for_gometh, genome_build, sep = "/"))
+  knitr::knit_exit()
+}
+if (!requireNamespace(anno_pkg, quietly = TRUE)) {
+  log_warn("Skipping gometh: required annotation package not available:", anno_pkg)
+  knitr::knit_exit()
+}
+suppressWarnings(suppressPackageStartupMessages(library(anno_pkg, character.only = TRUE)))
+
+safe_gometh <- function(...) {
+  tryCatch(
+    missMethyl::gometh(...),
+    error = function(e) tibble::tibble(note = paste("gometh failed:", conditionMessage(e)))
+  )
+}
+
+standardize_enrichment_terms <- function(tbl) {
+  tbl <- tibble::as_tibble(tbl)
+  if (nrow(tbl) == 0) return(tbl)
+  if ("Term" %in% names(tbl)) return(tbl)
+
+  label_col <- intersect(c("Pathway", "Description", "NAME", "name", "ID"), names(tbl))[1]
+  if (!is.na(label_col) && length(label_col) > 0) {
+    tbl$Term <- as.character(tbl[[label_col]])
+  }
+  tbl
+}
+
+build_enrichment_plot <- function(tbl, cmp_id, title_prefix, out_path, top_n = 10) {
+  if (!all(c("Term", "FDR") %in% names(tbl))) return(FALSE)
+  plot_tbl <- tbl
+  plot_tbl <- plot_tbl[is.finite(plot_tbl$FDR) & !is.na(plot_tbl$FDR), , drop = FALSE]
+  if (nrow(plot_tbl) == 0) return(FALSE)
+  plot_tbl <- dplyr::slice_min(plot_tbl, order_by = .data$FDR, n = min(top_n, nrow(plot_tbl)))
+  plot_tbl <- dplyr::mutate(
+    plot_tbl,
+    Term = factor(.data$Term, levels = rev(.data$Term)),
+    score = -log10(pmax(.data$FDR, 1e-300))
+  )
+  p <- ggplot2::ggplot(plot_tbl, ggplot2::aes(score, Term)) +
+    ggplot2::geom_col(fill = "#2F6B9A", width = 0.75) +
+    ggplot2::labs(
+      title = paste(title_prefix, cmp_id),
+      x = expression(-log[10](FDR)),
+      y = NULL
+    ) +
+    ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(face = "bold"),
+      panel.grid.minor = ggplot2::element_blank()
+    )
+  save_plot(p, out_path, width = 9, height = 5.5)
+  TRUE
+}
+
+go_summary <- list()
+kegg_summary <- list()
+enrichment_input_summary <- list()
+for (cmp_id in names(dmp_by_cmp)) {
+  dmp <- dmp_by_cmp[[cmp_id]]
+  sig <- dplyr::filter(dmp, significant)
+  all_cpg <- dmp$CpG
+  sig_cpg <- sig$CpG
+
+  cmp_tbl_dir <- file.path("results/tables/comparisons", cmp_id)
+  dir.create(cmp_tbl_dir, recursive = TRUE, showWarnings = FALSE)
+
+  if (length(sig_cpg) == 0) {
+    go_tbl <- tibble::tibble(comparison_id = cmp_id, note = "No significant CpGs for enrichment")
+    kegg_tbl <- tibble::tibble(comparison_id = cmp_id, note = "No significant CpGs for enrichment")
+  } else {
+    if ("GO" %in% unlist(cfg$enrichment$collections)) {
+      go <- safe_gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "GO", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+      go_tbl <- standardize_enrichment_terms(go)
+      ont_col <- intersect(c("Ont", "ONTOLOGY", "ontology"), names(go_tbl))[1]
+      if (!is.na(ont_col) && !is.null(ont_col)) {
+        go_tbl <- dplyr::filter(go_tbl, .data[[ont_col]] %in% unlist(cfg$enrichment$ontologies))
+      }
+      go_tbl$comparison_id <- cmp_id
+    } else {
+      go_tbl <- tibble::tibble(comparison_id = cmp_id, note = "GO not requested")
+    }
+
+    if ("KEGG" %in% unlist(cfg$enrichment$collections)) {
+      kegg <- safe_gometh(sig.cpg = sig_cpg, all.cpg = all_cpg, collection = "KEGG", array.type = array_for_gometh, plot.bias = FALSE, prior.prob = TRUE)
+      kegg_tbl <- standardize_enrichment_terms(kegg)
+      kegg_tbl$comparison_id <- cmp_id
+    } else {
+      kegg_tbl <- tibble::tibble(comparison_id = cmp_id, note = "KEGG not requested")
+    }
+  }
+
+  write_table(go_tbl, file.path(cmp_tbl_dir, "go_terms.csv"))
+  write_table(kegg_tbl, file.path(cmp_tbl_dir, "kegg_terms.csv"))
+  build_enrichment_plot(
+    go_tbl,
+    cmp_id = cmp_id,
+    title_prefix = "Top GO terms:",
+    out_path = file.path("results/figures/comparisons", cmp_id, "go_terms.png"),
+    top_n = min(10, cfg$enrichment$top_n)
+  )
+  build_enrichment_plot(
+    kegg_tbl,
+    cmp_id = cmp_id,
+    title_prefix = "Top KEGG pathways:",
+    out_path = file.path("results/figures/comparisons", cmp_id, "kegg_terms.png"),
+    top_n = min(10, cfg$enrichment$top_n)
+  )
+  go_summary[[cmp_id]] <- go_tbl
+  kegg_summary[[cmp_id]] <- kegg_tbl
+  enrichment_input_summary[[cmp_id]] <- tibble::tibble(
+    comparison_id = cmp_id,
+    n_tested_cpg = length(all_cpg),
+    n_significant_cpg = length(sig_cpg),
+    array_type_for_gometh = array_for_gometh,
+    genome_build = genome_build,
+    collections = paste(unlist(cfg$enrichment$collections), collapse = "; "),
+    ontologies = paste(unlist(cfg$enrichment$ontologies), collapse = "; ")
+  )
+}
+
+go_all <- dplyr::bind_rows(go_summary)
+kegg_all <- dplyr::bind_rows(kegg_summary)
+enrichment_inputs <- dplyr::bind_rows(enrichment_input_summary)
+write_table(go_all, "results/tables/go_terms.csv")
+write_table(kegg_all, "results/tables/kegg_terms.csv")
+write_table(enrichment_inputs, "results/tables/enrichment_input_summary.csv")
+save_rds(go_all, "results/rds/enrichment_go.rds")
+save_rds(kegg_all, "results/rds/enrichment_kegg.rds")
+```
+
+## Method
+
+This report performs CpG-set enrichment using `missMethyl::gometh()` on the significant CpGs from each DMP comparison. The enrichment background is the set of CpGs tested in that same comparison, not all genes in the genome.
+
+`gometh()` is used because it adjusts for probe-number bias, which is important in methylation-array data because genes differ in how many CpG probes map to them. GO and KEGG are then evaluated separately for each comparison-specific significant CpG set.
+
+For mixed-array projects, the enrichment step chooses one annotation universe for `gometh()` based on the configured or inferred array composition. That selected array type is shown in the input summary below.
+
+## Enrichment Inputs
+
+This table summarizes the CpG universe used for enrichment in each comparison, including the number of tested and significant CpGs and the array annotation mode selected for `gometh()`.
+
+```{r enrichment-input-summary}
+render_report_table(
+  enrichment_inputs,
+  preferred = c("comparison_id", "n_tested_cpg", "n_significant_cpg", "array_type_for_gometh", "genome_build", "collections", "ontologies"),
+  page_length = 10
+)
+report_download_link("results/tables/enrichment_input_summary.csv")
+```
+
+## GO Terms (Top by Comparison)
+
+These tables list the highest-ranked GO terms for each comparison based on the significant CpG set carried forward from the DMP results.
+
+```{r go-top-terms, results='asis'}
+for (cmp_id in names(go_summary)) {
+  tbl <- go_summary[[cmp_id]]
+  fig <- file.path("results/figures/comparisons", cmp_id, "go_terms.png")
+  fig_report <- file.path("..", fig)
+
+  cat("### GO: ", cmp_id, "\n\n", sep = "")
+  n_tested <- enrichment_inputs$n_tested_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
+  n_sig <- enrichment_inputs$n_significant_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
+  cat("These GO results summarize functional themes enriched among significant CpGs for this comparison.\n\n")
+  cat("Input summary: ", n_sig, " significant CpGs out of ", n_tested, " tested CpGs entered `gometh()` for this comparison.\n\n", sep = "")
+
+  print(render_report_table(
+    head(tbl, cfg$enrichment$top_n),
+    preferred = c("Term", "Ont", "N", "DE", "P.DE", "FDR", "comparison_id", "note"),
+    page_length = cfg$enrichment$top_n,
+    caption = cmp_id
+  ))
+
+  if (file.exists(fig)) {
+    cat("\n")
+    print(knitr::include_graphics(fig_report))
+    cat("\n")
+  }
+  print(report_download_link(file.path("results/tables/comparisons", cmp_id, "go_terms.csv")))
+  cat("\n")
+}
+```
+
+## KEGG Terms (Top by Comparison)
+
+These tables list the highest-ranked KEGG pathways for each comparison using the same significant CpG sets used for GO analysis.
+
+```{r kegg-top-terms, results='asis'}
+for (cmp_id in names(kegg_summary)) {
+  tbl <- kegg_summary[[cmp_id]]
+  fig <- file.path("results/figures/comparisons", cmp_id, "kegg_terms.png")
+  fig_report <- file.path("..", fig)
+
+  cat("### KEGG: ", cmp_id, "\n\n", sep = "")
+  n_tested <- enrichment_inputs$n_tested_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
+  n_sig <- enrichment_inputs$n_significant_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
+  cat("These KEGG results summarize pathway-level enrichment for the comparison-specific significant CpGs.\n\n")
+  cat("Input summary: ", n_sig, " significant CpGs out of ", n_tested, " tested CpGs entered `gometh()` for this comparison.\n\n", sep = "")
+
+  print(render_report_table(
+    head(tbl, cfg$enrichment$top_n),
+    preferred = c("Term", "N", "DE", "P.DE", "FDR", "comparison_id", "note"),
+    page_length = cfg$enrichment$top_n,
+    caption = cmp_id
+  ))
+
+  if (file.exists(fig)) {
+    cat("\n")
+    print(knitr::include_graphics(fig_report))
+    cat("\n")
+  }
+  print(report_download_link(file.path("results/tables/comparisons", cmp_id, "kegg_terms.csv")))
+  cat("\n")
+}
+```

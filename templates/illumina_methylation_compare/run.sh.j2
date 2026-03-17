@@ -4,89 +4,63 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-mkdir -p results/logs
-LOG_FILE="results/logs/run_$(date +%Y%m%d_%H%M%S).log"
-
-required=(pixi.toml config/project.toml config/samples.csv)
-for f in "${required[@]}"; do
-  if [[ ! -f "$f" ]]; then
-    echo "ERROR: missing required file: $f" >&2
-    exit 1
-  fi
-done
+if [[ ! -f pixi.toml ]]; then
+  echo "ERROR: missing required file: pixi.toml" >&2
+  exit 1
+fi
+if [[ ! -f config/project.toml ]]; then
+  echo "ERROR: missing required file: config/project.toml" >&2
+  exit 1
+fi
+if [[ ! -f config/samples.csv ]]; then
+  echo "ERROR: missing required file: config/samples.csv" >&2
+  exit 1
+fi
 if [[ ! -f config/input_registry.csv ]]; then
-  echo "ERROR: missing input run configuration (config/input_registry.csv)" >&2
+  echo "ERROR: missing required file: config/input_registry.csv" >&2
   exit 1
 fi
 if [[ ! -f config/comparisons.csv ]]; then
-  echo "ERROR: missing comparisons definition (config/comparisons.csv)" >&2
+  echo "ERROR: missing required file: config/comparisons.csv" >&2
+  exit 1
+fi
+if ! command -v pixi >/dev/null 2>&1; then
+  echo "ERROR: pixi not found on PATH" >&2
   exit 1
 fi
 
-echo "[INFO] Running Illumina methylation COMPARE pipeline for {{ ctx.params.study_name | default(ctx.template.id, true) }}" | tee -a "$LOG_FILE"
-echo "[INFO] Root: $ROOT_DIR" | tee -a "$LOG_FILE"
+echo "[INFO] Running Illumina methylation COMPARE pipeline for {{ ctx.params.study_name | default(ctx.template.id, true) }}"
+echo "[INFO] Root: $ROOT_DIR"
 
-if command -v pixi >/dev/null 2>&1; then
-  :
-else
-  echo "ERROR: pixi not found on PATH" | tee -a "$LOG_FILE" >&2
-  exit 1
-fi
+echo "[INFO] Installing/updating pixi environment"
+pixi install
 
-PROJECT_YAML="$ROOT_DIR/../project.yaml"
-AUTHOR_METADATA="config/quarto_authors.yml"
-python3 - "$PROJECT_YAML" "$AUTHOR_METADATA" <<'PY'
-from pathlib import Path
-import sys
+SYNC_ON_RUN="$(pixi run Rscript -e 'cfg <- RcppTOML::parseTOML("config/project.toml"); v <- TRUE; if (!is.null(cfg$input$sync_samples_on_run)) v <- cfg$input$sync_samples_on_run; cat(tolower(as.character(v)))' 2>/dev/null || echo true)"
+# if [[ "$SYNC_ON_RUN" =~ ^(true|t|1|yes|y)$ ]]; then
+#   echo "[INFO] Syncing sample sheets"
+#   pixi run sync-samples
+# else
+#   echo "[INFO] Skipping sample sync because input.sync_samples_on_run is disabled"
+# fi
 
-project_yaml = Path(sys.argv[1])
-output_yaml = Path(sys.argv[2])
-names = []
+echo "[INFO] Validating project configuration"
+pixi run check
 
-if project_yaml.exists():
-    in_authors = False
-    current_item_indent = None
-    for raw_line in project_yaml.read_text(encoding="utf-8").splitlines():
-        line = raw_line.rstrip()
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip(" "))
-        if not in_authors:
-            if stripped == "authors:":
-                in_authors = True
-            continue
-        if indent == 0 and not stripped.startswith("- ") and stripped != "authors:":
-            break
-        if stripped.startswith("- "):
-            current_item_indent = indent
-            remainder = stripped[2:].strip()
-            if remainder.startswith("name:"):
-                value = remainder.split(":", 1)[1].strip().strip("'\"")
-                if value:
-                    names.append(value)
-            continue
-        if current_item_indent is not None and indent > current_item_indent and stripped.startswith("name:"):
-            value = stripped.split(":", 1)[1].strip().strip("'\"")
-            if value:
-                names.append(value)
+mkdir -p reports
 
-output_yaml.parent.mkdir(parents=True, exist_ok=True)
-with output_yaml.open("w", encoding="utf-8") as fh:
-    if names:
-        fh.write("author:\n")
-        for name in names:
-            fh.write(f"  - {name}\n")
-    else:
-        fh.write("{}\n")
-PY
+echo "[INFO] Rendering 01_dmp.qmd"
+pixi run quarto render 01_dmp.qmd --to html --output-dir reports --no-clean
 
-pixi install 2>&1 | tee -a "$LOG_FILE"
-SYNC_ON_RUN="$(pixi run Rscript -e 'cfg <- RcppTOML::parseTOML(\"config/project.toml\"); v <- TRUE; if (!is.null(cfg$input$sync_samples_on_run)) v <- cfg$input$sync_samples_on_run; cat(tolower(as.character(v)))' 2>/dev/null || echo true)"
-if [[ "$SYNC_ON_RUN" =~ ^(true|t|1|yes|y)$ ]]; then
-  pixi run sync-samples 2>&1 | tee -a "$LOG_FILE"
-fi
-pixi run check 2>&1 | tee -a "$LOG_FILE"
-pixi run render 2>&1 | tee -a "$LOG_FILE"
+echo "[INFO] Rendering 02_dmr.qmd"
+pixi run quarto render 02_dmr.qmd --to html --output-dir reports --no-clean
 
-echo "[INFO] Complete. Reports written to reports/" | tee -a "$LOG_FILE"
+echo "[INFO] Rendering 03_enrichment.qmd"
+pixi run quarto render 03_enrichment.qmd --to html --output-dir reports --no-clean
+
+echo "[INFO] Rendering 04_drilldown.qmd"
+pixi run quarto render 04_drilldown.qmd --to html --output-dir reports --no-clean
+
+echo "[INFO] Rendering 00_index.qmd"
+pixi run quarto render 00_index.qmd --to html --output-dir reports --no-clean
+
+echo "[INFO] Complete. Reports written to reports/"

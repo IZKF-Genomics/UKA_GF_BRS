@@ -10,6 +10,12 @@ params:
     required: false
     default: ""
     description: "Optional project/report name; defaults to rendered template id when omitted"
+  authors:
+    type: str
+    cli: "--authors"
+    required: false
+    default: ""
+    description: "Author name shown in rendered reports"
   array_type:
     type: str
     cli: "--array-type"
@@ -47,13 +53,14 @@ render:
     - config/comparisons.csv -> config/comparisons.csv
     - config/group_map.csv -> config/group_map.csv
     - config/samples.csv -> config/samples.csv
+    - config/samples_paths.csv -> config/samples_paths.csv
     - common.R -> common.R
     - scripts/sync_samples_from_inputs.R -> scripts/sync_samples_from_inputs.R
-    - steps/01_dmp.qmd.j2 -> steps/01_dmp.qmd
-    - steps/02_dmr.qmd.j2 -> steps/02_dmr.qmd
-    - steps/03_enrichment.qmd.j2 -> steps/03_enrichment.qmd
-    - steps/04_drilldown.qmd.j2 -> steps/04_drilldown.qmd
-    - steps/00_index.qmd.j2 -> steps/00_index.qmd
+    - 01_dmp.qmd.j2 -> 01_dmp.qmd
+    - 02_dmr.qmd.j2 -> 02_dmr.qmd
+    - 03_enrichment.qmd.j2 -> 03_enrichment.qmd
+    - 04_drilldown.qmd.j2 -> 04_drilldown.qmd
+    - 00_index.qmd.j2 -> 00_index.qmd
 
 run:
   entry: "run.sh"

@@ -1,0 +1,2 @@
+sample_id,sample_uid,run_id,dataset_id,process_template,array_type,input_source,input_object,SentrixBarcode,SentrixPosition,idat_base_dir,idat_basename,Basename,BasenameSource,EffectiveIdatBaseDir,filenames
+S1,SRC1::S1,SRC1,study_a,illumina_methylation_process,EPIC,../process_a/results/rds,../process_a/results/rds/adjustedset.rds,1234567890,R01C01,/data/public_study/idats,/data/public_study/idats/1234567890_R01C01,/data/public_study/idats/1234567890_R01C01,idat_basename_override,/data/public_study/idats,/data/public_study/idats/1234567890_R01C01
