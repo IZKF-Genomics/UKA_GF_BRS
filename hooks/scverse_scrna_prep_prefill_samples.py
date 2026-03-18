@@ -62,6 +62,36 @@ def _read_existing_rows(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     return fieldnames or FIELDS, rows
 
 
+def _infer_sample_ids_from_input_params(ctx: Any) -> list[str]:
+    params = getattr(ctx, "params", {}) or {}
+    raw = str(params.get("input_matrix") or params.get("input_h5ad") or "").strip()
+    if not raw:
+        return []
+
+    local_path = Path(ctx.materialize(raw))
+    name = local_path.name
+    lower = name.lower()
+
+    if local_path.is_dir():
+        if name in {"filtered_feature_bc_matrix", "raw_feature_bc_matrix"} and local_path.parent.name:
+            return [local_path.parent.name]
+        return [name]
+
+    for suffix in (".h5ad", ".h5", ".mtx.gz", ".mtx"):
+        if lower.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+
+    for stem in ("_filtered_feature_bc_matrix", "_raw_feature_bc_matrix", "filtered_feature_bc_matrix", "raw_feature_bc_matrix"):
+        if name.endswith(stem):
+            trimmed = name[: -len(stem)].rstrip("._-")
+            if trimmed:
+                name = trimmed
+            break
+
+    return [name] if name else []
+
+
 def main(ctx: Any) -> str:
     if not getattr(ctx, "project", None):
         return "[hook:scverse_scrna_prep_prefill_samples] skipped (no project context)"
@@ -73,14 +103,19 @@ def main(ctx: Any) -> str:
 
     project_data = _read_project_yaml(project_dir)
     published_samplesheet = _find_published_samplesheet(project_data)
-    if not published_samplesheet:
-        return "[hook:scverse_scrna_prep_prefill_samples] skipped (no published nfcore_samplesheet found)"
-
-    samplesheet_path = Path(ctx.materialize(published_samplesheet))
-    if not samplesheet_path.exists():
-        raise RuntimeError(f"Published nfcore_samplesheet does not exist: {samplesheet_path}")
-
-    sample_ids = _read_samplesheet(samplesheet_path)
+    sample_ids: list[str]
+    source_label: str
+    if published_samplesheet:
+        samplesheet_path = Path(ctx.materialize(published_samplesheet))
+        if not samplesheet_path.exists():
+            raise RuntimeError(f"Published nfcore_samplesheet does not exist: {samplesheet_path}")
+        sample_ids = _read_samplesheet(samplesheet_path)
+        source_label = str(samplesheet_path)
+    else:
+        sample_ids = _infer_sample_ids_from_input_params(ctx)
+        if not sample_ids:
+            return "[hook:scverse_scrna_prep_prefill_samples] skipped (no published nfcore_samplesheet or direct input path found)"
+        source_label = "input_matrix_or_h5ad"
     existing_fields, existing_rows = _read_existing_rows(samples_csv)
     fieldnames = FIELDS + [f for f in existing_fields if f and f not in FIELDS]
 
@@ -108,5 +143,5 @@ def main(ctx: Any) -> str:
 
     return (
         "[hook:scverse_scrna_prep_prefill_samples] wrote "
-        f"{samples_csv} (samplesheet={samplesheet_path}, total_rows={len(rows_out)}, added={added})"
+        f"{samples_csv} (source={source_label}, total_rows={len(rows_out)}, added={added})"
     )

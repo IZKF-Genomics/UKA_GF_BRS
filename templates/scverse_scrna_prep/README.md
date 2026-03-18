@@ -28,6 +28,7 @@ optional_params:
 - organism
 - sample_id_key
 - sample_metadata
+- var_names
 run_entry: run.sh
 publish_keys:
 - scrna_prep_h5ad
@@ -63,6 +64,7 @@ Direct manual inputs are also supported:
 - `--param input_matrix=/path/to/filtered_feature_bc_matrix`
 
 Set `--param input_format=auto|h5ad|10x_h5|10x_mtx` when auto-detection is not sufficient.
+For `10x_mtx` inputs, set `--param var_names=gene_symbols|gene_ids` as needed.
 
 ## Render
 
@@ -105,7 +107,8 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 
 - `config/project.toml`: analysis configuration written at render time
 - `config/samples.csv`: editable sample metadata scaffold; post-render hook pre-fills `sample_id`
-  from `nfcore_scrnaseq.published.nfcore_samplesheet` when available
+  from `nfcore_scrnaseq.published.nfcore_samplesheet` when available and otherwise
+  falls back to the direct input name
 - `00_qc.qmd`: Quarto notebook containing the preprocessing logic and report
 
 ## Outputs

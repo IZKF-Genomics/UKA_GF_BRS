@@ -115,6 +115,17 @@ def infer_sample_id(obs: pd.DataFrame, preferred_key: str) -> pd.Series:
     return pd.Series(["sample1"] * obs.shape[0], index=obs.index, dtype="object")
 
 
+def display_sample_label(obs: pd.DataFrame) -> pd.Series:
+    if "sample_label" in obs.columns:
+        labels = obs["sample_label"].astype("object")
+        labels = labels.where(labels.notna(), "")
+        labels = labels.astype(str).str.strip()
+        fallback = obs["sample_id"].astype(str)
+        labels = labels.where(labels != "", fallback)
+        return labels
+    return obs["sample_id"].astype(str)
+
+
 def annotate_qc_genes(adata, organism: str) -> None:
     org = ORGANISM_ALIASES.get(organism.lower(), "")
     if org not in QC_PATTERNS:
@@ -168,7 +179,7 @@ def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]
     return 1.0, "auto"
 
 
-def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str):
+def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_names: str):
     chosen = ""
     if str(input_matrix).strip():
         chosen = str(input_matrix).strip()
@@ -187,13 +198,16 @@ def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str):
         raise RuntimeError(
             f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx."
         )
+    var_choice = str(var_names).strip() or "gene_symbols"
+    if var_choice not in {"gene_symbols", "gene_ids"}:
+        raise RuntimeError("input.var_names must be gene_symbols or gene_ids")
 
     if fmt == "h5ad":
         adata = sc.read_h5ad(input_path)
     elif fmt == "10x_h5":
         adata = sc.read_10x_h5(input_path)
     else:
-        adata = sc.read_10x_mtx(input_path, var_names="gene_symbols", make_unique=True)
+        adata = sc.read_10x_mtx(input_path, var_names=var_choice, make_unique=True)
 
     return adata, input_path, fmt
 
@@ -301,11 +315,13 @@ def compare_sample_metric(sample_compare_df: pd.DataFrame, metric: str, label: s
 def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
     coords = adata.obsm["X_umap"]
     emb = pd.DataFrame(coords, columns=["UMAP1", "UMAP2"], index=adata.obs_names)
-    emb = emb.join(adata.obs[[color_key, "sample_id"]], how="left")
+    emb = emb.join(adata.obs[[color_key, "sample_id", "sample_display"]], how="left")
     emb[color_key] = emb[color_key].astype(str)
     emb["hover"] = (
         "cell="
         + emb.index.astype(str)
+        + "<br>sample="
+        + emb["sample_display"].astype(str)
         + "<br>sample_id="
         + emb["sample_id"].astype(str)
         + f"<br>{color_key}="
@@ -316,8 +332,8 @@ def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
         x="UMAP1",
         y="UMAP2",
         color=color_key,
-        hover_name="sample_id",
-        hover_data={"UMAP1": ":.3f", "UMAP2": ":.3f", color_key: True, "sample_id": False},
+        hover_name="sample_display",
+        hover_data={"UMAP1": ":.3f", "UMAP2": ":.3f", color_key: True, "sample_display": False, "sample_id": True},
         template="simple_white",
         title=title,
         opacity=0.8,
@@ -331,15 +347,15 @@ def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
 def pca_plot(adata, color_key: str, title: str) -> go.Figure:
     coords = adata.obsm["X_pca"][:, :2]
     emb = pd.DataFrame(coords, columns=["PC1", "PC2"], index=adata.obs_names)
-    emb = emb.join(adata.obs[[color_key, "sample_id"]], how="left")
+    emb = emb.join(adata.obs[[color_key, "sample_id", "sample_display"]], how="left")
     emb[color_key] = emb[color_key].astype(str)
     fig = px.scatter(
         emb,
         x="PC1",
         y="PC2",
         color=color_key,
-        hover_name="sample_id",
-        hover_data={"PC1": ":.3f", "PC2": ":.3f", color_key: True, "sample_id": False},
+        hover_name="sample_display",
+        hover_data={"PC1": ":.3f", "PC2": ":.3f", color_key: True, "sample_display": False, "sample_id": True},
         template="simple_white",
         title=title,
         opacity=0.8,
@@ -413,7 +429,8 @@ cfg
 input_h5ad = str(cfg["input"].get("input_h5ad", "")).strip()
 input_matrix = str(cfg["input"].get("input_matrix", "")).strip()
 input_format = str(cfg["input"].get("input_format", "auto")).strip().lower() or "auto"
-adata, input_path, resolved_input_format = load_input_adata(input_h5ad, input_matrix, input_format)
+var_names = str(cfg["input"].get("var_names", "gene_symbols")).strip() or "gene_symbols"
+adata, input_path, resolved_input_format = load_input_adata(input_h5ad, input_matrix, input_format, var_names)
 sample_metadata_path = resolve_path(ROOT, str(cfg["input"]["sample_metadata"]))
 organism = str(cfg["metadata"]["organism"]).strip().lower()
 if not organism:
@@ -445,6 +462,8 @@ adata.obs["sample_id"] = adata.obs[sample_id_key].astype(str)
 metadata_df = read_optional_metadata(sample_metadata_path)
 if metadata_df is not None:
     apply_sample_metadata(adata, metadata_df, sample_id_key)
+
+adata.obs["sample_display"] = display_sample_label(adata.obs)
 
 for key in (batch_key, condition_key):
     if key not in adata.obs.columns:
@@ -490,12 +509,12 @@ qc_before = {
 
 qc_cell_df = before_obs.loc[
     :,
-    ["sample_id", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc", "stage"],
+    ["sample_id", "sample_display", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc", "stage"],
 ].copy()
 qc_cell_df.to_csv(tables_dir / "cell_qc_metrics.csv", index=True)
 
 before_sample_qc = (
-    before_obs.groupby("sample_id", dropna=False)
+    before_obs.groupby(["sample_id", "sample_display"], dropna=False)
     .agg(
         n_cells=("pass_qc", "size"),
         n_cells_pass_qc=("pass_qc", "sum"),
@@ -619,7 +638,7 @@ filter_effect_df = pd.DataFrame(
 )
 
 sample_after_qc = (
-    after_obs.groupby("sample_id", dropna=False)
+    after_obs.groupby(["sample_id", "sample_display"], dropna=False)
     .agg(
         n_cells_after=("sample_id", "size"),
         median_total_counts_after=("total_counts", "median"),
@@ -629,7 +648,7 @@ sample_after_qc = (
     .reset_index()
 )
 
-sample_compare_df = before_sample_qc.merge(sample_after_qc, on="sample_id", how="left")
+sample_compare_df = before_sample_qc.merge(sample_after_qc, on=["sample_id", "sample_display"], how="left")
 sample_compare_df["n_cells_after"] = sample_compare_df["n_cells_after"].fillna(0).astype(int)
 sample_compare_df["retained_fraction_after"] = sample_compare_df["n_cells_after"] / sample_compare_df["n_cells"]
 sample_compare_df["removed_cells"] = sample_compare_df["n_cells"] - sample_compare_df["n_cells_after"]
@@ -651,6 +670,7 @@ run_summary = {
     "project_name": cfg["project"]["name"],
     "organism": organism,
     "input_format": resolved_input_format,
+    "var_names": var_names,
     "batch_key": batch_key,
     "condition_key": condition_key,
     "leiden_resolution": resolved_leiden_resolution,
@@ -689,11 +709,12 @@ and output object were used for this run before interpreting downstream figures.
 ```{python}
 pd.DataFrame(
     {
-        "field": ["project_name", "organism", "input_format", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
+        "field": ["project_name", "organism", "input_format", "var_names", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
         "value": [
             run_summary["project_name"],
             run_summary["organism"],
             run_summary["input_format"],
+            run_summary["var_names"],
             run_summary["batch_key"],
             run_summary["condition_key"],
             run_summary["leiden_resolution"],
@@ -759,6 +780,7 @@ The retained fraction bar plot is often the fastest way to spot problematic samp
 ```{python}
 format_table(sample_compare_df[[
     "sample_id",
+    "sample_display",
     "n_cells",
     "n_cells_after",
     "removed_cells",
@@ -775,7 +797,7 @@ format_table(sample_compare_df[[
 ```{python}
 retention_fig = px.bar(
     sample_compare_df.sort_values("retained_fraction_after", ascending=False),
-    x="sample_id",
+    x="sample_display",
     y="retained_fraction_after",
     color="retained_fraction_after",
     color_continuous_scale="Tealgrn",
@@ -844,6 +866,7 @@ pd.DataFrame(
         "parameter": [
             "input_path",
             "input_format",
+            "var_names",
             "organism",
             "sample_id_key",
             "batch_key",
@@ -861,6 +884,7 @@ pd.DataFrame(
         "value": [
             str(input_path),
             resolved_input_format,
+            var_names,
             organism,
             sample_id_key,
             batch_key,

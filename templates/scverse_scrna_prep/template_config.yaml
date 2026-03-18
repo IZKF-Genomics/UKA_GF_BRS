@@ -20,6 +20,12 @@ params:
     required: false
     default: "auto"
     description: "Input format: auto, h5ad, 10x_h5, or 10x_mtx"
+  var_names:
+    type: str
+    cli: "--var-names"
+    required: false
+    default: "gene_symbols"
+    description: "Feature naming for 10x_mtx input: gene_symbols or gene_ids"
   sample_metadata:
     type: str
     cli: "--sample-metadata"
