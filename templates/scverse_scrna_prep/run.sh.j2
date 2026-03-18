@@ -4,18 +4,6 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-if [[ ! -f pixi.toml ]]; then
-  echo "ERROR: missing required file: pixi.toml" >&2
-  exit 1
-fi
-if [[ ! -f config/project.toml ]]; then
-  echo "ERROR: missing required file: config/project.toml" >&2
-  exit 1
-fi
-if [[ ! -f 00_qc.qmd ]]; then
-  echo "ERROR: missing required file: 00_qc.qmd" >&2
-  exit 1
-fi
 if ! command -v pixi >/dev/null 2>&1; then
   echo "ERROR: pixi not found on PATH" >&2
   exit 1
