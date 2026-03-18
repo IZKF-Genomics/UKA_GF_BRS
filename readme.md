@@ -99,6 +99,7 @@ cd /path/to/output
 - illumina_methylation_compare now supports multi-comparison execution from `config/comparisons.csv` (base_group/target_group matrix) and writes per-comparison result tables/figures plus global all-sample PCA overview.
 - illumina_methylation_compare no longer requires explicitly passing `study_name`; when omitted, the rendered template id is used as the project/report name.
 - illumina_methylation_compare now auto-discovers active `illumina_methylation_process` runs from project.yaml via post-render hook and populates `config/input_registry.csv` (can be disabled with `--auto-discover-inputs false`); fallback `run1` is only kept when no process runs are discovered.
+- nfcore_scrnaseq now publishes `nfcore_scrnaseq_res_mt`, a resolver-backed path to the preferred downstream `.h5ad` matrix under `results/<aligner>/mtx_conversions/`, so follow-up scverse templates can auto-discover the matrix from project.yaml.
 
 ## Agent Readability
 

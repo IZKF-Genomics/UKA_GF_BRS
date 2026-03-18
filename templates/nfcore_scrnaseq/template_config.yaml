@@ -67,6 +67,8 @@ publish:
     resolver: "resolvers.get_multiqc_report"
   nfcore_samplesheet:
     resolver: "resolvers.get_samplesheet"
+  nfcore_scrnaseq_res_mt:
+    resolver: "resolvers.get_scrnaseq_result_matrix"
 tools:
   required: []
   optional: []

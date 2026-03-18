@@ -33,11 +33,19 @@ run_entry: run.sh
 publish_keys:
 - nfcore_multiqc
 - nfcore_samplesheet
+- nfcore_scrnaseq_res_mt
 render_file_count: 2
 ```
 <!-- AGENT_METADATA_END -->
 
 nf-core/scrnaseq wrapper for single-cell RNA-seq data (default aligner: Cell Ranger).
+
+Published outputs:
+- `nfcore_multiqc`: MultiQC HTML report
+- `nfcore_samplesheet`: rendered input samplesheet
+- `nfcore_scrnaseq_res_mt`: preferred downstream `.h5ad` matrix from `results/<aligner>/mtx_conversions/`
+  for follow-up Scanpy/scverse templates. Resolver preference is `combined_filtered_matrix.h5ad`,
+  then other combined/sample `.h5ad` outputs.
 
 ## Render
 Run from the project directory (where project.yaml lives).
