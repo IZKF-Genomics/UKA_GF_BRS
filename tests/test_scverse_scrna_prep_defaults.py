@@ -15,6 +15,11 @@ authors:
   - name: Ada Lovelace
 templates:
   - id: nfcore_scrnaseq
+    params:
+      organism: hsapiens
+    published:
+      nfcore_scrnaseq_res_mt: nextgen:/data/projects/demo/nfcore_scrnaseq/results/cellranger/mtx_conversions/combined_filtered_matrix.h5ad
+  - id: nfcore_scrnaseq
     published:
       nfcore_scrnaseq_res_mt: nextgen:/data/projects/demo/nfcore_scrnaseq/results/cellranger/mtx_conversions/combined_filtered_matrix.h5ad
 """,
@@ -37,3 +42,4 @@ templates:
     populate(ctx)
 
     assert ctx.params["input_h5ad"] == "/data/projects/demo/nfcore_scrnaseq/results/cellranger/mtx_conversions/combined_filtered_matrix.h5ad"
+    assert ctx.params["organism"] == "hsapiens"

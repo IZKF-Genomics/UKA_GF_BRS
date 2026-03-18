@@ -18,8 +18,8 @@ params:
     type: str
     cli: "--organism"
     required: false
-    default: "human"
-    description: "Organism name for QC feature prefixes (human or mouse)"
+    default: ""
+    description: "Organism name for QC feature prefixes; auto-filled from any upstream params.organism when available"
   batch_key:
     type: str
     cli: "--batch-key"

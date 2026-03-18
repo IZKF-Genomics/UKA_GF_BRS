@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
 import tomllib
 from pathlib import Path
 
@@ -26,6 +25,15 @@ QC_PATTERNS = {
         "ribo": ("Rps", "Rpl"),
         "hb_regex": r"^Hb(?!p)",
     },
+}
+
+ORGANISM_ALIASES = {
+    "human": "human",
+    "hsapiens": "human",
+    "homo_sapiens": "human",
+    "mouse": "mouse",
+    "mmusculus": "mouse",
+    "mus_musculus": "mouse",
 }
 
 
@@ -75,9 +83,11 @@ def infer_sample_id(obs: pd.DataFrame, preferred_key: str) -> pd.Series:
 
 
 def annotate_qc_genes(adata, organism: str) -> None:
-    org = organism.lower()
+    org = ORGANISM_ALIASES.get(organism.lower(), "")
     if org not in QC_PATTERNS:
-        org = "human"
+        raise RuntimeError(
+            "metadata.organism is missing or unsupported. Set --param organism or ensure an upstream template wrote params.organism in project.yaml."
+        )
     pats = QC_PATTERNS[org]
     var_names = pd.Index(adata.var_names.astype(str))
     adata.var["mt"] = var_names.str.startswith(pats["mt"])
@@ -140,6 +150,10 @@ def main() -> None:
     input_path = resolve_path(root_dir, input_h5ad)
     sample_metadata_path = resolve_path(root_dir, str(cfg["input"]["sample_metadata"]))
     organism = str(cfg["metadata"]["organism"]).strip().lower()
+    if not organism:
+        raise RuntimeError(
+            "config metadata.organism is empty; set --param organism or render in a project with an upstream params.organism value"
+        )
     sample_id_key = str(cfg["metadata"]["sample_id_key"]).strip() or "sample_id"
     batch_key = str(cfg["metadata"]["batch_key"]).strip() or "batch"
     condition_key = str(cfg["metadata"]["condition_key"]).strip() or "condition"

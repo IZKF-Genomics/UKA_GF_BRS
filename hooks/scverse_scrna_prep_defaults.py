@@ -33,6 +33,24 @@ def _find_template_entry(project_data: dict, template_id: str):
     return None
 
 
+def _find_any_template_param(project_data: dict, param_name: str):
+    templates = project_data.get("templates")
+    if not isinstance(templates, list):
+        return None
+    for entry in reversed(templates):
+        if not isinstance(entry, dict):
+            continue
+        params = entry.get("params")
+        if not isinstance(params, dict):
+            continue
+        value = params.get(param_name)
+        if isinstance(value, str):
+            value = value.strip()
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def populate(ctx) -> None:
     params = ctx.params
     project_data = _load_project_yaml(ctx)
@@ -55,3 +73,12 @@ def populate(ctx) -> None:
 
     if _needs_fill(params.get("sample_metadata")):
         params["sample_metadata"] = ""
+
+    if _needs_fill(params.get("organism")):
+        organism = _find_any_template_param(project_data, "organism")
+        if organism is not None:
+            params["organism"] = str(organism)
+            print(f"[hook:scverse_scrna_prep_defaults] organism <- {params['organism']}")
+        else:
+            params["organism"] = ""
+            print("[hook:scverse_scrna_prep_defaults] organism not found in project.yaml; leaving empty")
