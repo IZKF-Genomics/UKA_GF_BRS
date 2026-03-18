@@ -87,11 +87,11 @@ params:
     default: 15
     description: "Number of neighbors for graph construction"
   leiden_resolution:
-    type: float
+    type: str
     cli: "--leiden-resolution"
     required: false
-    default: 0.8
-    description: "Leiden resolution for clustering"
+    default: ""
+    description: "Optional Leiden resolution override; when omitted, a heuristic value is chosen after QC"
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"

@@ -71,6 +71,10 @@ bpm template render scverse_scrna_prep \
   --dir /path/to/project
 ```
 
+`leiden_resolution` is optional. If omitted, the template chooses a heuristic value
+after QC based on the number of retained cells and records the resolved value in the
+results.
+
 Standalone/ad-hoc usage with an explicit input:
 
 ```bash

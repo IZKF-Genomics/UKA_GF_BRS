@@ -137,6 +137,19 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]:
+    value = str(raw_value).strip()
+    if value:
+        return float(value), "manual"
+    if n_cells < 2000:
+        return 0.4, "auto"
+    if n_cells < 10000:
+        return 0.6, "auto"
+    if n_cells < 50000:
+        return 0.8, "auto"
+    return 1.0, "auto"
+
+
 def main() -> None:
     args = parse_args()
     config_path = Path(args.config).resolve()
@@ -243,6 +256,11 @@ def main() -> None:
     if filtered.n_vars < 2:
         raise RuntimeError("Too few genes remain after filtering; relax min_cells or upstream filtering")
 
+    resolved_leiden_resolution, leiden_resolution_source = resolve_leiden_resolution(
+        str(cfg["analysis"].get("leiden_resolution", "")),
+        filtered.n_obs,
+    )
+
     sc.pp.normalize_total(filtered, target_sum=float(cfg["analysis"]["target_sum"]))
     sc.pp.log1p(filtered)
     sc.pp.highly_variable_genes(filtered, n_top_genes=int(cfg["analysis"]["n_top_hvgs"]), flavor="seurat")
@@ -252,7 +270,7 @@ def main() -> None:
     sc.tl.pca(filtered, svd_solver="arpack")
     sc.pp.neighbors(filtered, n_neighbors=n_neighbors, n_pcs=max_pcs)
     sc.tl.umap(filtered)
-    sc.tl.leiden(filtered, resolution=float(cfg["analysis"]["leiden_resolution"]))
+    sc.tl.leiden(filtered, resolution=resolved_leiden_resolution)
 
     qc_after = {
         "n_cells_after": int(filtered.n_obs),
@@ -262,6 +280,8 @@ def main() -> None:
         "median_pct_counts_mt_after": float(np.median(filtered.obs["pct_counts_mt"])) if filtered.n_obs else math.nan,
         "n_hvgs": int(filtered.var["highly_variable"].sum()) if "highly_variable" in filtered.var.columns else 0,
         "doublet_method": str(filtered.uns.get("doublet_method", "none")),
+        "leiden_resolution": resolved_leiden_resolution,
+        "leiden_resolution_source": leiden_resolution_source,
     }
 
     qc_summary = pd.DataFrame(
@@ -294,6 +314,8 @@ def main() -> None:
 
     filtered.uns["prep_config"] = cfg
     filtered.uns["input_h5ad"] = str(input_path)
+    filtered.uns["resolved_leiden_resolution"] = resolved_leiden_resolution
+    filtered.uns["resolved_leiden_resolution_source"] = leiden_resolution_source
     ensure_parent(out_adata)
     filtered.write_h5ad(out_adata)
 
@@ -304,6 +326,8 @@ def main() -> None:
             "organism": organism,
             "batch_key": batch_key,
             "condition_key": condition_key,
+            "leiden_resolution": resolved_leiden_resolution,
+            "leiden_resolution_source": leiden_resolution_source,
             "output_h5ad": str(out_adata),
         },
     )

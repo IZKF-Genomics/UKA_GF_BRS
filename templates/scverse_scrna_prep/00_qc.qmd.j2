@@ -32,12 +32,14 @@ qc_summary
 ```{python}
 pd.DataFrame(
     {
-        "field": ["project_name", "organism", "batch_key", "condition_key", "output_h5ad"],
+        "field": ["project_name", "organism", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
         "value": [
             run_summary["project_name"],
             run_summary["organism"],
             run_summary["batch_key"],
             run_summary["condition_key"],
+            run_summary["leiden_resolution"],
+            run_summary["leiden_resolution_source"],
             run_summary["output_h5ad"],
         ],
     }
