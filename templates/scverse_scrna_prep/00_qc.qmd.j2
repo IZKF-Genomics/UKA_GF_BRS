@@ -66,6 +66,7 @@ STAGE_COLORS = {
     "Before filtering": "#68737d",
     "After filtering": "#0f766e",
 }
+QUALITATIVE_SEQUENCE = ["#0f766e", "#7c3aed", "#d97706", "#dc2626", "#2563eb", "#059669", "#b91c1c", "#475569"]
 
 
 def load_config(path: Path) -> dict:
@@ -279,10 +280,41 @@ def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
         template="simple_white",
         title=title,
         opacity=0.8,
+        color_discrete_sequence=QUALITATIVE_SEQUENCE,
     )
     fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
     fig.update_layout(height=560, font=dict(size=14), legend=dict(orientation="h"))
     return fig
+
+
+def pca_plot(adata, color_key: str, title: str) -> go.Figure:
+    coords = adata.obsm["X_pca"][:, :2]
+    emb = pd.DataFrame(coords, columns=["PC1", "PC2"], index=adata.obs_names)
+    emb = emb.join(adata.obs[[color_key, "sample_id"]], how="left")
+    emb[color_key] = emb[color_key].astype(str)
+    fig = px.scatter(
+        emb,
+        x="PC1",
+        y="PC2",
+        color=color_key,
+        hover_name="sample_id",
+        hover_data={"PC1": ":.3f", "PC2": ":.3f", color_key: True, "sample_id": False},
+        template="simple_white",
+        title=title,
+        opacity=0.8,
+        color_discrete_sequence=QUALITATIVE_SEQUENCE,
+    )
+    fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
+    fig.update_layout(height=560, font=dict(size=14), legend=dict(orientation="h"))
+    return fig
+
+
+def format_table(df: pd.DataFrame, digits: int = 3) -> pd.DataFrame:
+    out = df.copy()
+    for col in out.columns:
+        if pd.api.types.is_float_dtype(out[col]):
+            out[col] = out[col].round(digits)
+    return out
 
 
 cfg = load_config(CONFIG_PATH)
@@ -587,11 +619,11 @@ pd.DataFrame(
 ## Filtering Effect Summary
 
 ```{python}
-filter_effect_df
+format_table(filter_effect_df)
 ```
 
 ```{python}
-pd.DataFrame(comparison_rows)
+format_table(pd.DataFrame(comparison_rows))
 ```
 
 ## Cell-Level QC Before vs After
@@ -609,13 +641,13 @@ compare_metric_figure(long_qc_df, "pct_counts_mt", "Mitochondrial percentage")
 ```
 
 ```{python}
-before_after_stats
+format_table(before_after_stats)
 ```
 
 ## Sample-Level QC Before vs After
 
 ```{python}
-sample_compare_df[[
+format_table(sample_compare_df[[
     "sample_id",
     "n_cells",
     "n_cells_after",
@@ -627,7 +659,7 @@ sample_compare_df[[
     "median_n_genes_after",
     "median_pct_counts_mt",
     "median_pct_counts_mt_after",
-]].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False])
+]].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False]))
 ```
 
 ```{python}
@@ -671,7 +703,15 @@ embedding_plot(filtered, condition_key, f"Interactive UMAP colored by {condition
 ```
 
 ```{python}
-cluster_counts
+pca_plot(filtered, "leiden", "Interactive PCA colored by Leiden cluster")
+```
+
+```{python}
+pca_plot(filtered, batch_key, f"Interactive PCA colored by {batch_key}")
+```
+
+```{python}
+format_table(cluster_counts)
 ```
 
 ## Methods Appendix

@@ -103,7 +103,9 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 - `results/tables/qc_summary.csv`: pre/post filter summary
 - `results/tables/sample_qc_summary.csv`: sample-level QC summary
 - `results/tables/cluster_counts.csv`: cluster abundances
-- `results/figures/*.png`: QC and embedding figures
+- `results/tables/filter_effect_summary.csv`: retained/removed cell and gene summary
+- `results/tables/qc_metric_stage_summary.csv`: per-metric before/after summaries
+- `results/tables/qc_metric_before_after.csv`: compact before/after delta table
 - `00_qc.html`: rendered report
 
 Published output:
