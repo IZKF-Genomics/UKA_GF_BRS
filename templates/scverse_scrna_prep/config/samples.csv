@@ -1,1 +1,1 @@
-sample_id,batch,condition,patient_id,notes
+sample_id,sample_label,batch,condition,patient_id,notes

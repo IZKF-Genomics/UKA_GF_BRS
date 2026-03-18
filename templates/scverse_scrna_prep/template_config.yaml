@@ -122,6 +122,8 @@ run:
 hooks:
   pre_render:
     - hooks.scverse_scrna_prep_defaults:populate
+  post_render:
+    - hooks.scverse_scrna_prep_prefill_samples:main
 
 publish:
   scrna_prep_h5ad:

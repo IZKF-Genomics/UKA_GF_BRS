@@ -104,7 +104,8 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 ## Key files
 
 - `config/project.toml`: analysis configuration written at render time
-- `config/samples.csv`: optional editable sample metadata scaffold
+- `config/samples.csv`: editable sample metadata scaffold; post-render hook pre-fills `sample_id`
+  from `nfcore_scrnaseq.published.nfcore_samplesheet` when available
 - `00_qc.qmd`: Quarto notebook containing the preprocessing logic and report
 
 ## Outputs
