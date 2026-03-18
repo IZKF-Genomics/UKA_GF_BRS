@@ -12,6 +12,8 @@ format:
     code-tools: true
     embed-resources: true
     theme: lumen
+    fig-width: 10
+    fig-height: 5
 execute:
   echo: true
   warning: false
@@ -26,12 +28,13 @@ import json
 import math
 import tomllib
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanpy as sc
-import seaborn as sns
 from scipy import sparse
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 ROOT = Path(".").resolve()
 CONFIG_PATH = ROOT / "config" / "project.toml"
@@ -56,6 +59,12 @@ ORGANISM_ALIASES = {
     "mouse": "mouse",
     "mmusculus": "mouse",
     "mus_musculus": "mouse",
+}
+
+STAGE_ORDER = ["Before filtering", "After filtering"]
+STAGE_COLORS = {
+    "Before filtering": "#68737d",
+    "After filtering": "#0f766e",
 }
 
 
@@ -129,22 +138,6 @@ def apply_sample_metadata(adata, metadata_df: pd.DataFrame, sample_id_key: str) 
     adata.obs = joined
 
 
-def make_histplot(series: pd.Series, title: str, out_path: Path, bins: int = 50) -> None:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    sns.histplot(series.astype(float), bins=bins, ax=ax)
-    ax.set_title(title)
-    ax.set_xlabel(series.name)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=160)
-    plt.close(fig)
-
-
-def make_umap_plot(adata, color_key: str, out_path: Path, title: str) -> None:
-    fig = sc.pl.umap(adata, color=color_key, show=False, return_fig=True, title=title)
-    fig.savefig(out_path, dpi=160, bbox_inches="tight")
-    plt.close(fig)
-
-
 def write_json(path: Path, data: dict) -> None:
     ensure_parent(path)
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -161,6 +154,135 @@ def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]
     if n_cells < 50000:
         return 0.8, "auto"
     return 1.0, "auto"
+
+
+def metric_summary(df: pd.DataFrame, stage: str, metric: str) -> dict[str, float | str]:
+    series = df[metric].dropna()
+    q1 = float(series.quantile(0.25)) if not series.empty else math.nan
+    q3 = float(series.quantile(0.75)) if not series.empty else math.nan
+    return {
+        "stage": stage,
+        "metric": metric,
+        "n_cells": int(df.shape[0]),
+        "median": float(series.median()) if not series.empty else math.nan,
+        "mean": float(series.mean()) if not series.empty else math.nan,
+        "q1": q1,
+        "q3": q3,
+        "iqr": q3 - q1 if not math.isnan(q1) and not math.isnan(q3) else math.nan,
+    }
+
+
+def compare_metric_figure(long_df: pd.DataFrame, metric: str, label: str) -> go.Figure:
+    plot_df = long_df[["stage", metric, "sample_id"]].dropna().copy()
+    plot_df["stage"] = pd.Categorical(plot_df["stage"], categories=STAGE_ORDER, ordered=True)
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=(f"{label}: histogram", f"{label}: violin"),
+        horizontal_spacing=0.12,
+    )
+    for idx, stage in enumerate(STAGE_ORDER, start=1):
+        stage_df = plot_df[plot_df["stage"] == stage]
+        fig.add_trace(
+            go.Histogram(
+                x=stage_df[metric],
+                name=stage,
+                marker=dict(color=STAGE_COLORS[stage]),
+                opacity=0.75,
+                nbinsx=60,
+                legendgroup=stage,
+                showlegend=(idx == 1),
+            ),
+            row=1,
+            col=1,
+        )
+        fig.add_trace(
+            go.Violin(
+                y=stage_df[metric],
+                x=[stage] * len(stage_df),
+                name=stage,
+                legendgroup=stage,
+                marker=dict(color=STAGE_COLORS[stage]),
+                line=dict(color=STAGE_COLORS[stage]),
+                box_visible=True,
+                meanline_visible=True,
+                points="outliers",
+                showlegend=False,
+            ),
+            row=1,
+            col=2,
+        )
+    fig.update_layout(
+        template="simple_white",
+        barmode="overlay",
+        height=420,
+        title=f"{label}: before vs after filtering",
+        legend=dict(orientation="h", y=1.12, x=0),
+        font=dict(size=14),
+        margin=dict(l=40, r=30, t=80, b=40),
+    )
+    fig.update_xaxes(title_text=label, row=1, col=1)
+    fig.update_yaxes(title_text="Cell count", row=1, col=1)
+    fig.update_xaxes(title_text="", row=1, col=2, categoryorder="array", categoryarray=STAGE_ORDER)
+    fig.update_yaxes(title_text=label, row=1, col=2)
+    return fig
+
+
+def compare_sample_metric(sample_compare_df: pd.DataFrame, metric: str, label: str) -> go.Figure:
+    fig = go.Figure()
+    for stage in STAGE_ORDER:
+        sub = sample_compare_df[sample_compare_df["stage"] == stage]
+        fig.add_trace(
+            go.Box(
+                y=sub[metric],
+                x=sub["stage"],
+                name=stage,
+                marker_color=STAGE_COLORS[stage],
+                boxmean=True,
+                boxpoints="outliers",
+                jitter=0.25,
+            )
+        )
+    fig.update_layout(
+        template="simple_white",
+        height=420,
+        title=f"{label}: sample-level before vs after filtering",
+        font=dict(size=14),
+        margin=dict(l=40, r=30, t=80, b=40),
+        showlegend=False,
+    )
+    fig.update_xaxes(categoryorder="array", categoryarray=STAGE_ORDER, title_text="")
+    fig.update_yaxes(title_text=label)
+    return fig
+
+
+def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
+    coords = adata.obsm["X_umap"]
+    emb = pd.DataFrame(coords, columns=["UMAP1", "UMAP2"], index=adata.obs_names)
+    emb = emb.join(adata.obs[[color_key, "sample_id"]], how="left")
+    emb[color_key] = emb[color_key].astype(str)
+    emb["hover"] = (
+        "cell="
+        + emb.index.astype(str)
+        + "<br>sample_id="
+        + emb["sample_id"].astype(str)
+        + f"<br>{color_key}="
+        + emb[color_key].astype(str)
+    )
+    fig = px.scatter(
+        emb,
+        x="UMAP1",
+        y="UMAP2",
+        color=color_key,
+        hover_name="sample_id",
+        hover_data={"UMAP1": ":.3f", "UMAP2": ":.3f", color_key: True, "sample_id": False},
+        template="simple_white",
+        title=title,
+        opacity=0.8,
+    )
+    fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
+    fig.update_layout(height=560, font=dict(size=14), legend=dict(orientation="h"))
+    return fig
 
 
 cfg = load_config(CONFIG_PATH)
@@ -191,13 +313,10 @@ out_adata = resolve_path(ROOT, str(cfg["output"]["adata_file"]))
 qc_summary_file = resolve_path(ROOT, str(cfg["output"]["qc_summary_file"]))
 sample_qc_summary_file = resolve_path(ROOT, str(cfg["output"]["sample_qc_summary_file"]))
 cluster_counts_file = resolve_path(ROOT, str(cfg["output"]["cluster_counts_file"]))
-figures_dir = ROOT / "results" / "figures"
 tables_dir = ROOT / "results" / "tables"
-figures_dir.mkdir(parents=True, exist_ok=True)
 tables_dir.mkdir(parents=True, exist_ok=True)
 
 sc.settings.verbosity = 2
-sc.settings.figdir = str(figures_dir)
 
 adata = sc.read_h5ad(input_path)
 adata.obs_names_make_unique()
@@ -233,14 +352,6 @@ adata
 annotate_qc_genes(adata, organism)
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True)
 
-qc_before = {
-    "n_cells_before": int(adata.n_obs),
-    "n_genes_before": int(adata.n_vars),
-    "median_counts_before": float(np.median(adata.obs["total_counts"])),
-    "median_genes_before": float(np.median(adata.obs["n_genes_by_counts"])),
-    "median_pct_counts_mt_before": float(np.median(adata.obs["pct_counts_mt"])),
-}
-
 min_genes = int(cfg["qc"]["min_genes"])
 min_cells = int(cfg["qc"]["min_cells"])
 min_counts = int(cfg["qc"]["min_counts"])
@@ -252,14 +363,25 @@ adata.obs["pass_qc"] = (
     & (adata.obs["pct_counts_mt"] <= max_pct_counts_mt)
 )
 
-qc_cell_df = adata.obs.loc[
+before_obs = adata.obs.copy()
+before_obs["stage"] = "Before filtering"
+
+qc_before = {
+    "n_cells_before": int(adata.n_obs),
+    "n_genes_before": int(adata.n_vars),
+    "median_counts_before": float(np.median(before_obs["total_counts"])),
+    "median_genes_before": float(np.median(before_obs["n_genes_by_counts"])),
+    "median_pct_counts_mt_before": float(np.median(before_obs["pct_counts_mt"])),
+}
+
+qc_cell_df = before_obs.loc[
     :,
-    ["sample_id", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc"],
+    ["sample_id", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc", "stage"],
 ].copy()
 qc_cell_df.to_csv(tables_dir / "cell_qc_metrics.csv", index=True)
 
-sample_qc = (
-    qc_cell_df.groupby("sample_id", dropna=False)
+before_sample_qc = (
+    before_obs.groupby("sample_id", dropna=False)
     .agg(
         n_cells=("pass_qc", "size"),
         n_cells_pass_qc=("pass_qc", "sum"),
@@ -269,10 +391,9 @@ sample_qc = (
     )
     .reset_index()
 )
-ensure_parent(sample_qc_summary_file)
-sample_qc.to_csv(sample_qc_summary_file, index=False)
+before_sample_qc["retained_fraction"] = before_sample_qc["n_cells_pass_qc"] / before_sample_qc["n_cells"]
 
-sample_qc.sort_values(["n_cells_pass_qc", "n_cells"], ascending=False)
+before_sample_qc.head()
 ```
 
 ## Filtering and Clustering
@@ -303,8 +424,11 @@ sc.pp.neighbors(filtered, n_neighbors=n_neighbors, n_pcs=max_pcs)
 sc.tl.umap(filtered)
 sc.tl.leiden(filtered, resolution=resolved_leiden_resolution)
 
+after_obs = filtered.obs.copy()
+after_obs["stage"] = "After filtering"
+
 cluster_counts = (
-    filtered.obs.groupby("leiden", dropna=False)
+    after_obs.groupby("leiden", dropna=False)
     .size()
     .rename("n_cells")
     .reset_index()
@@ -322,9 +446,9 @@ cluster_counts
 qc_after = {
     "n_cells_after": int(filtered.n_obs),
     "n_genes_after": int(filtered.n_vars),
-    "median_counts_after": float(np.median(filtered.obs["total_counts"])) if filtered.n_obs else math.nan,
-    "median_genes_after": float(np.median(filtered.obs["n_genes_by_counts"])) if filtered.n_obs else math.nan,
-    "median_pct_counts_mt_after": float(np.median(filtered.obs["pct_counts_mt"])) if filtered.n_obs else math.nan,
+    "median_counts_after": float(np.median(after_obs["total_counts"])) if filtered.n_obs else math.nan,
+    "median_genes_after": float(np.median(after_obs["n_genes_by_counts"])) if filtered.n_obs else math.nan,
+    "median_pct_counts_mt_after": float(np.median(after_obs["pct_counts_mt"])) if filtered.n_obs else math.nan,
     "n_hvgs": int(filtered.var["highly_variable"].sum()) if "highly_variable" in filtered.var.columns else 0,
     "doublet_method": str(filtered.uns.get("doublet_method", "none")),
     "leiden_resolution": resolved_leiden_resolution,
@@ -340,13 +464,67 @@ qc_summary = pd.DataFrame(
 ensure_parent(qc_summary_file)
 qc_summary.to_csv(qc_summary_file, index=False)
 
-make_histplot(adata.obs["n_genes_by_counts"], "Genes per cell before filtering", figures_dir / "hist_n_genes_before.png")
-make_histplot(adata.obs["pct_counts_mt"], "Mitochondrial percentage before filtering", figures_dir / "hist_pct_mt_before.png")
-make_umap_plot(filtered, "leiden", figures_dir / "umap_leiden.png", "UMAP colored by Leiden cluster")
-if batch_key in filtered.obs.columns:
-    make_umap_plot(filtered, batch_key, figures_dir / "umap_batch.png", f"UMAP colored by {batch_key}")
-if condition_key in filtered.obs.columns:
-    make_umap_plot(filtered, condition_key, figures_dir / "umap_condition.png", f"UMAP colored by {condition_key}")
+before_after_stats = pd.DataFrame(
+    [metric_summary(before_obs, "Before filtering", "total_counts"),
+     metric_summary(after_obs, "After filtering", "total_counts"),
+     metric_summary(before_obs, "Before filtering", "n_genes_by_counts"),
+     metric_summary(after_obs, "After filtering", "n_genes_by_counts"),
+     metric_summary(before_obs, "Before filtering", "pct_counts_mt"),
+     metric_summary(after_obs, "After filtering", "pct_counts_mt")]
+)
+
+comparison_rows = []
+for metric in ["total_counts", "n_genes_by_counts", "pct_counts_mt"]:
+    b = before_after_stats[(before_after_stats["metric"] == metric) & (before_after_stats["stage"] == "Before filtering")].iloc[0]
+    a = before_after_stats[(before_after_stats["metric"] == metric) & (before_after_stats["stage"] == "After filtering")].iloc[0]
+    comparison_rows.append(
+        {
+            "metric": metric,
+            "before_median": b["median"],
+            "after_median": a["median"],
+            "median_change": a["median"] - b["median"],
+            "before_iqr": b["iqr"],
+            "after_iqr": a["iqr"],
+            "iqr_change": a["iqr"] - b["iqr"],
+        }
+    )
+filter_effect_df = pd.DataFrame(
+    [
+        {
+            "cells_before": int(adata.n_obs),
+            "cells_after": int(filtered.n_obs),
+            "cells_removed": int(adata.n_obs - filtered.n_obs),
+            "retained_fraction": float(filtered.n_obs / adata.n_obs) if adata.n_obs else math.nan,
+            "genes_before": int(adata.n_vars),
+            "genes_after": int(filtered.n_vars),
+            "genes_removed": int(adata.n_vars - filtered.n_vars),
+            "leiden_resolution": resolved_leiden_resolution,
+            "leiden_resolution_source": leiden_resolution_source,
+        }
+    ]
+)
+
+sample_after_qc = (
+    after_obs.groupby("sample_id", dropna=False)
+    .agg(
+        n_cells_after=("sample_id", "size"),
+        median_total_counts_after=("total_counts", "median"),
+        median_n_genes_after=("n_genes_by_counts", "median"),
+        median_pct_counts_mt_after=("pct_counts_mt", "median"),
+    )
+    .reset_index()
+)
+
+sample_compare_df = before_sample_qc.merge(sample_after_qc, on="sample_id", how="left")
+sample_compare_df["n_cells_after"] = sample_compare_df["n_cells_after"].fillna(0).astype(int)
+sample_compare_df["retained_fraction_after"] = sample_compare_df["n_cells_after"] / sample_compare_df["n_cells"]
+sample_compare_df["removed_cells"] = sample_compare_df["n_cells"] - sample_compare_df["n_cells_after"]
+ensure_parent(sample_qc_summary_file)
+sample_compare_df.to_csv(sample_qc_summary_file, index=False)
+
+before_after_stats.to_csv(tables_dir / "qc_metric_stage_summary.csv", index=False)
+pd.DataFrame(comparison_rows).to_csv(tables_dir / "qc_metric_before_after.csv", index=False)
+filter_effect_df.to_csv(tables_dir / "filter_effect_summary.csv", index=False)
 
 filtered.uns["prep_config"] = cfg
 filtered.uns["input_h5ad"] = str(input_path)
@@ -365,6 +543,24 @@ run_summary = {
     "output_h5ad": str(out_adata),
 }
 write_json(tables_dir / "run_summary.json", run_summary)
+
+long_qc_df = pd.concat(
+    [
+        before_obs.assign(stage="Before filtering"),
+        after_obs.assign(stage="After filtering"),
+    ],
+    axis=0,
+    join="outer",
+).reset_index(names="cell_id")
+long_qc_df["stage"] = pd.Categorical(long_qc_df["stage"], categories=STAGE_ORDER, ordered=True)
+
+sample_compare_long = pd.concat(
+    [
+        before_sample_qc.assign(stage="Before filtering", n_cells_stage=before_sample_qc["n_cells"], median_total_counts_stage=before_sample_qc["median_total_counts"], median_n_genes_stage=before_sample_qc["median_n_genes"], median_pct_counts_mt_stage=before_sample_qc["median_pct_counts_mt"]),
+        sample_compare_df.assign(stage="After filtering", n_cells_stage=sample_compare_df["n_cells_after"], median_total_counts_stage=sample_compare_df["median_total_counts_after"], median_n_genes_stage=sample_compare_df["median_n_genes_after"], median_pct_counts_mt_stage=sample_compare_df["median_pct_counts_mt_after"]),
+    ],
+    ignore_index=True,
+)
 
 qc_summary
 ```
@@ -388,42 +584,133 @@ pd.DataFrame(
 )
 ```
 
-## QC Summary
+## Filtering Effect Summary
 
 ```{python}
-qc_summary
+filter_effect_df
 ```
-
-## Sample-Level Summary
 
 ```{python}
-sample_qc.sort_values(["n_cells_pass_qc", "n_cells"], ascending=False)
+pd.DataFrame(comparison_rows)
 ```
 
-## Cluster Counts
+## Cell-Level QC Before vs After
+
+```{python}
+compare_metric_figure(long_qc_df, "total_counts", "Total counts")
+```
+
+```{python}
+compare_metric_figure(long_qc_df, "n_genes_by_counts", "Genes detected per cell")
+```
+
+```{python}
+compare_metric_figure(long_qc_df, "pct_counts_mt", "Mitochondrial percentage")
+```
+
+```{python}
+before_after_stats
+```
+
+## Sample-Level QC Before vs After
+
+```{python}
+sample_compare_df[[
+    "sample_id",
+    "n_cells",
+    "n_cells_after",
+    "removed_cells",
+    "retained_fraction_after",
+    "median_total_counts",
+    "median_total_counts_after",
+    "median_n_genes",
+    "median_n_genes_after",
+    "median_pct_counts_mt",
+    "median_pct_counts_mt_after",
+]].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False])
+```
+
+```{python}
+retention_fig = px.bar(
+    sample_compare_df.sort_values("retained_fraction_after", ascending=False),
+    x="sample_id",
+    y="retained_fraction_after",
+    color="retained_fraction_after",
+    color_continuous_scale="Tealgrn",
+    template="simple_white",
+    title="Retained cell fraction by sample",
+)
+retention_fig.update_layout(height=420, xaxis_title="", yaxis_title="Retained fraction")
+retention_fig
+```
+
+```{python}
+compare_sample_metric(sample_compare_long, "median_total_counts_stage", "Median total counts per sample")
+```
+
+```{python}
+compare_sample_metric(sample_compare_long, "median_n_genes_stage", "Median genes per sample")
+```
+
+```{python}
+compare_sample_metric(sample_compare_long, "median_pct_counts_mt_stage", "Median mitochondrial percentage per sample")
+```
+
+## Embedding and Clustering
+
+```{python}
+embedding_plot(filtered, "leiden", "Interactive UMAP colored by Leiden cluster")
+```
+
+```{python}
+embedding_plot(filtered, batch_key, f"Interactive UMAP colored by {batch_key}")
+```
+
+```{python}
+embedding_plot(filtered, condition_key, f"Interactive UMAP colored by {condition_key}")
+```
 
 ```{python}
 cluster_counts
 ```
 
-## Figures
+## Methods Appendix
 
-### Genes per cell before filtering
-
-![](results/figures/hist_n_genes_before.png)
-
-### Mitochondrial percentage before filtering
-
-![](results/figures/hist_pct_mt_before.png)
-
-### UMAP by Leiden cluster
-
-![](results/figures/umap_leiden.png)
-
-### UMAP by batch
-
-![](results/figures/umap_batch.png)
-
-### UMAP by condition
-
-![](results/figures/umap_condition.png)
+```{python}
+pd.DataFrame(
+    {
+        "parameter": [
+            "input_h5ad",
+            "organism",
+            "sample_id_key",
+            "batch_key",
+            "condition_key",
+            "min_genes",
+            "min_cells",
+            "min_counts",
+            "max_pct_counts_mt",
+            "n_top_hvgs",
+            "n_pcs",
+            "n_neighbors",
+            "leiden_resolution",
+            "leiden_resolution_source",
+        ],
+        "value": [
+            str(input_path),
+            organism,
+            sample_id_key,
+            batch_key,
+            condition_key,
+            min_genes,
+            min_cells,
+            min_counts,
+            max_pct_counts_mt,
+            int(cfg["analysis"]["n_top_hvgs"]),
+            int(cfg["analysis"]["n_pcs"]),
+            int(cfg["analysis"]["n_neighbors"]),
+            resolved_leiden_resolution,
+            leiden_resolution_source,
+        ],
+    }
+)
+```
