@@ -350,12 +350,57 @@ def pca_plot(adata, color_key: str, title: str) -> go.Figure:
     return fig
 
 
-def format_table(df: pd.DataFrame, digits: int = 3) -> pd.DataFrame:
+def format_table(df: pd.DataFrame, digits: int = 3):
     out = df.copy()
+
+    def _fmt_text(value):
+        if pd.isna(value):
+            return ""
+        return str(value)
+
+    def _fmt_int(value):
+        if pd.isna(value):
+            return ""
+        return f"{int(round(float(value))):,}"
+
+    def _fmt_float(value):
+        if pd.isna(value):
+            return ""
+        return f"{float(value):,.{digits}f}"
+
+    def _fmt_fraction(value):
+        if pd.isna(value):
+            return ""
+        return f"{100 * float(value):.{max(1, digits - 1)}f}%"
+
+    formatters = {}
     for col in out.columns:
-        if pd.api.types.is_float_dtype(out[col]):
-            out[col] = out[col].round(digits)
-    return out
+        lower = str(col).lower()
+        series = out[col]
+        if pd.api.types.is_integer_dtype(series):
+            formatters[col] = _fmt_int
+        elif pd.api.types.is_float_dtype(series):
+            if "fraction" in lower or lower.startswith("pct_") or lower.endswith("_pct"):
+                formatters[col] = _fmt_fraction
+            elif "n_" in lower or lower.endswith("_count") or lower.endswith("_counts") or lower.endswith("_cells") or lower.endswith("_genes"):
+                formatters[col] = _fmt_int
+            else:
+                formatters[col] = _fmt_float
+        else:
+            formatters[col] = _fmt_text
+
+    return (
+        out.style
+        .format(formatters)
+        .set_properties(**{"text-align": "left", "white-space": "nowrap"})
+        .set_table_styles(
+            [
+                {"selector": "th", "props": [("text-align", "left"), ("font-weight", "600")]},
+                {"selector": "td", "props": [("padding", "0.25rem 0.5rem")]},
+                {"selector": "table", "props": [("font-size", "0.95rem")]},
+            ]
+        )
+    )
 
 
 cfg = load_config(CONFIG_PATH)
