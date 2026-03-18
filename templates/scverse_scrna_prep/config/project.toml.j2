@@ -1,0 +1,33 @@
+[project]
+name = "{{ ctx.params.study_name | default(ctx.project.name if ctx.project else ctx.template.id, true) }}"
+authors = "{{ ctx.params.authors }}"
+
+[input]
+input_h5ad = "{{ ctx.params.input_h5ad }}"
+sample_metadata = "{{ ctx.params.sample_metadata if ctx.params.sample_metadata else 'config/samples.csv' }}"
+
+[metadata]
+organism = "{{ ctx.params.organism }}"
+sample_id_key = "{{ ctx.params.sample_id_key }}"
+batch_key = "{{ ctx.params.batch_key }}"
+condition_key = "{{ ctx.params.condition_key }}"
+
+[qc]
+doublet_method = "{{ ctx.params.doublet_method }}"
+min_genes = {{ ctx.params.min_genes }}
+min_cells = {{ ctx.params.min_cells }}
+min_counts = {{ ctx.params.min_counts }}
+max_pct_counts_mt = {{ ctx.params.max_pct_counts_mt }}
+
+[analysis]
+n_top_hvgs = {{ ctx.params.n_top_hvgs }}
+n_pcs = {{ ctx.params.n_pcs }}
+n_neighbors = {{ ctx.params.n_neighbors }}
+leiden_resolution = {{ ctx.params.leiden_resolution }}
+target_sum = 10000
+
+[output]
+adata_file = "results/adata.prep.h5ad"
+qc_summary_file = "results/tables/qc_summary.csv"
+sample_qc_summary_file = "results/tables/sample_qc_summary.csv"
+cluster_counts_file = "results/tables/cluster_counts.csv"

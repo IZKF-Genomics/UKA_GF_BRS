@@ -1,0 +1,299 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import tomllib
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+from scipy import sparse
+
+
+QC_PATTERNS = {
+    "human": {
+        "mt": ("MT-",),
+        "ribo": ("RPS", "RPL"),
+        "hb_regex": r"^HB(?!P)",
+    },
+    "mouse": {
+        "mt": ("mt-", "mt."),
+        "ribo": ("Rps", "Rpl"),
+        "hb_regex": r"^Hb(?!p)",
+    },
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run baseline Scanpy preprocessing.")
+    parser.add_argument("--config", required=True, help="Path to config/project.toml")
+    return parser.parse_args()
+
+
+def load_config(path: Path) -> dict:
+    with path.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_path(root: Path, value: str) -> Path:
+    p = Path(value)
+    if p.is_absolute():
+        return p
+    return (root / p).resolve()
+
+
+def read_optional_metadata(path: Path) -> pd.DataFrame | None:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    df = pd.read_csv(path)
+    if df.empty:
+        return None
+    return df
+
+
+def sparse_copy(x):
+    return x.copy() if sparse.issparse(x) else np.array(x, copy=True)
+
+
+def infer_sample_id(obs: pd.DataFrame, preferred_key: str) -> pd.Series:
+    candidates = [preferred_key, "sample_id", "sample", "orig.ident", "library_id", "batch"]
+    for key in candidates:
+        if key in obs.columns:
+            vals = obs[key].astype(str).fillna("unknown")
+            if vals.nunique() > 0:
+                return vals
+    return pd.Series(["sample1"] * obs.shape[0], index=obs.index, dtype="object")
+
+
+def annotate_qc_genes(adata, organism: str) -> None:
+    org = organism.lower()
+    if org not in QC_PATTERNS:
+        org = "human"
+    pats = QC_PATTERNS[org]
+    var_names = pd.Index(adata.var_names.astype(str))
+    adata.var["mt"] = var_names.str.startswith(pats["mt"])
+    adata.var["ribo"] = var_names.str.startswith(pats["ribo"])
+    adata.var["hb"] = var_names.str.match(pats["hb_regex"], case=False)
+
+
+def apply_sample_metadata(adata, metadata_df: pd.DataFrame, sample_id_key: str) -> None:
+    if "sample_id" not in metadata_df.columns:
+        raise RuntimeError("sample metadata must contain a sample_id column")
+
+    adata.obs[sample_id_key] = adata.obs[sample_id_key].astype(str)
+    meta = metadata_df.copy()
+    meta["sample_id"] = meta["sample_id"].astype(str)
+    joined = adata.obs.merge(meta, how="left", left_on=sample_id_key, right_on="sample_id", suffixes=("", "_meta"))
+    joined.index = adata.obs.index
+
+    for col in meta.columns:
+        if col == "sample_id":
+            continue
+        meta_col = f"{col}_meta"
+        if meta_col in joined.columns:
+            joined[col] = joined[meta_col].combine_first(joined[col] if col in joined.columns else pd.Series(index=joined.index, dtype="object"))
+            joined = joined.drop(columns=[meta_col])
+
+    adata.obs = joined
+
+
+def make_histplot(series: pd.Series, title: str, out_path: Path, bins: int = 50) -> None:
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.histplot(series.astype(float), bins=bins, ax=ax)
+    ax.set_title(title)
+    ax.set_xlabel(series.name)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def make_umap_plot(adata, color_key: str, out_path: Path, title: str) -> None:
+    fig = sc.pl.umap(adata, color=color_key, show=False, return_fig=True, title=title)
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
+
+def write_json(path: Path, data: dict) -> None:
+    ensure_parent(path)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def main() -> None:
+    args = parse_args()
+    config_path = Path(args.config).resolve()
+    root_dir = config_path.parent.parent
+    cfg = load_config(config_path)
+
+    input_h5ad = str(cfg["input"]["input_h5ad"]).strip()
+    if not input_h5ad:
+        raise RuntimeError("config input.input_h5ad is empty; provide --param input_h5ad or render in a project with nfcore_scrnaseq published outputs")
+
+    input_path = resolve_path(root_dir, input_h5ad)
+    sample_metadata_path = resolve_path(root_dir, str(cfg["input"]["sample_metadata"]))
+    organism = str(cfg["metadata"]["organism"]).strip().lower()
+    sample_id_key = str(cfg["metadata"]["sample_id_key"]).strip() or "sample_id"
+    batch_key = str(cfg["metadata"]["batch_key"]).strip() or "batch"
+    condition_key = str(cfg["metadata"]["condition_key"]).strip() or "condition"
+
+    out_adata = resolve_path(root_dir, str(cfg["output"]["adata_file"]))
+    qc_summary_file = resolve_path(root_dir, str(cfg["output"]["qc_summary_file"]))
+    sample_qc_summary_file = resolve_path(root_dir, str(cfg["output"]["sample_qc_summary_file"]))
+    cluster_counts_file = resolve_path(root_dir, str(cfg["output"]["cluster_counts_file"]))
+    figures_dir = root_dir / "results" / "figures"
+    tables_dir = root_dir / "results" / "tables"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    sc.settings.verbosity = 2
+    sc.settings.figdir = str(figures_dir)
+
+    adata = sc.read_h5ad(input_path)
+    adata.obs_names_make_unique()
+    adata.var_names_make_unique()
+
+    if "counts" not in adata.layers:
+        adata.layers["counts"] = sparse_copy(adata.X)
+
+    adata.obs[sample_id_key] = infer_sample_id(adata.obs, sample_id_key)
+    adata.obs["sample_id"] = adata.obs[sample_id_key].astype(str)
+
+    metadata_df = read_optional_metadata(sample_metadata_path)
+    if metadata_df is not None:
+        apply_sample_metadata(adata, metadata_df, sample_id_key)
+
+    for key in (batch_key, condition_key):
+        if key not in adata.obs.columns:
+            adata.obs[key] = "unknown"
+        adata.obs[key] = adata.obs[key].astype(str).fillna("unknown")
+
+    if "doublet_score" not in adata.obs.columns:
+        adata.obs["doublet_score"] = np.nan
+    if "predicted_doublet" not in adata.obs.columns:
+        adata.obs["predicted_doublet"] = False
+    adata.uns["doublet_method"] = str(cfg["qc"]["doublet_method"]).strip().lower()
+
+    annotate_qc_genes(adata, organism)
+    sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True)
+
+    qc_before = {
+        "n_cells_before": int(adata.n_obs),
+        "n_genes_before": int(adata.n_vars),
+        "median_counts_before": float(np.median(adata.obs["total_counts"])),
+        "median_genes_before": float(np.median(adata.obs["n_genes_by_counts"])),
+        "median_pct_counts_mt_before": float(np.median(adata.obs["pct_counts_mt"])),
+    }
+
+    min_genes = int(cfg["qc"]["min_genes"])
+    min_cells = int(cfg["qc"]["min_cells"])
+    min_counts = int(cfg["qc"]["min_counts"])
+    max_pct_counts_mt = float(cfg["qc"]["max_pct_counts_mt"])
+
+    adata.obs["pass_qc"] = (
+        (adata.obs["n_genes_by_counts"] >= min_genes)
+        & (adata.obs["total_counts"] >= min_counts)
+        & (adata.obs["pct_counts_mt"] <= max_pct_counts_mt)
+    )
+
+    qc_cell_df = adata.obs.loc[:, ["sample_id", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc"]].copy()
+    qc_cell_df.to_csv(tables_dir / "cell_qc_metrics.csv", index=True)
+
+    sample_summary = (
+        qc_cell_df.groupby("sample_id", dropna=False)
+        .agg(
+            n_cells=("pass_qc", "size"),
+            n_cells_pass_qc=("pass_qc", "sum"),
+            median_total_counts=("total_counts", "median"),
+            median_n_genes=("n_genes_by_counts", "median"),
+            median_pct_counts_mt=("pct_counts_mt", "median"),
+        )
+        .reset_index()
+    )
+    ensure_parent(sample_qc_summary_file)
+    sample_summary.to_csv(sample_qc_summary_file, index=False)
+
+    filtered = adata[adata.obs["pass_qc"].to_numpy()].copy()
+    sc.pp.filter_genes(filtered, min_cells=min_cells)
+    filtered.layers["counts"] = sparse_copy(filtered.layers["counts"])
+
+    if filtered.n_obs == 0:
+        raise RuntimeError("No cells passed QC thresholds; relax filtering parameters in config/project.toml")
+    if filtered.n_vars < 2:
+        raise RuntimeError("Too few genes remain after filtering; relax min_cells or upstream filtering")
+
+    sc.pp.normalize_total(filtered, target_sum=float(cfg["analysis"]["target_sum"]))
+    sc.pp.log1p(filtered)
+    sc.pp.highly_variable_genes(filtered, n_top_genes=int(cfg["analysis"]["n_top_hvgs"]), flavor="seurat")
+    sc.pp.scale(filtered, max_value=10)
+    max_pcs = max(2, min(filtered.n_obs - 1, filtered.n_vars - 1, int(cfg["analysis"]["n_pcs"])))
+    n_neighbors = max(2, min(int(cfg["analysis"]["n_neighbors"]), filtered.n_obs - 1))
+    sc.tl.pca(filtered, svd_solver="arpack")
+    sc.pp.neighbors(filtered, n_neighbors=n_neighbors, n_pcs=max_pcs)
+    sc.tl.umap(filtered)
+    sc.tl.leiden(filtered, resolution=float(cfg["analysis"]["leiden_resolution"]))
+
+    qc_after = {
+        "n_cells_after": int(filtered.n_obs),
+        "n_genes_after": int(filtered.n_vars),
+        "median_counts_after": float(np.median(filtered.obs["total_counts"])) if filtered.n_obs else math.nan,
+        "median_genes_after": float(np.median(filtered.obs["n_genes_by_counts"])) if filtered.n_obs else math.nan,
+        "median_pct_counts_mt_after": float(np.median(filtered.obs["pct_counts_mt"])) if filtered.n_obs else math.nan,
+        "n_hvgs": int(filtered.var["highly_variable"].sum()) if "highly_variable" in filtered.var.columns else 0,
+        "doublet_method": str(filtered.uns.get("doublet_method", "none")),
+    }
+
+    qc_summary = pd.DataFrame(
+        {
+            "metric": list(qc_before.keys()) + list(qc_after.keys()) + ["input_h5ad"],
+            "value": list(qc_before.values()) + list(qc_after.values()) + [str(input_path)],
+        }
+    )
+    ensure_parent(qc_summary_file)
+    qc_summary.to_csv(qc_summary_file, index=False)
+
+    cluster_counts = (
+        filtered.obs.groupby("leiden", dropna=False)
+        .size()
+        .rename("n_cells")
+        .reset_index()
+        .sort_values("n_cells", ascending=False)
+    )
+    ensure_parent(cluster_counts_file)
+    cluster_counts.to_csv(cluster_counts_file, index=False)
+
+    make_histplot(adata.obs["n_genes_by_counts"], "Genes per cell before filtering", figures_dir / "hist_n_genes_before.png")
+    make_histplot(adata.obs["pct_counts_mt"], "Mitochondrial percentage before filtering", figures_dir / "hist_pct_mt_before.png")
+
+    make_umap_plot(filtered, "leiden", figures_dir / "umap_leiden.png", "UMAP colored by Leiden cluster")
+    if batch_key in filtered.obs.columns:
+        make_umap_plot(filtered, batch_key, figures_dir / "umap_batch.png", f"UMAP colored by {batch_key}")
+    if condition_key in filtered.obs.columns:
+        make_umap_plot(filtered, condition_key, figures_dir / "umap_condition.png", f"UMAP colored by {condition_key}")
+
+    filtered.uns["prep_config"] = cfg
+    filtered.uns["input_h5ad"] = str(input_path)
+    ensure_parent(out_adata)
+    filtered.write_h5ad(out_adata)
+
+    write_json(
+        tables_dir / "run_summary.json",
+        {
+            "project_name": cfg["project"]["name"],
+            "organism": organism,
+            "batch_key": batch_key,
+            "condition_key": condition_key,
+            "output_h5ad": str(out_adata),
+        },
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,85 @@
+---
+title: "00 scRNA Preprocessing QC"
+author: "{{ ctx.params.authors }}"
+date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
+jupyter: python3
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    theme: lumen
+---
+
+```{python}
+from pathlib import Path
+import json
+import pandas as pd
+
+root = Path(".")
+qc_summary = pd.read_csv(root / "results" / "tables" / "qc_summary.csv")
+sample_qc = pd.read_csv(root / "results" / "tables" / "sample_qc_summary.csv")
+cluster_counts = pd.read_csv(root / "results" / "tables" / "cluster_counts.csv")
+run_summary = json.loads((root / "results" / "tables" / "run_summary.json").read_text())
+qc_summary
+```
+
+## Overview
+
+```{python}
+pd.DataFrame(
+    {
+        "field": ["project_name", "organism", "batch_key", "condition_key", "output_h5ad"],
+        "value": [
+            run_summary["project_name"],
+            run_summary["organism"],
+            run_summary["batch_key"],
+            run_summary["condition_key"],
+            run_summary["output_h5ad"],
+        ],
+    }
+)
+```
+
+## QC Summary
+
+```{python}
+qc_summary
+```
+
+## Sample-Level Summary
+
+```{python}
+sample_qc.sort_values(["n_cells_pass_qc", "n_cells"], ascending=False)
+```
+
+## Cluster Counts
+
+```{python}
+cluster_counts
+```
+
+## Figures
+
+### Genes per cell before filtering
+
+![](results/figures/hist_n_genes_before.png)
+
+### Mitochondrial percentage before filtering
+
+![](results/figures/hist_pct_mt_before.png)
+
+### UMAP by Leiden cluster
+
+![](results/figures/umap_leiden.png)
+
+### UMAP by batch
+
+![](results/figures/umap_batch.png)
+
+### UMAP by condition
+
+![](results/figures/umap_condition.png)
