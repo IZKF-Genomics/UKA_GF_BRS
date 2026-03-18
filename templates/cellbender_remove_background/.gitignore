@@ -1,0 +1,4 @@
+.pixi/
+.quarto/
+results/
+00_summary.html

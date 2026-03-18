@@ -1,0 +1,73 @@
+id: cellbender_remove_background
+description: "Optional CellBender ambient RNA correction for raw droplet scRNA-seq matrices."
+
+params:
+  input_raw_matrix:
+    type: str
+    cli: "--input-raw-matrix"
+    required: true
+    default: ""
+    description: "Raw 10x-style droplet matrix for CellBender, typically raw_feature_bc_matrix.h5"
+  input_format:
+    type: str
+    cli: "--input-format"
+    required: false
+    default: "10x_h5"
+    description: "Raw matrix format for CellBender: 10x_h5 or 10x_mtx"
+  expected_cells:
+    type: int
+    cli: "--expected-cells"
+    required: false
+    default: 0
+    description: "Expected number of real cells; 0 leaves this unset"
+  total_droplets_included:
+    type: int
+    cli: "--total-droplets-included"
+    required: false
+    default: 20000
+    description: "Number of droplets to include in CellBender inference"
+  epochs:
+    type: int
+    cli: "--epochs"
+    required: false
+    default: 150
+    description: "Training epochs for CellBender"
+  low_count_threshold:
+    type: int
+    cli: "--low-count-threshold"
+    required: false
+    default: 15
+    description: "Low-count threshold passed to CellBender"
+  fpr:
+    type: str
+    cli: "--fpr"
+    required: false
+    default: "0.01"
+    description: "Target false positive rate for CellBender background removal"
+  use_cuda:
+    type: bool
+    cli: "--use-cuda"
+    required: false
+    default: false
+    description: "Allow CellBender to use CUDA if available"
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+    - pixi.toml -> pixi.toml
+    - run.sh.j2 -> run.sh
+    - .gitignore -> .gitignore
+    - config/project.toml.j2 -> config/project.toml
+    - 00_summary.qmd.j2 -> 00_summary.qmd
+
+run:
+  entry: "run.sh"
+
+publish:
+  cellbender_corrected_matrix:
+    resolver: "resolvers.get_cellbender_corrected_matrix"
+
+tools:
+  required: [pixi, quarto, jupyter]
+  optional: []

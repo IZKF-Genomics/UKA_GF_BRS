@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+INPUT_RAW="{{ ctx.params.input_raw_matrix }}"
+INPUT_FORMAT="{{ ctx.params.input_format }}"
+EXPECTED_CELLS="{{ ctx.params.expected_cells }}"
+TOTAL_DROPLETS="{{ ctx.params.total_droplets_included }}"
+EPOCHS="{{ ctx.params.epochs }}"
+LOW_COUNT_THRESHOLD="{{ ctx.params.low_count_threshold }}"
+FPR="{{ ctx.params.fpr }}"
+USE_CUDA="{{ ctx.params.use_cuda | string | lower }}"
+OUTPUT_DIR="$ROOT_DIR/results/cellbender"
+OUTPUT_H5="$OUTPUT_DIR/cellbender_filtered.h5"
+
+echo "[INFO] Running cellbender_remove_background for {{ ctx.project.name if ctx.project else ctx.template.id }}"
+echo "[INFO] Root: $ROOT_DIR"
+echo "[INFO] Input: $INPUT_RAW"
+
+pixi install
+mkdir -p "$OUTPUT_DIR"
+
+if [[ "$USE_CUDA" != "true" ]]; then
+  export CUDA_VISIBLE_DEVICES=""
+fi
+
+CMD=(pixi run cellbender remove-background
+  --input "$INPUT_RAW"
+  --output "$OUTPUT_H5"
+  --fpr "$FPR"
+  --epochs "$EPOCHS"
+  --total-droplets-included "$TOTAL_DROPLETS"
+  --low-count-threshold "$LOW_COUNT_THRESHOLD"
+)
+
+if [[ "$EXPECTED_CELLS" != "0" ]]; then
+  CMD+=(--expected-cells "$EXPECTED_CELLS")
+fi
+
+if [[ "$INPUT_FORMAT" == "10x_mtx" ]]; then
+  echo "[WARN] CellBender typically expects a raw 10x HDF5 matrix; verify that your installed CellBender version supports this input."
+fi
+
+printf '[INFO] CellBender command:'
+printf ' %q' "${CMD[@]}"
+printf '\n'
+"${CMD[@]}"
+
+echo "[INFO] Rendering 00_summary.qmd"
+pixi run render
+
+echo "[INFO] Complete. Results written to $OUTPUT_DIR and 00_summary.html"

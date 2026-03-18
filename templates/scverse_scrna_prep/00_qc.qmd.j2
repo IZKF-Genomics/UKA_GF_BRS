@@ -24,17 +24,24 @@ execute:
 
 ```{python}
 from pathlib import Path
+import importlib.metadata
 import json
 import math
+import platform
+import re
+import sys
 import tomllib
 
+import igraph as ig
 import numpy as np
 import pandas as pd
-import scanpy as sc
-from scipy import sparse
 import plotly.express as px
 import plotly.graph_objects as go
+import scanpy as sc
 from plotly.subplots import make_subplots
+from scipy import sparse
+from scipy.stats import median_abs_deviation
+from sklearn.metrics import davies_bouldin_score
 
 ROOT = Path(".").resolve()
 CONFIG_PATH = ROOT / "config" / "project.toml"
@@ -66,7 +73,16 @@ STAGE_COLORS = {
     "Before filtering": "#68737d",
     "After filtering": "#0f766e",
 }
-QUALITATIVE_SEQUENCE = ["#0f766e", "#7c3aed", "#d97706", "#dc2626", "#2563eb", "#059669", "#b91c1c", "#475569"]
+QUALITATIVE_SEQUENCE = [
+    "#0f766e",
+    "#7c3aed",
+    "#d97706",
+    "#dc2626",
+    "#2563eb",
+    "#059669",
+    "#b91c1c",
+    "#475569",
+]
 
 
 def load_config(path: Path) -> dict:
@@ -83,9 +99,31 @@ def resolve_path(root: Path, value: str) -> Path:
     return p if p.is_absolute() else (root / p).resolve()
 
 
+def first_existing(*paths: Path) -> Path | None:
+    for candidate in paths:
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def detect_input_format(path: Path) -> str:
     if path.is_dir():
-        return "10x_mtx"
+        if first_existing(path / "count_matrix.mtx", path / "count_matrix.mtx.gz") and first_existing(
+            path / "all_genes.csv", path / "all_genes.csv.gz"
+        ):
+            return "parsebio"
+        if first_existing(path / "matrix.mtx", path / "matrix.mtx.gz") and first_existing(
+            path / "features.tsv", path / "features.tsv.gz"
+        ) and (
+            "scalebio" in path.as_posix().lower()
+            or "starsolo" in path.as_posix().lower()
+        ):
+            return "scalebio"
+        if first_existing(path / "matrix.mtx", path / "matrix.mtx.gz") and first_existing(
+            path / "features.tsv", path / "features.tsv.gz"
+        ):
+            return "10x_mtx"
+        return ""
     lower = path.name.lower()
     if lower.endswith(".h5ad"):
         return "h5ad"
@@ -103,6 +141,13 @@ def read_optional_metadata(path: Path) -> pd.DataFrame | None:
 
 def sparse_copy(x):
     return x.copy() if sparse.issparse(x) else np.array(x, copy=True)
+
+
+def parse_optional_float(value) -> float | None:
+    raw = str(value).strip()
+    if raw == "":
+        return None
+    return float(raw)
 
 
 def infer_sample_id(obs: pd.DataFrame, preferred_key: str) -> pd.Series:
@@ -130,7 +175,7 @@ def annotate_qc_genes(adata, organism: str) -> None:
     org = ORGANISM_ALIASES.get(organism.lower(), "")
     if org not in QC_PATTERNS:
         raise RuntimeError(
-            "metadata.organism is missing or unsupported. Set --param organism or ensure an upstream template wrote params.organism in project.yaml."
+            "metadata.organism is missing or unsupported. Set --param organism or ensure an upstream template wrote params.organism or params.genome in project.yaml."
         )
     pats = QC_PATTERNS[org]
     var_names = pd.Index(adata.var_names.astype(str))
@@ -166,6 +211,11 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def write_table(path: Path, df: pd.DataFrame) -> None:
+    ensure_parent(path)
+    df.to_csv(path, index=False)
+
+
 def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]:
     value = str(raw_value).strip()
     if value:
@@ -179,13 +229,71 @@ def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]
     return 1.0, "auto"
 
 
-def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_names: str):
-    chosen = ""
-    if str(input_matrix).strip():
-        chosen = str(input_matrix).strip()
-    elif str(input_h5ad).strip():
-        chosen = str(input_h5ad).strip()
+def parse_resolution_grid(raw: str, include_value: float) -> list[float]:
+    values: list[float] = []
+    for part in str(raw).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        values.append(float(part))
+    values.append(float(include_value))
+    return sorted({round(v, 6) for v in values})
+
+
+def read_parsebio(data_path: Path):
+    matrix_file = first_existing(data_path / "count_matrix.mtx", data_path / "count_matrix.mtx.gz")
+    genes_file = first_existing(data_path / "all_genes.csv", data_path / "all_genes.csv.gz")
+    cells_file = first_existing(data_path / "cell_metadata.csv", data_path / "cell_metadata.csv.gz")
+    if not matrix_file or not genes_file or not cells_file:
+        raise RuntimeError(f"ParseBio input directory is incomplete: {data_path}")
+
+    adata = sc.read_mtx(matrix_file)
+    gene_data = pd.read_csv(genes_file)
+    cell_meta = pd.read_csv(cells_file)
+
+    gene_data = gene_data[gene_data["gene_name"].notna()].copy()
+    adata = adata[:, gene_data.index.to_list()]
+    adata.var = gene_data
+    adata.var.set_index("gene_name", inplace=True)
+    adata.var.index.name = None
+    adata.var_names_make_unique()
+
+    adata.obs = cell_meta
+    obs_index = "bc_wells" if "bc_wells" in adata.obs.columns else adata.obs.columns[0]
+    adata.obs.set_index(obs_index, inplace=True)
+    adata.obs.index.name = None
+    adata.obs_names_make_unique()
+    return adata
+
+
+def read_scalebio(data_path: Path, var_names: str):
+    matrix_file = first_existing(data_path / "matrix.mtx", data_path / "matrix.mtx.gz")
+    features_file = first_existing(data_path / "features.tsv", data_path / "features.tsv.gz")
+    barcodes_file = first_existing(data_path / "barcodes.tsv", data_path / "barcodes.tsv.gz")
+    if not matrix_file or not features_file or not barcodes_file:
+        raise RuntimeError(f"ScaleBio input directory is incomplete: {data_path}")
+
+    adata = sc.read_mtx(matrix_file).T
+    gene_data = pd.read_table(features_file, names=["gene_id", "gene_name", "gene_type"])
+    cell_meta = pd.read_table(barcodes_file, names=["barcode"])
+    gene_data = gene_data[gene_data["gene_name"].notna()].copy()
+    adata.var = gene_data
+    if var_names == "gene_ids":
+        adata.var.set_index("gene_id", inplace=True)
     else:
+        adata.var.set_index("gene_name", inplace=True)
+    adata.var.index.name = None
+    adata.var_names_make_unique()
+    adata.obs = cell_meta
+    adata.obs.set_index("barcode", inplace=True)
+    adata.obs.index.name = None
+    adata.obs_names_make_unique()
+    return adata
+
+
+def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_names: str):
+    chosen = str(input_matrix).strip() or str(input_h5ad).strip()
+    if not chosen:
         raise RuntimeError(
             "No input matrix was provided. Set input_matrix/input_h5ad or render in a project with nfcore_scrnaseq published outputs."
         )
@@ -194,9 +302,9 @@ def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_
     fmt = str(input_format).strip().lower() or "auto"
     if fmt == "auto":
         fmt = detect_input_format(input_path)
-    if fmt not in {"h5ad", "10x_h5", "10x_mtx"}:
+    if fmt not in {"h5ad", "10x_h5", "10x_mtx", "parsebio", "scalebio"}:
         raise RuntimeError(
-            f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx."
+            f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx, parsebio, scalebio."
         )
     var_choice = str(var_names).strip() or "gene_symbols"
     if var_choice not in {"gene_symbols", "gene_ids"}:
@@ -206,14 +314,18 @@ def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_
         adata = sc.read_h5ad(input_path)
     elif fmt == "10x_h5":
         adata = sc.read_10x_h5(input_path)
-    else:
+    elif fmt == "10x_mtx":
         adata = sc.read_10x_mtx(input_path, var_names=var_choice, make_unique=True)
+    elif fmt == "parsebio":
+        adata = read_parsebio(input_path)
+    else:
+        adata = read_scalebio(input_path, var_choice)
 
     return adata, input_path, fmt
 
 
 def metric_summary(df: pd.DataFrame, stage: str, metric: str) -> dict[str, float | str]:
-    series = df[metric].dropna()
+    series = pd.to_numeric(df[metric], errors="coerce").dropna()
     q1 = float(series.quantile(0.25)) if not series.empty else math.nan
     q3 = float(series.quantile(0.75)) if not series.empty else math.nan
     return {
@@ -228,8 +340,58 @@ def metric_summary(df: pd.DataFrame, stage: str, metric: str) -> dict[str, float
     }
 
 
+def compute_outliers(series: pd.Series, nmads: float, *, max_only: bool = False, log_transform: bool = False) -> pd.Series:
+    values = pd.to_numeric(series, errors="coerce")
+    valid = values.dropna()
+    if valid.size < 10:
+        return pd.Series(False, index=series.index)
+
+    transformed = np.log1p(valid) if log_transform else valid
+    med = float(np.median(transformed))
+    mad = float(median_abs_deviation(transformed, nan_policy="omit"))
+    if mad == 0 or math.isnan(mad):
+        return pd.Series(False, index=series.index)
+
+    lower = med - nmads * mad
+    upper = med + nmads * mad
+    transformed_all = np.log1p(values) if log_transform else values
+    if max_only:
+        flags = transformed_all > upper
+    else:
+        flags = (transformed_all < lower) | (transformed_all > upper)
+    return flags.fillna(False)
+
+
+def run_mad_qc(obs: pd.DataFrame, nmads: float) -> tuple[pd.DataFrame, list[str]]:
+    metrics = [
+        ("total_counts", False, True),
+        ("n_genes_by_counts", False, True),
+        ("pct_counts_mt", True, False),
+    ]
+    for extra in ("pct_counts_ribo", "pct_counts_hb", "doublet_score"):
+        if extra in obs.columns and pd.to_numeric(obs[extra], errors="coerce").notna().any():
+            metrics.append((extra, True, False))
+
+    parts = []
+    for _, group in obs.groupby("sample_id", dropna=False):
+        group = group.copy()
+        for metric, max_only, log_transform in metrics:
+            group[f"{metric}_mad_outlier"] = compute_outliers(
+                group[metric],
+                nmads=nmads,
+                max_only=max_only,
+                log_transform=log_transform,
+            )
+        parts.append(group)
+
+    out = pd.concat(parts).sort_index()
+    flag_cols = [f"{metric}_mad_outlier" for metric, _, _ in metrics]
+    out["pass_qc_mad"] = ~out[flag_cols].any(axis=1)
+    return out, flag_cols
+
+
 def compare_metric_figure(long_df: pd.DataFrame, metric: str, label: str) -> go.Figure:
-    plot_df = long_df[["stage", metric, "sample_id"]].dropna().copy()
+    plot_df = long_df[["stage", metric]].dropna().copy()
     plot_df["stage"] = pd.Categorical(plot_df["stage"], categories=STAGE_ORDER, ordered=True)
     fig = make_subplots(
         rows=1,
@@ -312,28 +474,19 @@ def compare_sample_metric(sample_compare_df: pd.DataFrame, metric: str, label: s
     return fig
 
 
-def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
-    coords = adata.obsm["X_umap"]
-    emb = pd.DataFrame(coords, columns=["UMAP1", "UMAP2"], index=adata.obs_names)
+def embedding_plot(adata, basis: str, color_key: str, title: str) -> go.Figure:
+    coords = adata.obsm[basis]
+    x_name, y_name = ("UMAP1", "UMAP2") if basis == "X_umap" else ("PC1", "PC2")
+    emb = pd.DataFrame(coords[:, :2], columns=[x_name, y_name], index=adata.obs_names)
     emb = emb.join(adata.obs[[color_key, "sample_id", "sample_display"]], how="left")
     emb[color_key] = emb[color_key].astype(str)
-    emb["hover"] = (
-        "cell="
-        + emb.index.astype(str)
-        + "<br>sample="
-        + emb["sample_display"].astype(str)
-        + "<br>sample_id="
-        + emb["sample_id"].astype(str)
-        + f"<br>{color_key}="
-        + emb[color_key].astype(str)
-    )
     fig = px.scatter(
         emb,
-        x="UMAP1",
-        y="UMAP2",
+        x=x_name,
+        y=y_name,
         color=color_key,
         hover_name="sample_display",
-        hover_data={"UMAP1": ":.3f", "UMAP2": ":.3f", color_key: True, "sample_display": False, "sample_id": True},
+        hover_data={x_name: ":.3f", y_name: ":.3f", color_key: True, "sample_display": False, "sample_id": True},
         template="simple_white",
         title=title,
         opacity=0.8,
@@ -344,26 +497,111 @@ def embedding_plot(adata, color_key: str, title: str) -> go.Figure:
     return fig
 
 
-def pca_plot(adata, color_key: str, title: str) -> go.Figure:
-    coords = adata.obsm["X_pca"][:, :2]
-    emb = pd.DataFrame(coords, columns=["PC1", "PC2"], index=adata.obs_names)
-    emb = emb.join(adata.obs[[color_key, "sample_id", "sample_display"]], how="left")
-    emb[color_key] = emb[color_key].astype(str)
+def confounder_scatter(long_df: pd.DataFrame, x: str, y: str, color_key: str, title: str) -> go.Figure:
+    plot_df = long_df[[x, y, "stage", "sample_display", "sample_id", color_key]].copy()
+    plot_df[color_key] = plot_df[color_key].astype(str)
     fig = px.scatter(
-        emb,
-        x="PC1",
-        y="PC2",
+        plot_df,
+        x=x,
+        y=y,
         color=color_key,
+        facet_col="stage",
+        category_orders={"stage": STAGE_ORDER},
         hover_name="sample_display",
-        hover_data={"PC1": ":.3f", "PC2": ":.3f", color_key: True, "sample_display": False, "sample_id": True},
+        hover_data={"sample_id": True, x: ":.3f", y: ":.3f", color_key: True},
+        template="simple_white",
+        opacity=0.45,
+        color_discrete_sequence=QUALITATIVE_SEQUENCE,
+        title=title,
+    )
+    fig.update_layout(height=460, font=dict(size=14), legend=dict(orientation="h"))
+    return fig
+
+
+def resolution_diagnostics_plot(df: pd.DataFrame) -> go.Figure:
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=("Modularity", "Davies-Bouldin score"),
+        horizontal_spacing=0.12,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["resolution"],
+            y=df["modularity"],
+            mode="lines+markers+text",
+            text=df["n_clusters"],
+            textposition="top center",
+            name="Modularity",
+            marker=dict(color="#0f766e", size=9),
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["resolution"],
+            y=df["davies_bouldin_score"],
+            mode="lines+markers+text",
+            text=df["n_clusters"],
+            textposition="top center",
+            name="Davies-Bouldin",
+            marker=dict(color="#d97706", size=9),
+        ),
+        row=1,
+        col=2,
+    )
+    chosen = df[df["selected_resolution"]]
+    for _, row in chosen.iterrows():
+        fig.add_vline(x=row["resolution"], line_dash="dash", line_color="#dc2626", row=1, col=1)
+        fig.add_vline(x=row["resolution"], line_dash="dash", line_color="#dc2626", row=1, col=2)
+    fig.update_layout(
+        template="simple_white",
+        height=420,
+        title="Clustering resolution diagnostics",
+        font=dict(size=14),
+        margin=dict(l=40, r=30, t=80, b=40),
+        showlegend=False,
+    )
+    fig.update_xaxes(title_text="Resolution", row=1, col=1)
+    fig.update_xaxes(title_text="Resolution", row=1, col=2)
+    fig.update_yaxes(title_text="Modularity", row=1, col=1)
+    fig.update_yaxes(title_text="Davies-Bouldin score", row=1, col=2)
+    return fig
+
+
+def composition_heatmap(df: pd.DataFrame, title: str) -> go.Figure:
+    fig = px.imshow(
+        df,
+        aspect="auto",
+        color_continuous_scale="Tealgrn",
+        text_auto=".2f",
         template="simple_white",
         title=title,
-        opacity=0.8,
-        color_discrete_sequence=QUALITATIVE_SEQUENCE,
     )
-    fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
-    fig.update_layout(height=560, font=dict(size=14), legend=dict(orientation="h"))
+    fig.update_layout(height=max(420, 50 + 28 * df.shape[0]), font=dict(size=13), margin=dict(l=40, r=30, t=80, b=40))
+    fig.update_xaxes(title_text="Cluster")
+    fig.update_yaxes(title_text="")
     return fig
+
+
+def build_igraph_from_connectivities(connectivities) -> ig.Graph:
+    coo = sparse.triu(connectivities, k=1).tocoo()
+    edges = list(zip(coo.row.tolist(), coo.col.tolist()))
+    graph = ig.Graph(n=connectivities.shape[0], edges=edges, directed=False)
+    graph.es["weight"] = coo.data.astype(float).tolist()
+    return graph
+
+
+def package_versions_table(packages: list[str]) -> pd.DataFrame:
+    rows = []
+    for package in packages:
+        try:
+            version = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            version = "not installed"
+        rows.append({"package": package, "version": version})
+    return pd.DataFrame(rows)
 
 
 def format_table(df: pd.DataFrame, digits: int = 3):
@@ -396,9 +634,9 @@ def format_table(df: pd.DataFrame, digits: int = 3):
         if pd.api.types.is_integer_dtype(series):
             formatters[col] = _fmt_int
         elif pd.api.types.is_float_dtype(series):
-            if "fraction" in lower or lower.startswith("pct_") or lower.endswith("_pct"):
+            if "fraction" in lower:
                 formatters[col] = _fmt_fraction
-            elif "n_" in lower or lower.endswith("_count") or lower.endswith("_counts") or lower.endswith("_cells") or lower.endswith("_genes"):
+            elif lower.startswith("n_") or lower.endswith("_count") or lower.endswith("_counts") or lower.endswith("_cells") or lower.endswith("_genes"):
                 formatters[col] = _fmt_int
             else:
                 formatters[col] = _fmt_float
@@ -425,17 +663,26 @@ cfg
 
 ## Load Inputs
 
+This section resolves the input matrix, sample metadata scaffold, and the core
+metadata keys used throughout the report. Reviewing this block first makes it
+clear which matrix format was loaded and which annotation columns will drive the
+QC summaries and embedding views.
+
 ```{python}
 input_h5ad = str(cfg["input"].get("input_h5ad", "")).strip()
 input_matrix = str(cfg["input"].get("input_matrix", "")).strip()
+input_source_template = str(cfg["input"].get("input_source_template", "manual")).strip() or "manual"
+ambient_correction_applied = bool(cfg["input"].get("ambient_correction_applied", False))
+ambient_correction_method = str(cfg["input"].get("ambient_correction_method", "none")).strip() or "none"
 input_format = str(cfg["input"].get("input_format", "auto")).strip().lower() or "auto"
 var_names = str(cfg["input"].get("var_names", "gene_symbols")).strip() or "gene_symbols"
 adata, input_path, resolved_input_format = load_input_adata(input_h5ad, input_matrix, input_format, var_names)
+
 sample_metadata_path = resolve_path(ROOT, str(cfg["input"]["sample_metadata"]))
 organism = str(cfg["metadata"]["organism"]).strip().lower()
 if not organism:
     raise RuntimeError(
-        "config metadata.organism is empty; set --param organism or render in a project with an upstream params.organism value"
+        "config metadata.organism is empty; set --param organism or render in a project with an upstream params.organism or params.genome value"
     )
 sample_id_key = str(cfg["metadata"]["sample_id_key"]).strip() or "sample_id"
 batch_key = str(cfg["metadata"]["batch_key"]).strip() or "batch"
@@ -449,7 +696,6 @@ tables_dir = ROOT / "results" / "tables"
 tables_dir.mkdir(parents=True, exist_ok=True)
 
 sc.settings.verbosity = 2
-
 adata.obs_names_make_unique()
 adata.var_names_make_unique()
 
@@ -464,37 +710,73 @@ if metadata_df is not None:
     apply_sample_metadata(adata, metadata_df, sample_id_key)
 
 adata.obs["sample_display"] = display_sample_label(adata.obs)
-
 for key in (batch_key, condition_key):
     if key not in adata.obs.columns:
         adata.obs[key] = "unknown"
     adata.obs[key] = adata.obs[key].astype(str).fillna("unknown")
 
-if "doublet_score" not in adata.obs.columns:
-    adata.obs["doublet_score"] = np.nan
-if "predicted_doublet" not in adata.obs.columns:
-    adata.obs["predicted_doublet"] = False
-adata.uns["doublet_method"] = str(cfg["qc"]["doublet_method"]).strip().lower()
-
 adata
 ```
 
-## QC Metrics
+## QC Metrics And Filtering Decisions
+
+This section computes the QC metrics used later in the report and records the
+exact filtering decision path. The template now exposes three layers of QC
+decision making:
+
+- fixed thresholds, which provide a stable baseline
+- optional per-sample MAD outlier detection, which is useful for heterogeneous cohorts
+- optional Scrublet doublet scoring, which can be used diagnostically or as an active filter
+
+Together these tables make the filtering logic explicit and auditable.
 
 ```{python}
 annotate_qc_genes(adata, organism)
 sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], inplace=True)
 
+doublet_method = str(cfg["qc"]["doublet_method"]).strip().lower()
+filter_predicted_doublets = bool(cfg["qc"]["filter_predicted_doublets"])
+qc_mode = str(cfg["qc"]["qc_mode"]).strip().lower() or "fixed"
+qc_nmads = float(cfg["qc"]["qc_nmads"])
+
+if doublet_method == "scrublet":
+    sc.pp.scrublet(adata, batch_key="sample_id")
+elif doublet_method not in {"", "none"}:
+    raise RuntimeError("qc.doublet_method must be 'none' or 'scrublet'")
+
+if "doublet_score" not in adata.obs.columns:
+    adata.obs["doublet_score"] = np.nan
+if "predicted_doublet" not in adata.obs.columns:
+    adata.obs["predicted_doublet"] = False
+
 min_genes = int(cfg["qc"]["min_genes"])
 min_cells = int(cfg["qc"]["min_cells"])
 min_counts = int(cfg["qc"]["min_counts"])
 max_pct_counts_mt = float(cfg["qc"]["max_pct_counts_mt"])
+max_pct_counts_ribo = parse_optional_float(cfg["qc"]["max_pct_counts_ribo"])
+max_pct_counts_hb = parse_optional_float(cfg["qc"]["max_pct_counts_hb"])
 
-adata.obs["pass_qc"] = (
+adata.obs["pass_qc_fixed"] = (
     (adata.obs["n_genes_by_counts"] >= min_genes)
     & (adata.obs["total_counts"] >= min_counts)
     & (adata.obs["pct_counts_mt"] <= max_pct_counts_mt)
 )
+if max_pct_counts_ribo is not None:
+    adata.obs["pass_qc_fixed"] = adata.obs["pass_qc_fixed"] & (adata.obs["pct_counts_ribo"] <= max_pct_counts_ribo)
+if max_pct_counts_hb is not None:
+    adata.obs["pass_qc_fixed"] = adata.obs["pass_qc_fixed"] & (adata.obs["pct_counts_hb"] <= max_pct_counts_hb)
+
+mad_flag_cols: list[str] = []
+if qc_mode == "mad_per_sample":
+    adata.obs, mad_flag_cols = run_mad_qc(adata.obs.copy(), qc_nmads)
+elif qc_mode == "fixed":
+    adata.obs["pass_qc_mad"] = True
+else:
+    raise RuntimeError("qc.qc_mode must be 'fixed' or 'mad_per_sample'")
+
+adata.obs["pass_qc"] = adata.obs["pass_qc_fixed"] & adata.obs["pass_qc_mad"]
+if filter_predicted_doublets:
+    adata.obs["pass_qc"] = adata.obs["pass_qc"] & (~adata.obs["predicted_doublet"].fillna(False))
 
 before_obs = adata.obs.copy()
 before_obs["stage"] = "Before filtering"
@@ -505,31 +787,58 @@ qc_before = {
     "median_counts_before": float(np.median(before_obs["total_counts"])),
     "median_genes_before": float(np.median(before_obs["n_genes_by_counts"])),
     "median_pct_counts_mt_before": float(np.median(before_obs["pct_counts_mt"])),
+    "median_pct_counts_ribo_before": float(np.median(before_obs["pct_counts_ribo"])),
+    "median_pct_counts_hb_before": float(np.median(before_obs["pct_counts_hb"])),
 }
 
-qc_cell_df = before_obs.loc[
-    :,
-    ["sample_id", "sample_display", batch_key, condition_key, "total_counts", "n_genes_by_counts", "pct_counts_mt", "pass_qc", "stage"],
-].copy()
-qc_cell_df.to_csv(tables_dir / "cell_qc_metrics.csv", index=True)
+qc_metric_columns = [
+    "sample_id",
+    "sample_display",
+    batch_key,
+    condition_key,
+    "total_counts",
+    "n_genes_by_counts",
+    "pct_counts_mt",
+    "pct_counts_ribo",
+    "pct_counts_hb",
+    "doublet_score",
+    "predicted_doublet",
+    "pass_qc_fixed",
+    "pass_qc_mad",
+    "pass_qc",
+    "stage",
+]
+for col in mad_flag_cols:
+    qc_metric_columns.append(col)
+
+qc_cell_df = before_obs.loc[:, qc_metric_columns].copy()
+write_table(tables_dir / "cell_qc_metrics.csv", qc_cell_df.reset_index(names="cell_id"))
 
 before_sample_qc = (
     before_obs.groupby(["sample_id", "sample_display"], dropna=False)
     .agg(
         n_cells=("pass_qc", "size"),
         n_cells_pass_qc=("pass_qc", "sum"),
+        n_doublets=("predicted_doublet", "sum"),
         median_total_counts=("total_counts", "median"),
         median_n_genes=("n_genes_by_counts", "median"),
         median_pct_counts_mt=("pct_counts_mt", "median"),
+        median_pct_counts_ribo=("pct_counts_ribo", "median"),
+        median_pct_counts_hb=("pct_counts_hb", "median"),
     )
     .reset_index()
 )
 before_sample_qc["retained_fraction"] = before_sample_qc["n_cells_pass_qc"] / before_sample_qc["n_cells"]
-
-before_sample_qc.head()
+before_sample_qc
 ```
 
-## Filtering and Clustering
+## Filtering And Clustering
+
+This section applies the QC decisions to create the retained object, then runs
+the standard Scanpy preprocessing steps used downstream. The final Leiden result
+is still chosen by the same simple heuristic or manual override as before, but
+the report now also benchmarks multiple resolutions so the chosen value can be
+reviewed instead of taken on faith.
 
 ```{python}
 filtered = adata[adata.obs["pass_qc"].to_numpy()].copy()
@@ -538,6 +847,8 @@ filtered.layers["counts"] = sparse_copy(filtered.layers["counts"])
 
 if filtered.n_obs == 0:
     raise RuntimeError("No cells passed QC thresholds; relax filtering parameters in config/project.toml")
+if filtered.n_obs < 3:
+    raise RuntimeError("Too few cells remain after filtering for PCA/neighbors/UMAP; relax QC thresholds or use a larger input.")
 if filtered.n_vars < 2:
     raise RuntimeError("Too few genes remain after filtering; relax min_cells or upstream filtering")
 
@@ -545,13 +856,14 @@ resolved_leiden_resolution, leiden_resolution_source = resolve_leiden_resolution
     str(cfg["analysis"].get("leiden_resolution", "")),
     filtered.n_obs,
 )
+resolution_grid = parse_resolution_grid(str(cfg["analysis"].get("resolution_grid", "")), resolved_leiden_resolution)
 
 sc.pp.normalize_total(filtered, target_sum=float(cfg["analysis"]["target_sum"]))
 sc.pp.log1p(filtered)
 sc.pp.highly_variable_genes(filtered, n_top_genes=int(cfg["analysis"]["n_top_hvgs"]), flavor="seurat")
 sc.pp.scale(filtered, max_value=10)
-max_pcs = max(2, min(filtered.n_obs - 1, filtered.n_vars - 1, int(cfg["analysis"]["n_pcs"])))
-n_neighbors = max(2, min(int(cfg["analysis"]["n_neighbors"]), filtered.n_obs - 1))
+max_pcs = min(filtered.n_obs - 1, filtered.n_vars - 1, int(cfg["analysis"]["n_pcs"]))
+n_neighbors = min(int(cfg["analysis"]["n_neighbors"]), filtered.n_obs - 1)
 sc.tl.pca(filtered, svd_solver="arpack")
 sc.pp.neighbors(filtered, n_neighbors=n_neighbors, n_pcs=max_pcs)
 sc.tl.umap(filtered)
@@ -560,6 +872,36 @@ sc.tl.leiden(filtered, resolution=resolved_leiden_resolution)
 after_obs = filtered.obs.copy()
 after_obs["stage"] = "After filtering"
 
+graph = build_igraph_from_connectivities(filtered.obsp["connectivities"])
+pca_for_score = filtered.obsm["X_pca"][:, : min(10, filtered.obsm["X_pca"].shape[1])]
+
+resolution_rows = []
+for resolution in resolution_grid:
+    key = f"leiden_res_{str(resolution).replace('.', '_')}"
+    if math.isclose(resolution, resolved_leiden_resolution):
+        filtered.obs[key] = filtered.obs["leiden"].astype(str)
+    else:
+        sc.tl.leiden(filtered, resolution=float(resolution), key_added=key)
+
+    labels = filtered.obs[key].astype(str)
+    codes = pd.Categorical(labels).codes.astype(int)
+    n_clusters = int(labels.nunique())
+    modularity = graph.modularity(codes.tolist(), weights="weight") if n_clusters > 1 else math.nan
+    if n_clusters > 1 and pca_for_score.shape[0] > n_clusters:
+        db_score = float(davies_bouldin_score(pca_for_score, codes))
+    else:
+        db_score = math.nan
+    resolution_rows.append(
+        {
+            "resolution": float(resolution),
+            "n_clusters": n_clusters,
+            "modularity": modularity,
+            "davies_bouldin_score": db_score,
+            "selected_resolution": math.isclose(resolution, resolved_leiden_resolution),
+        }
+    )
+
+resolution_diagnostics_df = pd.DataFrame(resolution_rows).sort_values("resolution").reset_index(drop=True)
 cluster_counts = (
     after_obs.groupby("leiden", dropna=False)
     .size()
@@ -567,8 +909,7 @@ cluster_counts = (
     .reset_index()
     .sort_values("n_cells", ascending=False)
 )
-ensure_parent(cluster_counts_file)
-cluster_counts.to_csv(cluster_counts_file, index=False)
+write_table(cluster_counts_file, cluster_counts)
 
 cluster_counts
 ```
@@ -582,32 +923,36 @@ qc_after = {
     "median_counts_after": float(np.median(after_obs["total_counts"])) if filtered.n_obs else math.nan,
     "median_genes_after": float(np.median(after_obs["n_genes_by_counts"])) if filtered.n_obs else math.nan,
     "median_pct_counts_mt_after": float(np.median(after_obs["pct_counts_mt"])) if filtered.n_obs else math.nan,
+    "median_pct_counts_ribo_after": float(np.median(after_obs["pct_counts_ribo"])) if filtered.n_obs else math.nan,
+    "median_pct_counts_hb_after": float(np.median(after_obs["pct_counts_hb"])) if filtered.n_obs else math.nan,
     "n_hvgs": int(filtered.var["highly_variable"].sum()) if "highly_variable" in filtered.var.columns else 0,
-    "doublet_method": str(filtered.uns.get("doublet_method", "none")),
+    "doublet_method": doublet_method,
+    "filter_predicted_doublets": filter_predicted_doublets,
+    "qc_mode": qc_mode,
+    "qc_nmads": qc_nmads,
     "leiden_resolution": resolved_leiden_resolution,
     "leiden_resolution_source": leiden_resolution_source,
 }
 
 qc_summary = pd.DataFrame(
     {
-        "metric": list(qc_before.keys()) + list(qc_after.keys()) + ["input_h5ad"],
+        "metric": list(qc_before.keys()) + list(qc_after.keys()) + ["input_path"],
         "value": list(qc_before.values()) + list(qc_after.values()) + [str(input_path)],
     }
 )
-ensure_parent(qc_summary_file)
-qc_summary.to_csv(qc_summary_file, index=False)
+write_table(qc_summary_file, qc_summary)
+
+metric_names = ["total_counts", "n_genes_by_counts", "pct_counts_mt", "pct_counts_ribo", "pct_counts_hb"]
+if pd.to_numeric(before_obs["doublet_score"], errors="coerce").notna().any():
+    metric_names.append("doublet_score")
 
 before_after_stats = pd.DataFrame(
-    [metric_summary(before_obs, "Before filtering", "total_counts"),
-     metric_summary(after_obs, "After filtering", "total_counts"),
-     metric_summary(before_obs, "Before filtering", "n_genes_by_counts"),
-     metric_summary(after_obs, "After filtering", "n_genes_by_counts"),
-     metric_summary(before_obs, "Before filtering", "pct_counts_mt"),
-     metric_summary(after_obs, "After filtering", "pct_counts_mt")]
+    [metric_summary(before_obs, "Before filtering", metric) for metric in metric_names]
+    + [metric_summary(after_obs, "After filtering", metric) for metric in metric_names]
 )
 
 comparison_rows = []
-for metric in ["total_counts", "n_genes_by_counts", "pct_counts_mt"]:
+for metric in metric_names:
     b = before_after_stats[(before_after_stats["metric"] == metric) & (before_after_stats["stage"] == "Before filtering")].iloc[0]
     a = before_after_stats[(before_after_stats["metric"] == metric) & (before_after_stats["stage"] == "After filtering")].iloc[0]
     comparison_rows.append(
@@ -621,6 +966,7 @@ for metric in ["total_counts", "n_genes_by_counts", "pct_counts_mt"]:
             "iqr_change": a["iqr"] - b["iqr"],
         }
     )
+
 filter_effect_df = pd.DataFrame(
     [
         {
@@ -631,6 +977,10 @@ filter_effect_df = pd.DataFrame(
             "genes_before": int(adata.n_vars),
             "genes_after": int(filtered.n_vars),
             "genes_removed": int(adata.n_vars - filtered.n_vars),
+            "fixed_qc_failures": int((~before_obs["pass_qc_fixed"]).sum()),
+            "mad_qc_failures": int((~before_obs["pass_qc_mad"]).sum()),
+            "predicted_doublets": int(before_obs["predicted_doublet"].fillna(False).sum()),
+            "doublets_removed": int(before_obs["predicted_doublet"].fillna(False).sum()) if filter_predicted_doublets else 0,
             "leiden_resolution": resolved_leiden_resolution,
             "leiden_resolution_source": leiden_resolution_source,
         }
@@ -644,6 +994,8 @@ sample_after_qc = (
         median_total_counts_after=("total_counts", "median"),
         median_n_genes_after=("n_genes_by_counts", "median"),
         median_pct_counts_mt_after=("pct_counts_mt", "median"),
+        median_pct_counts_ribo_after=("pct_counts_ribo", "median"),
+        median_pct_counts_hb_after=("pct_counts_hb", "median"),
     )
     .reset_index()
 )
@@ -652,17 +1004,56 @@ sample_compare_df = before_sample_qc.merge(sample_after_qc, on=["sample_id", "sa
 sample_compare_df["n_cells_after"] = sample_compare_df["n_cells_after"].fillna(0).astype(int)
 sample_compare_df["retained_fraction_after"] = sample_compare_df["n_cells_after"] / sample_compare_df["n_cells"]
 sample_compare_df["removed_cells"] = sample_compare_df["n_cells"] - sample_compare_df["n_cells_after"]
-ensure_parent(sample_qc_summary_file)
-sample_compare_df.to_csv(sample_qc_summary_file, index=False)
+write_table(sample_qc_summary_file, sample_compare_df)
 
-before_after_stats.to_csv(tables_dir / "qc_metric_stage_summary.csv", index=False)
-pd.DataFrame(comparison_rows).to_csv(tables_dir / "qc_metric_before_after.csv", index=False)
-filter_effect_df.to_csv(tables_dir / "filter_effect_summary.csv", index=False)
+sample_compare_long = pd.concat(
+    [
+        before_sample_qc.assign(
+            stage="Before filtering",
+            n_cells_stage=before_sample_qc["n_cells"],
+            median_total_counts_stage=before_sample_qc["median_total_counts"],
+            median_n_genes_stage=before_sample_qc["median_n_genes"],
+            median_pct_counts_mt_stage=before_sample_qc["median_pct_counts_mt"],
+            median_pct_counts_ribo_stage=before_sample_qc["median_pct_counts_ribo"],
+            median_pct_counts_hb_stage=before_sample_qc["median_pct_counts_hb"],
+        ),
+        sample_compare_df.assign(
+            stage="After filtering",
+            n_cells_stage=sample_compare_df["n_cells_after"],
+            median_total_counts_stage=sample_compare_df["median_total_counts_after"],
+            median_n_genes_stage=sample_compare_df["median_n_genes_after"],
+            median_pct_counts_mt_stage=sample_compare_df["median_pct_counts_mt_after"],
+            median_pct_counts_ribo_stage=sample_compare_df["median_pct_counts_ribo_after"],
+            median_pct_counts_hb_stage=sample_compare_df["median_pct_counts_hb_after"],
+        ),
+    ],
+    ignore_index=True,
+)
+
+cluster_by_sample_counts = pd.crosstab(filtered.obs["sample_display"], filtered.obs["leiden"])
+cluster_by_sample_fraction = cluster_by_sample_counts.div(cluster_by_sample_counts.sum(axis=1).replace(0, np.nan), axis=0)
+cluster_by_condition_counts = pd.crosstab(filtered.obs[condition_key], filtered.obs["leiden"])
+cluster_by_condition_fraction = cluster_by_condition_counts.div(
+    cluster_by_condition_counts.sum(axis=1).replace(0, np.nan), axis=0
+)
+
+write_table(tables_dir / "qc_metric_stage_summary.csv", before_after_stats)
+write_table(tables_dir / "qc_metric_before_after.csv", pd.DataFrame(comparison_rows))
+write_table(tables_dir / "filter_effect_summary.csv", filter_effect_df)
+write_table(tables_dir / "cluster_resolution_diagnostics.csv", resolution_diagnostics_df)
+write_table(tables_dir / "cluster_by_sample_counts.csv", cluster_by_sample_counts.reset_index(names="sample_display"))
+write_table(tables_dir / "cluster_by_sample_fraction.csv", cluster_by_sample_fraction.reset_index(names="sample_display"))
+write_table(tables_dir / "cluster_by_condition_counts.csv", cluster_by_condition_counts.reset_index(names=condition_key))
+write_table(tables_dir / "cluster_by_condition_fraction.csv", cluster_by_condition_fraction.reset_index(names=condition_key))
 
 filtered.uns["prep_config"] = cfg
 filtered.uns["input_h5ad"] = str(input_path)
+filtered.uns["input_source_template"] = input_source_template
+filtered.uns["ambient_correction_applied"] = ambient_correction_applied
+filtered.uns["ambient_correction_method"] = ambient_correction_method
 filtered.uns["resolved_leiden_resolution"] = resolved_leiden_resolution
 filtered.uns["resolved_leiden_resolution_source"] = leiden_resolution_source
+filtered.uns["resolution_diagnostics"] = resolution_rows
 ensure_parent(out_adata)
 filtered.write_h5ad(out_adata)
 
@@ -670,9 +1061,16 @@ run_summary = {
     "project_name": cfg["project"]["name"],
     "organism": organism,
     "input_format": resolved_input_format,
+    "input_source_template": input_source_template,
+    "ambient_correction_applied": ambient_correction_applied,
+    "ambient_correction_method": ambient_correction_method,
     "var_names": var_names,
     "batch_key": batch_key,
     "condition_key": condition_key,
+    "doublet_method": doublet_method,
+    "filter_predicted_doublets": filter_predicted_doublets,
+    "qc_mode": qc_mode,
+    "qc_nmads": qc_nmads,
     "leiden_resolution": resolved_leiden_resolution,
     "leiden_resolution_source": leiden_resolution_source,
     "output_h5ad": str(out_adata),
@@ -689,52 +1087,96 @@ long_qc_df = pd.concat(
 ).reset_index(names="cell_id")
 long_qc_df["stage"] = pd.Categorical(long_qc_df["stage"], categories=STAGE_ORDER, ordered=True)
 
-sample_compare_long = pd.concat(
+session_info_df = pd.concat(
     [
-        before_sample_qc.assign(stage="Before filtering", n_cells_stage=before_sample_qc["n_cells"], median_total_counts_stage=before_sample_qc["median_total_counts"], median_n_genes_stage=before_sample_qc["median_n_genes"], median_pct_counts_mt_stage=before_sample_qc["median_pct_counts_mt"]),
-        sample_compare_df.assign(stage="After filtering", n_cells_stage=sample_compare_df["n_cells_after"], median_total_counts_stage=sample_compare_df["median_total_counts_after"], median_n_genes_stage=sample_compare_df["median_n_genes_after"], median_pct_counts_mt_stage=sample_compare_df["median_pct_counts_mt_after"]),
+        pd.DataFrame(
+            [
+                {"package": "python", "version": platform.python_version()},
+                {"package": "platform", "version": platform.platform()},
+            ]
+        ),
+        package_versions_table(
+            [
+                "scanpy",
+                "anndata",
+                "numpy",
+                "pandas",
+                "scipy",
+                "plotly",
+                "scikit-learn",
+                "igraph",
+                "leidenalg",
+                "scrublet",
+                "quarto",
+            ]
+        ),
     ],
     ignore_index=True,
 )
+write_table(tables_dir / "session_info.csv", session_info_df)
 
 qc_summary
 ```
 
 ## Overview
 
-This section summarizes the key analysis settings and the main processed output.
-Use it to confirm that the expected organism, input format, clustering settings,
-and output object were used for this run before interpreting downstream figures.
+This section summarizes the core run settings and the main output object. It is
+the fastest place to confirm that the report reflects the expected input format,
+organism, QC mode, and final clustering choice before inspecting the detailed
+plots.
 
 ```{python}
-pd.DataFrame(
-    {
-        "field": ["project_name", "organism", "input_format", "var_names", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
-        "value": [
-            run_summary["project_name"],
-            run_summary["organism"],
-            run_summary["input_format"],
-            run_summary["var_names"],
-            run_summary["batch_key"],
-            run_summary["condition_key"],
-            run_summary["leiden_resolution"],
-            run_summary["leiden_resolution_source"],
-            run_summary["output_h5ad"],
-        ],
-    }
+format_table(
+    pd.DataFrame(
+        {
+            "field": [
+                "project_name",
+                "organism",
+                "input_format",
+                "input_source_template",
+                "ambient_correction_applied",
+                "ambient_correction_method",
+                "var_names",
+                "batch_key",
+                "condition_key",
+                "doublet_method",
+                "filter_predicted_doublets",
+                "qc_mode",
+                "qc_nmads",
+                "leiden_resolution",
+                "leiden_resolution_source",
+                "output_h5ad",
+            ],
+            "value": [
+                run_summary["project_name"],
+                run_summary["organism"],
+                run_summary["input_format"],
+                run_summary["input_source_template"],
+                run_summary["ambient_correction_applied"],
+                run_summary["ambient_correction_method"],
+                run_summary["var_names"],
+                run_summary["batch_key"],
+                run_summary["condition_key"],
+                run_summary["doublet_method"],
+                run_summary["filter_predicted_doublets"],
+                run_summary["qc_mode"],
+                run_summary["qc_nmads"],
+                run_summary["leiden_resolution"],
+                run_summary["leiden_resolution_source"],
+                run_summary["output_h5ad"],
+            ],
+        }
+    )
 )
 ```
 
 ## Filtering Effect Summary
 
-This section quantifies the impact of QC filtering on the dataset. The first table
-summarizes how many cells and genes were retained, while the second table shows
-how core QC metrics shifted from the unfiltered to the filtered object.
-
-In general:
-- a moderate drop in cell count is expected after removing low-quality droplets
-- mitochondrial percentage should often decrease after filtering
-- retained cell fractions that are very low should prompt threshold review
+These tables quantify what the filtering step removed and why. The first table
+captures the global effect on cells and genes, and the second shows how the main
+QC distributions shifted after filtering. Very low retained fractions, very high
+doublet burden, or strong median shifts should trigger a closer review of the
+threshold settings and sample-level diagnostics below.
 
 ```{python}
 format_table(filter_effect_df)
@@ -744,14 +1186,14 @@ format_table(filter_effect_df)
 format_table(pd.DataFrame(comparison_rows))
 ```
 
-## Cell-Level QC Before vs After
+## Cell-Level QC Before Vs After
 
-These interactive figures compare per-cell QC distributions before and after filtering.
-Each metric is shown as a paired histogram and violin plot so the effect of filtering
-is visible both at the distribution level and at the level of spread/outliers.
+These interactive figures compare the key QC metrics before and after filtering.
+The goal is to make the filtering effect easy to interpret at a glance:
 
-Use these panels to check whether filtering removed low-quality tails without
-over-collapsing the biological signal.
+- histograms show how much of each distribution was trimmed
+- violin plots show whether the retained object still has sensible spread
+- the summary table below can be used directly in methods or supplementary notes
 
 ```{python}
 compare_metric_figure(long_qc_df, "total_counts", "Total counts")
@@ -766,32 +1208,74 @@ compare_metric_figure(long_qc_df, "pct_counts_mt", "Mitochondrial percentage")
 ```
 
 ```{python}
+compare_metric_figure(long_qc_df, "pct_counts_ribo", "Ribosomal percentage")
+```
+
+```{python}
+compare_metric_figure(long_qc_df, "pct_counts_hb", "Hemoglobin percentage")
+```
+
+```{python}
+if pd.to_numeric(long_qc_df["doublet_score"], errors="coerce").notna().any():
+    compare_metric_figure(long_qc_df, "doublet_score", "Doublet score")
+```
+
+```{python}
 format_table(before_after_stats)
 ```
 
-## Sample-Level QC Before vs After
+## Confounder Diagnostics
 
-These tables and plots summarize filtering effects at the sample level. They are
-useful for identifying samples with unusually poor retention or systematically
-different QC profiles that may require separate review.
-
-The retained fraction bar plot is often the fastest way to spot problematic samples.
+These panels show how the main QC covariates relate to one another before and
+after filtering. They are useful for detecting technical structure that may not
+be obvious from one-dimensional distributions alone, such as low-complexity
+cells with high mitochondrial load or high-count cells that are enriched for
+doublet calls.
 
 ```{python}
-format_table(sample_compare_df[[
-    "sample_id",
-    "sample_display",
-    "n_cells",
-    "n_cells_after",
-    "removed_cells",
-    "retained_fraction_after",
-    "median_total_counts",
-    "median_total_counts_after",
-    "median_n_genes",
-    "median_n_genes_after",
-    "median_pct_counts_mt",
-    "median_pct_counts_mt_after",
-]].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False]))
+confounder_scatter(long_qc_df, "total_counts", "n_genes_by_counts", batch_key, f"Counts vs genes by {batch_key}")
+```
+
+```{python}
+confounder_scatter(long_qc_df, "total_counts", "pct_counts_mt", condition_key, f"Counts vs mitochondrial percentage by {condition_key}")
+```
+
+```{python}
+if pd.to_numeric(long_qc_df["doublet_score"], errors="coerce").notna().any():
+    confounder_scatter(long_qc_df, "total_counts", "doublet_score", batch_key, f"Counts vs doublet score by {batch_key}")
+```
+
+## Sample-Level QC Before Vs After
+
+These summaries make it easier to spot problematic samples, not just problematic
+cells. In mixed or clinically heterogeneous cohorts, this section is often the
+most important QC review panel because it reveals whether one sample is driving
+most exclusions or carrying systematically different metric profiles.
+
+```{python}
+format_table(
+    sample_compare_df[
+        [
+            "sample_id",
+            "sample_display",
+            "n_cells",
+            "n_cells_after",
+            "removed_cells",
+            "retained_fraction_after",
+            "n_doublets",
+            "median_total_counts",
+            "median_total_counts_after",
+            "median_n_genes",
+            "median_n_genes_after",
+            "median_pct_counts_mt",
+            "median_pct_counts_mt_after",
+            "median_pct_counts_ribo",
+            "median_pct_counts_ribo_after",
+            "median_pct_counts_hb",
+            "median_pct_counts_hb_after",
+        ]
+    ].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False])
+)
 ```
 
 ```{python}
@@ -803,6 +1287,7 @@ retention_fig = px.bar(
     color_continuous_scale="Tealgrn",
     template="simple_white",
     title="Retained cell fraction by sample",
+    hover_data={"sample_id": True, "retained_fraction_after": ":.2%"},
 )
 retention_fig.update_layout(height=420, xaxis_title="", yaxis_title="Retained fraction")
 retention_fig
@@ -820,97 +1305,176 @@ compare_sample_metric(sample_compare_long, "median_n_genes_stage", "Median genes
 compare_sample_metric(sample_compare_long, "median_pct_counts_mt_stage", "Median mitochondrial percentage per sample")
 ```
 
-## Embedding and Clustering
+## Embedding And Clustering
 
-These interactive embeddings show the filtered dataset after normalization,
-dimensionality reduction, neighborhood graph construction, and Leiden clustering.
+These embeddings show the retained object after normalization, PCA, graph
+construction, UMAP, and Leiden clustering. Review them together rather than in
+isolation:
 
-Recommended checks:
-- `UMAP/PCA by leiden`: cluster separation and granularity
-- `UMAP/PCA by batch`: residual batch structure
-- `UMAP by condition`: whether condition effects align with expected biology or
-  are dominated by technical structure
+- `by leiden` checks whether the selected clustering granularity is plausible
+- `by batch` checks for residual batch structure
+- `by condition` checks whether biological structure is interpretable rather than purely technical
 
 ```{python}
-embedding_plot(filtered, "leiden", "Interactive UMAP colored by Leiden cluster")
+embedding_plot(filtered, "X_umap", "leiden", "Interactive UMAP colored by Leiden cluster")
 ```
 
 ```{python}
-embedding_plot(filtered, batch_key, f"Interactive UMAP colored by {batch_key}")
+embedding_plot(filtered, "X_umap", batch_key, f"Interactive UMAP colored by {batch_key}")
 ```
 
 ```{python}
-embedding_plot(filtered, condition_key, f"Interactive UMAP colored by {condition_key}")
+embedding_plot(filtered, "X_umap", condition_key, f"Interactive UMAP colored by {condition_key}")
 ```
 
 ```{python}
-pca_plot(filtered, "leiden", "Interactive PCA colored by Leiden cluster")
+embedding_plot(filtered, "X_pca", "leiden", "Interactive PCA colored by Leiden cluster")
 ```
 
 ```{python}
-pca_plot(filtered, batch_key, f"Interactive PCA colored by {batch_key}")
+embedding_plot(filtered, "X_pca", batch_key, f"Interactive PCA colored by {batch_key}")
 ```
 
 ```{python}
 format_table(cluster_counts)
 ```
 
-## Methods Appendix
+## Resolution Diagnostics
 
-This appendix records the concrete parameter values used in the run. It is intended
-to support reproducibility, troubleshooting, and later methods write-up.
+The final Leiden resolution is still set either manually or by the simple
+heuristic used in this template, but this section now benchmarks a grid of
+alternative resolutions on the same graph. The line labels show the number of
+clusters at each resolution.
+
+Interpretation:
+
+- higher modularity can indicate cleaner graph partitioning
+- lower Davies-Bouldin score can indicate better separation in PCA space
+- the selected resolution should usually sit in a stable, interpretable range rather than at an arbitrary extreme
 
 ```{python}
-pd.DataFrame(
-    {
-        "parameter": [
-            "input_path",
-            "input_format",
-            "var_names",
-            "organism",
-            "sample_id_key",
-            "batch_key",
-            "condition_key",
-            "min_genes",
-            "min_cells",
-            "min_counts",
-            "max_pct_counts_mt",
-            "n_top_hvgs",
-            "n_pcs",
-            "n_neighbors",
-            "leiden_resolution",
-            "leiden_resolution_source",
-        ],
-        "value": [
-            str(input_path),
-            resolved_input_format,
-            var_names,
-            organism,
-            sample_id_key,
-            batch_key,
-            condition_key,
-            min_genes,
-            min_cells,
-            min_counts,
-            max_pct_counts_mt,
-            int(cfg["analysis"]["n_top_hvgs"]),
-            int(cfg["analysis"]["n_pcs"]),
-            int(cfg["analysis"]["n_neighbors"]),
-            resolved_leiden_resolution,
-            leiden_resolution_source,
-        ],
-    }
+resolution_diagnostics_plot(resolution_diagnostics_df)
+```
+
+```{python}
+format_table(resolution_diagnostics_df)
+```
+
+## Cluster Composition
+
+These composition summaries show whether the inferred clusters are broadly
+represented across samples and conditions or dominated by only one subset. This
+is especially helpful before downstream differential analysis because it makes
+replication and imbalance issues visible early.
+
+```{python}
+format_table(cluster_by_sample_counts.reset_index(names="sample_display"))
+```
+
+```{python}
+composition_heatmap(cluster_by_sample_fraction.fillna(0), "Cluster composition by sample (row fractions)")
+```
+
+```{python}
+format_table(cluster_by_condition_counts.reset_index(names=condition_key))
+```
+
+```{python}
+composition_heatmap(cluster_by_condition_fraction.fillna(0), f"Cluster composition by {condition_key} (row fractions)")
+```
+
+## Methods Appendix
+
+This appendix records the parameter values used in the run. It is designed to
+support reproducibility and methods write-up rather than interpretation of the
+biological signal itself.
+
+```{python}
+format_table(
+    pd.DataFrame(
+        {
+            "parameter": [
+                "input_path",
+                "input_format",
+                "input_source_template",
+                "ambient_correction_applied",
+                "ambient_correction_method",
+                "var_names",
+                "organism",
+                "sample_id_key",
+                "batch_key",
+                "condition_key",
+                "doublet_method",
+                "filter_predicted_doublets",
+                "qc_mode",
+                "qc_nmads",
+                "min_genes",
+                "min_cells",
+                "min_counts",
+                "max_pct_counts_mt",
+                "max_pct_counts_ribo",
+                "max_pct_counts_hb",
+                "n_top_hvgs",
+                "n_pcs",
+                "n_neighbors",
+                "resolution_grid",
+                "leiden_resolution",
+                "leiden_resolution_source",
+            ],
+            "value": [
+                str(input_path),
+                resolved_input_format,
+                input_source_template,
+                ambient_correction_applied,
+                ambient_correction_method,
+                var_names,
+                organism,
+                sample_id_key,
+                batch_key,
+                condition_key,
+                doublet_method,
+                filter_predicted_doublets,
+                qc_mode,
+                qc_nmads,
+                min_genes,
+                min_cells,
+                min_counts,
+                max_pct_counts_mt,
+                max_pct_counts_ribo,
+                max_pct_counts_hb,
+                int(cfg["analysis"]["n_top_hvgs"]),
+                int(cfg["analysis"]["n_pcs"]),
+                int(cfg["analysis"]["n_neighbors"]),
+                str(cfg["analysis"].get("resolution_grid", "")),
+                resolved_leiden_resolution,
+                leiden_resolution_source,
+            ],
+        }
+    )
 )
+```
+
+## Session Info
+
+This section records the execution environment used to render the report and
+write the processed object. It is the quickest way to diagnose version-related
+differences between runs.
+
+```{python}
+format_table(session_info_df)
 ```
 
 ## References
 
-The workflow in this notebook is based on the Scanpy/scverse ecosystem and is rendered
-with Quarto using the Jupyter engine. The following official resources are useful for
-methodological background and format details:
+The workflow in this notebook is based on the Scanpy/scverse ecosystem and is
+rendered with Quarto using the Jupyter engine. The following resources are
+useful for methodological background and format details:
 
 - Scanpy documentation: <https://scanpy.readthedocs.io/>
 - AnnData documentation: <https://anndata.readthedocs.io/>
+- Scrublet publication: Wolock SL, Lopez R, Klein AM. Cell Systems (2019). <https://doi.org/10.1016/j.cels.2018.11.005>
 - Quarto with Jupyter kernels: <https://quarto.org/docs/advanced/jupyter/kernel-execution.html>
 - Quarto authoring with Jupyter: <https://quarto.org/docs/get-started/authoring/jupyter.html>
 - 10x Genomics Cell Ranger HDF5 matrices: <https://www.10xgenomics.com/support/software/cell-ranger/latest/tutorials/outputs/cr-outputs-h5-matrices>
+- Parse Biosciences split-pool workflow documentation: <https://support.parsebiosciences.com/>
+- Scale Bio RNA output documentation: <https://github.com/ScaleBio/ScaleRna/blob/master/docs/outputs.md>

@@ -1,0 +1,120 @@
+---
+title: "00 CellBender Ambient RNA Correction"
+author: "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
+date: today
+jupyter: python3
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    toc-location: left
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    theme: lumen
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{python}
+from pathlib import Path
+import json
+import tomllib
+
+import pandas as pd
+
+ROOT = Path(".").resolve()
+CONFIG_PATH = ROOT / "config" / "project.toml"
+
+
+def load_config(path: Path) -> dict:
+    with path.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def format_table(df: pd.DataFrame):
+    return (
+        df.style
+        .set_properties(**{"text-align": "left", "white-space": "nowrap"})
+        .set_table_styles(
+            [
+                {"selector": "th", "props": [("text-align", "left"), ("font-weight", "600")]},
+                {"selector": "td", "props": [("padding", "0.25rem 0.5rem")]},
+            ]
+        )
+    )
+
+
+cfg = load_config(CONFIG_PATH)
+results_dir = ROOT / cfg["output"]["results_dir"]
+corrected_matrix = ROOT / cfg["output"]["corrected_matrix"]
+```
+
+## Overview
+
+This template is intended to run CellBender as a dedicated upstream decontamination
+step on raw droplet matrices. The corrected matrix is then published for use by
+`scverse_scrna_prep`.
+
+```{python}
+format_table(
+    pd.DataFrame(
+        {
+            "field": [
+                "input_raw_matrix",
+                "input_format",
+                "expected_cells",
+                "total_droplets_included",
+                "epochs",
+                "low_count_threshold",
+                "fpr",
+                "use_cuda",
+                "corrected_matrix",
+            ],
+            "value": [
+                cfg["input"]["input_raw_matrix"],
+                cfg["input"]["input_format"],
+                cfg["cellbender"]["expected_cells"],
+                cfg["cellbender"]["total_droplets_included"],
+                cfg["cellbender"]["epochs"],
+                cfg["cellbender"]["low_count_threshold"],
+                cfg["cellbender"]["fpr"],
+                cfg["cellbender"]["use_cuda"],
+                str(corrected_matrix),
+            ],
+        }
+    )
+)
+```
+
+## Output Check
+
+This section only verifies whether the expected output file is present. A richer
+diagnostic report can be added once the template is validated against real runs.
+
+```{python}
+format_table(
+    pd.DataFrame(
+        {
+            "path": [str(corrected_matrix)],
+            "exists": [corrected_matrix.exists()],
+            "size_bytes": [corrected_matrix.stat().st_size if corrected_matrix.exists() else 0],
+        }
+    )
+)
+```
+
+## Notes
+
+- Use this template on raw droplet matrices, not on normalized or prefiltered downstream objects.
+- The published output key is `templates.cellbender_remove_background.published.cellbender_corrected_matrix`.
+- `scverse_scrna_prep` can consume that published output automatically when it exists in project history.
+
+## References
+
+- CellBender documentation: <https://cellbender.readthedocs.io/>
+- CellBender changelog: <https://cellbender.readthedocs.io/en/v0.3.2/changelog/index.html>

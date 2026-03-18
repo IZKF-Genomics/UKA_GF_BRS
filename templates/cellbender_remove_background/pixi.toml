@@ -1,0 +1,18 @@
+[workspace]
+name = "cellbender_remove_background"
+channels = ["conda-forge", "bioconda"]
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+render = { cmd = ["quarto", "render", "00_summary.qmd", "--to", "html", "--no-clean"] }
+clean = { cmd = ["bash", "-lc", "rm -rf results .quarto 00_summary.html"] }
+
+[dependencies]
+python = ">=3.11,<3.13"
+quarto = ">=1.6,<2"
+jupyter = ">=1.1,<2"
+ipykernel = ">=6.29,<7"
+pandas = ">=2.2,<3"
+cellbender = ">=0.3,<1"
+python-tzdata = ">=2024.1"

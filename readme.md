@@ -41,6 +41,7 @@ cd /path/to/output
 - illumina_methylation_process: [templates/illumina_methylation_process/README.md](templates/illumina_methylation_process/README.md)
 - illumina_methylation_compare: [templates/illumina_methylation_compare/README.md](templates/illumina_methylation_compare/README.md)
 - ercc: [templates/ercc/README.md](templates/ercc/README.md)
+- cellbender_remove_background: [templates/cellbender_remove_background/README.md](templates/cellbender_remove_background/README.md)
 - nfcore_3mrnaseq: [templates/nfcore_3mrnaseq/README.md](templates/nfcore_3mrnaseq/README.md)
 - nfcore_cutandrun: [templates/nfcore_cutandrun/README.md](templates/nfcore_cutandrun/README.md)
 - nfcore_rnaseq: [templates/nfcore_rnaseq/README.md](templates/nfcore_rnaseq/README.md)
@@ -102,7 +103,8 @@ cd /path/to/output
 - illumina_methylation_compare no longer requires explicitly passing `study_name`; when omitted, the rendered template id is used as the project/report name.
 - illumina_methylation_compare now auto-discovers active `illumina_methylation_process` runs from project.yaml via post-render hook and populates `config/input_registry.csv` (can be disabled with `--auto-discover-inputs false`); fallback `run1` is only kept when no process runs are discovered.
 - nfcore_scrnaseq now publishes `nfcore_scrnaseq_res_mt`, a resolver-backed path to the preferred downstream `.h5ad` matrix under `results/<aligner>/mtx_conversions/`, so follow-up scverse templates can auto-discover the matrix from project.yaml.
-- scverse_scrna_prep now provides the first scverse-based downstream single-cell template, auto-resolving `nfcore_scrnaseq_res_mt`, writing `results/adata.prep.h5ad`, and publishing it as `scrna_prep_h5ad`.
+- cellbender_remove_background now provides an optional upstream CellBender branch for raw droplet matrices and publishes `cellbender_corrected_matrix`.
+- scverse_scrna_prep now provides the first scverse-based downstream single-cell template, preferring `cellbender_corrected_matrix` when available, otherwise auto-resolving `nfcore_scrnaseq_res_mt`, writing `results/adata.prep.h5ad`, and publishing it as `scrna_prep_h5ad`.
 
 ## Agent Readability
 

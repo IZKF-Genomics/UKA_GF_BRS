@@ -1,0 +1,20 @@
+[project]
+name = "{{ ctx.project.name if ctx.project else ctx.template.id }}"
+authors = "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
+
+[input]
+input_raw_matrix = "{{ ctx.params.input_raw_matrix }}"
+input_format = "{{ ctx.params.input_format }}"
+
+[cellbender]
+expected_cells = {{ ctx.params.expected_cells }}
+total_droplets_included = {{ ctx.params.total_droplets_included }}
+epochs = {{ ctx.params.epochs }}
+low_count_threshold = {{ ctx.params.low_count_threshold }}
+fpr = "{{ ctx.params.fpr }}"
+use_cuda = {{ ctx.params.use_cuda | string | lower }}
+
+[output]
+results_dir = "results/cellbender"
+corrected_matrix = "results/cellbender/cellbender_filtered.h5"
+report_html = "00_summary.html"

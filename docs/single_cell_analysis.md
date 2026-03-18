@@ -51,7 +51,33 @@ This key should be the default handoff for future scRNA templates.
 
 ## Proposed template family
 
-### 1. `scverse_scrna_prep`
+### 1. `cellbender_remove_background`
+
+Purpose:
+- Provide an optional upstream ambient RNA correction step for raw droplet matrices.
+- Keep ambient/background correction separate from the general Scanpy preprocessing
+  template so the data contract stays explicit.
+
+Inputs:
+- raw droplet matrix, typically `raw_feature_bc_matrix.h5`
+- optional expected cell count and CellBender tuning parameters
+
+Core tasks:
+- run `cellbender remove-background`
+- publish the corrected raw-count matrix
+- record the run parameters and output presence in a lightweight report
+
+Outputs:
+- `published.cellbender_corrected_matrix`
+- `results/cellbender/cellbender_filtered.h5`
+- `00_summary.html`
+
+Notes:
+- This template should remain optional.
+- `scverse_scrna_prep` should prefer this published output over the generic
+  nf-core result matrix when both exist in project history.
+
+### 2. `scverse_scrna_prep`
 
 Purpose:
 - Load upstream matrix and metadata.
@@ -91,7 +117,7 @@ Default stack:
 - `seaborn`
 - optional `scrublet` or `doubletdetection`
 
-### 2. `scverse_scrna_integrate`
+### 3. `scverse_scrna_integrate`
 
 Purpose:
 - Correct batch effects and produce integrated embeddings while preserving the original
@@ -121,7 +147,7 @@ Notes:
 - Do not force one integration method for all projects.
 - The template should expose `integration_method` and `batch_key` explicitly.
 
-### 3. `scverse_scrna_annotate`
+### 4. `scverse_scrna_annotate`
 
 Purpose:
 - Add biological interpretation to clusters and cells using multiple annotation routes.
@@ -147,7 +173,7 @@ Standard obs fields:
 - `annotation_method`
 - `annotation_score`
 
-### 4. `scverse_scrna_de`
+### 5. `scverse_scrna_de`
 
 Purpose:
 - Run downstream comparisons after annotation, with sample-aware defaults.
@@ -177,7 +203,7 @@ Outputs:
 - `reports/01_differential_expression.html`
 - `reports/02_enrichment.html`
 
-### 5. `scverse_scrna_trajectory`
+### 6. `scverse_scrna_trajectory`
 
 Purpose:
 - Reconstruct differentiation continua and lineage relationships.
@@ -195,7 +221,7 @@ Outputs:
 - `published.scrna_trajectory_h5ad`
 - trajectory report with lineage and pseudotime summaries
 
-### 6. `scverse_scrna_velocity`
+### 7. `scverse_scrna_velocity`
 
 Purpose:
 - Model RNA velocity when spliced/unspliced information is available.
@@ -214,7 +240,7 @@ Outputs:
 Notes:
 - Keep separate from generic trajectory analysis because the input requirements differ.
 
-### 7. `scverse_spatial`
+### 8. `scverse_spatial`
 
 Purpose:
 - Handle spatial single-cell / spatial transcriptomics analysis as a separate track.
@@ -235,7 +261,7 @@ Notes:
 - Spatial packages currently have a different dependency profile from core scRNA work.
 - Keep a dedicated Pixi environment.
 
-### 8. `scverse_scatac`
+### 9. `scverse_scatac`
 
 Purpose:
 - Support scATAC-seq and related chromatin accessibility workflows.
@@ -254,7 +280,7 @@ Core tasks:
 - differential accessibility
 - motif and gene activity summaries
 
-### 9. `scverse_multimodal`
+### 10. `scverse_multimodal`
 
 Purpose:
 - Support RNA + ATAC or RNA + protein integration and consistency checks.

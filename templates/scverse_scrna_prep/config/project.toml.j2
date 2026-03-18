@@ -5,6 +5,9 @@ authors = "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.pr
 [input]
 input_h5ad = "{{ ctx.params.input_h5ad }}"
 input_matrix = "{{ ctx.params.input_matrix }}"
+input_source_template = "{{ ctx.params.input_source_template }}"
+ambient_correction_applied = {{ ctx.params.ambient_correction_applied | string | lower }}
+ambient_correction_method = "{{ ctx.params.ambient_correction_method }}"
 input_format = "{{ ctx.params.input_format }}"
 var_names = "{{ ctx.params.var_names }}"
 sample_metadata = "{{ ctx.params.sample_metadata if ctx.params.sample_metadata else 'config/samples.csv' }}"
@@ -17,16 +20,22 @@ condition_key = "{{ ctx.params.condition_key }}"
 
 [qc]
 doublet_method = "{{ ctx.params.doublet_method }}"
+filter_predicted_doublets = {{ ctx.params.filter_predicted_doublets | string | lower }}
+qc_mode = "{{ ctx.params.qc_mode }}"
+qc_nmads = {{ ctx.params.qc_nmads }}
 min_genes = {{ ctx.params.min_genes }}
 min_cells = {{ ctx.params.min_cells }}
 min_counts = {{ ctx.params.min_counts }}
 max_pct_counts_mt = {{ ctx.params.max_pct_counts_mt }}
+max_pct_counts_ribo = "{{ ctx.params.max_pct_counts_ribo }}"
+max_pct_counts_hb = "{{ ctx.params.max_pct_counts_hb }}"
 
 [analysis]
 n_top_hvgs = {{ ctx.params.n_top_hvgs }}
 n_pcs = {{ ctx.params.n_pcs }}
 n_neighbors = {{ ctx.params.n_neighbors }}
 leiden_resolution = "{{ ctx.params.leiden_resolution }}"
+resolution_grid = "{{ ctx.params.resolution_grid }}"
 target_sum = 10000
 
 [output]
