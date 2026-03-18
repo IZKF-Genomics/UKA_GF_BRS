@@ -5,8 +5,8 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-render = { cmd = ["quarto", "render", "00_qc.qmd", "--to", "html", "--output-dir", "reports", "--no-clean"] }
-clean = { cmd = ["bash", "-lc", "rm -rf reports results .quarto"] }
+render = { cmd = ["quarto", "render", "00_qc.qmd", "--to", "html", "--no-clean"] }
+clean = { cmd = ["bash", "-lc", "rm -rf results .quarto 00_qc.html"] }
 
 [dependencies]
 python = ">=3.11,<3.13"

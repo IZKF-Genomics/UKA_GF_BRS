@@ -104,7 +104,7 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 - `results/tables/sample_qc_summary.csv`: sample-level QC summary
 - `results/tables/cluster_counts.csv`: cluster abundances
 - `results/figures/*.png`: QC and embedding figures
-- `reports/00_qc.html`: rendered report
+- `00_qc.html`: rendered report
 
 Published output:
 - `scrna_prep_h5ad`: resolver-backed path to `results/adata.prep.h5ad`
