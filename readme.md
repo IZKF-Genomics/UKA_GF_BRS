@@ -70,6 +70,7 @@ cd /path/to/output
 - Keep rules: [docs/keep_rules.md](docs/keep_rules.md)
 - Demultiplexing: [docs/demultiplexing.md](docs/demultiplexing.md)
 - Basic analysis: [docs/basic_analysis.md](docs/basic_analysis.md)
+- Single-cell analysis plan: [docs/single_cell_analysis.md](docs/single_cell_analysis.md)
 
 ## Conventions
 - Project mode renders into `<project_dir>/<template_id>/` and updates `project.yaml`.
