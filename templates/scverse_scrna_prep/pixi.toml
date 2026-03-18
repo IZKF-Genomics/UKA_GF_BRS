@@ -5,9 +5,7 @@ platforms = ["linux-64"]
 version = "0.1.0"
 
 [tasks]
-run-analysis = { cmd = ["python", "scripts/run_prep.py", "--config", "config/project.toml"] }
 render = { cmd = ["quarto", "render", "00_qc.qmd", "--to", "html", "--output-dir", "reports", "--no-clean"] }
-check = { cmd = ["python", "-m", "py_compile", "scripts/run_prep.py"] }
 clean = { cmd = ["bash", "-lc", "rm -rf reports results .quarto"] }
 
 [dependencies]

@@ -29,7 +29,7 @@ optional_params:
 run_entry: run.sh
 publish_keys:
 - scrna_prep_h5ad
-render_file_count: 8
+render_file_count: 7
 ```
 <!-- AGENT_METADATA_END -->
 
@@ -95,8 +95,7 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 
 - `config/project.toml`: analysis configuration written at render time
 - `config/samples.csv`: optional editable sample metadata scaffold
-- `scripts/run_prep.py`: Scanpy preprocessing entrypoint
-- `00_qc.qmd`: HTML report
+- `00_qc.qmd`: Quarto notebook containing the preprocessing logic and report
 
 ## Outputs
 

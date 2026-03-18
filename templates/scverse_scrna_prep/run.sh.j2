@@ -12,8 +12,8 @@ if [[ ! -f config/project.toml ]]; then
   echo "ERROR: missing required file: config/project.toml" >&2
   exit 1
 fi
-if [[ ! -f scripts/run_prep.py ]]; then
-  echo "ERROR: missing required file: scripts/run_prep.py" >&2
+if [[ ! -f 00_qc.qmd ]]; then
+  echo "ERROR: missing required file: 00_qc.qmd" >&2
   exit 1
 fi
 if ! command -v pixi >/dev/null 2>&1; then
@@ -26,12 +26,6 @@ echo "[INFO] Root: $ROOT_DIR"
 
 echo "[INFO] Installing/updating pixi environment"
 pixi install
-
-echo "[INFO] Validating Python entrypoint"
-pixi run check
-
-echo "[INFO] Running Scanpy preprocessing"
-pixi run run-analysis
 
 mkdir -p reports
 

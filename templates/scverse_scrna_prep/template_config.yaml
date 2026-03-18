@@ -102,7 +102,6 @@ render:
     - .gitignore -> .gitignore
     - config/project.toml.j2 -> config/project.toml
     - config/samples.csv -> config/samples.csv
-    - scripts/run_prep.py -> scripts/run_prep.py
     - 00_qc.qmd.j2 -> 00_qc.qmd
 
 run:
