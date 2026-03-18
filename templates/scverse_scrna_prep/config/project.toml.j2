@@ -4,6 +4,8 @@ authors = "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.pr
 
 [input]
 input_h5ad = "{{ ctx.params.input_h5ad }}"
+input_matrix = "{{ ctx.params.input_matrix }}"
+input_format = "{{ ctx.params.input_format }}"
 sample_metadata = "{{ ctx.params.sample_metadata if ctx.params.sample_metadata else 'config/samples.csv' }}"
 
 [metadata]

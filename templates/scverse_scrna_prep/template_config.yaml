@@ -7,7 +7,19 @@ params:
     cli: "--input-h5ad"
     required: false
     default: ""
-    description: "Input H5AD matrix; defaults to nfcore_scrnaseq published nfcore_scrnaseq_res_mt when available"
+    description: "Explicit H5AD input; defaults to nfcore_scrnaseq published nfcore_scrnaseq_res_mt when both input_h5ad and input_matrix are empty"
+  input_matrix:
+    type: str
+    cli: "--input-matrix"
+    required: false
+    default: ""
+    description: "General input path for direct loading of H5AD, Cell Ranger .h5, or 10x matrix directory"
+  input_format:
+    type: str
+    cli: "--input-format"
+    required: false
+    default: "auto"
+    description: "Input format: auto, h5ad, 10x_h5, or 10x_mtx"
   sample_metadata:
     type: str
     cli: "--sample-metadata"

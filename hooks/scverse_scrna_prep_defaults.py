@@ -55,7 +55,10 @@ def populate(ctx) -> None:
     params = ctx.params
     project_data = _load_project_yaml(ctx)
 
-    if _needs_fill(params.get("input_h5ad")):
+    input_h5ad_missing = _needs_fill(params.get("input_h5ad"))
+    input_matrix_missing = _needs_fill(params.get("input_matrix"))
+
+    if input_h5ad_missing and input_matrix_missing:
         upstream = _find_template_entry(project_data, "nfcore_scrnaseq")
         published = upstream.get("published") if isinstance(upstream, dict) else {}
         candidate = published.get("nfcore_scrnaseq_res_mt") if isinstance(published, dict) else None
@@ -68,8 +71,14 @@ def populate(ctx) -> None:
             raise RuntimeError("input_h5ad is required in ad-hoc mode")
         else:
             raise RuntimeError(
-                "input_h5ad not provided and no published nfcore_scrnaseq_res_mt found in project.yaml"
+                "Neither input_h5ad nor input_matrix was provided, and no published nfcore_scrnaseq_res_mt was found in project.yaml"
             )
+
+    if _needs_fill(params.get("input_matrix")):
+        params["input_matrix"] = ""
+
+    if _needs_fill(params.get("input_format")):
+        params["input_format"] = "auto"
 
     if _needs_fill(params.get("sample_metadata")):
         params["sample_metadata"] = ""

@@ -15,6 +15,8 @@ optional_params:
 - condition_key
 - doublet_method
 - input_h5ad
+- input_matrix
+- input_format
 - leiden_resolution
 - max_pct_counts_mt
 - min_cells
@@ -37,6 +39,7 @@ Scanpy/scverse preprocessing template for single-cell RNA-seq.
 
 Scope:
 - consume an upstream `.h5ad` matrix, typically from `nfcore_scrnaseq`
+- also accept direct Cell Ranger matrix inputs
 - compute baseline QC metrics
 - filter cells and genes
 - normalize and log-transform
@@ -53,6 +56,13 @@ If `input_h5ad` is not provided, the pre-render hook tries to resolve:
 
 This is intended to make `scverse_scrna_prep` the default downstream step after
 `nfcore_scrnaseq`.
+
+Direct manual inputs are also supported:
+- `--param input_matrix=/path/to/file.h5ad`
+- `--param input_matrix=/path/to/filtered_feature_bc_matrix.h5`
+- `--param input_matrix=/path/to/filtered_feature_bc_matrix`
+
+Set `--param input_format=auto|h5ad|10x_h5|10x_mtx` when auto-detection is not sufficient.
 
 ## Render
 
@@ -79,7 +89,7 @@ Standalone/ad-hoc usage with an explicit input:
 
 ```bash
 bpm template render scverse_scrna_prep \
-  --param input_h5ad=/path/to/input.h5ad \
+  --param input_matrix=/path/to/filtered_feature_bc_matrix.h5 \
   --out /path/to/output
 ```
 

@@ -83,6 +83,17 @@ def resolve_path(root: Path, value: str) -> Path:
     return p if p.is_absolute() else (root / p).resolve()
 
 
+def detect_input_format(path: Path) -> str:
+    if path.is_dir():
+        return "10x_mtx"
+    lower = path.name.lower()
+    if lower.endswith(".h5ad"):
+        return "h5ad"
+    if lower.endswith(".h5"):
+        return "10x_h5"
+    return ""
+
+
 def read_optional_metadata(path: Path) -> pd.DataFrame | None:
     if not path.exists() or path.stat().st_size == 0:
         return None
@@ -155,6 +166,36 @@ def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]
     if n_cells < 50000:
         return 0.8, "auto"
     return 1.0, "auto"
+
+
+def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str):
+    chosen = ""
+    if str(input_matrix).strip():
+        chosen = str(input_matrix).strip()
+    elif str(input_h5ad).strip():
+        chosen = str(input_h5ad).strip()
+    else:
+        raise RuntimeError(
+            "No input matrix was provided. Set input_matrix/input_h5ad or render in a project with nfcore_scrnaseq published outputs."
+        )
+
+    input_path = resolve_path(ROOT, chosen)
+    fmt = str(input_format).strip().lower() or "auto"
+    if fmt == "auto":
+        fmt = detect_input_format(input_path)
+    if fmt not in {"h5ad", "10x_h5", "10x_mtx"}:
+        raise RuntimeError(
+            f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx."
+        )
+
+    if fmt == "h5ad":
+        adata = sc.read_h5ad(input_path)
+    elif fmt == "10x_h5":
+        adata = sc.read_10x_h5(input_path)
+    else:
+        adata = sc.read_10x_mtx(input_path, var_names="gene_symbols", make_unique=True)
+
+    return adata, input_path, fmt
 
 
 def metric_summary(df: pd.DataFrame, stage: str, metric: str) -> dict[str, float | str]:
@@ -324,13 +365,10 @@ cfg
 ## Load Inputs
 
 ```{python}
-input_h5ad = str(cfg["input"]["input_h5ad"]).strip()
-if not input_h5ad:
-    raise RuntimeError(
-        "config input.input_h5ad is empty; provide --param input_h5ad or render in a project with nfcore_scrnaseq published outputs"
-    )
-
-input_path = resolve_path(ROOT, input_h5ad)
+input_h5ad = str(cfg["input"].get("input_h5ad", "")).strip()
+input_matrix = str(cfg["input"].get("input_matrix", "")).strip()
+input_format = str(cfg["input"].get("input_format", "auto")).strip().lower() or "auto"
+adata, input_path, resolved_input_format = load_input_adata(input_h5ad, input_matrix, input_format)
 sample_metadata_path = resolve_path(ROOT, str(cfg["input"]["sample_metadata"]))
 organism = str(cfg["metadata"]["organism"]).strip().lower()
 if not organism:
@@ -350,7 +388,6 @@ tables_dir.mkdir(parents=True, exist_ok=True)
 
 sc.settings.verbosity = 2
 
-adata = sc.read_h5ad(input_path)
 adata.obs_names_make_unique()
 adata.var_names_make_unique()
 
@@ -568,6 +605,7 @@ filtered.write_h5ad(out_adata)
 run_summary = {
     "project_name": cfg["project"]["name"],
     "organism": organism,
+    "input_format": resolved_input_format,
     "batch_key": batch_key,
     "condition_key": condition_key,
     "leiden_resolution": resolved_leiden_resolution,
@@ -602,10 +640,11 @@ qc_summary
 ```{python}
 pd.DataFrame(
     {
-        "field": ["project_name", "organism", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
+        "field": ["project_name", "organism", "input_format", "batch_key", "condition_key", "leiden_resolution", "leiden_resolution_source", "output_h5ad"],
         "value": [
             run_summary["project_name"],
             run_summary["organism"],
+            run_summary["input_format"],
             run_summary["batch_key"],
             run_summary["condition_key"],
             run_summary["leiden_resolution"],
@@ -720,7 +759,8 @@ format_table(cluster_counts)
 pd.DataFrame(
     {
         "parameter": [
-            "input_h5ad",
+            "input_path",
+            "input_format",
             "organism",
             "sample_id_key",
             "batch_key",
@@ -737,6 +777,7 @@ pd.DataFrame(
         ],
         "value": [
             str(input_path),
+            resolved_input_format,
             organism,
             sample_id_key,
             batch_key,
