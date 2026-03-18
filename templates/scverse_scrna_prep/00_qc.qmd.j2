@@ -682,6 +682,10 @@ qc_summary
 
 ## Overview
 
+This section summarizes the key analysis settings and the main processed output.
+Use it to confirm that the expected organism, input format, clustering settings,
+and output object were used for this run before interpreting downstream figures.
+
 ```{python}
 pd.DataFrame(
     {
@@ -702,6 +706,15 @@ pd.DataFrame(
 
 ## Filtering Effect Summary
 
+This section quantifies the impact of QC filtering on the dataset. The first table
+summarizes how many cells and genes were retained, while the second table shows
+how core QC metrics shifted from the unfiltered to the filtered object.
+
+In general:
+- a moderate drop in cell count is expected after removing low-quality droplets
+- mitochondrial percentage should often decrease after filtering
+- retained cell fractions that are very low should prompt threshold review
+
 ```{python}
 format_table(filter_effect_df)
 ```
@@ -711,6 +724,13 @@ format_table(pd.DataFrame(comparison_rows))
 ```
 
 ## Cell-Level QC Before vs After
+
+These interactive figures compare per-cell QC distributions before and after filtering.
+Each metric is shown as a paired histogram and violin plot so the effect of filtering
+is visible both at the distribution level and at the level of spread/outliers.
+
+Use these panels to check whether filtering removed low-quality tails without
+over-collapsing the biological signal.
 
 ```{python}
 compare_metric_figure(long_qc_df, "total_counts", "Total counts")
@@ -729,6 +749,12 @@ format_table(before_after_stats)
 ```
 
 ## Sample-Level QC Before vs After
+
+These tables and plots summarize filtering effects at the sample level. They are
+useful for identifying samples with unusually poor retention or systematically
+different QC profiles that may require separate review.
+
+The retained fraction bar plot is often the fastest way to spot problematic samples.
 
 ```{python}
 format_table(sample_compare_df[[
@@ -774,6 +800,15 @@ compare_sample_metric(sample_compare_long, "median_pct_counts_mt_stage", "Median
 
 ## Embedding and Clustering
 
+These interactive embeddings show the filtered dataset after normalization,
+dimensionality reduction, neighborhood graph construction, and Leiden clustering.
+
+Recommended checks:
+- `UMAP/PCA by leiden`: cluster separation and granularity
+- `UMAP/PCA by batch`: residual batch structure
+- `UMAP by condition`: whether condition effects align with expected biology or
+  are dominated by technical structure
+
 ```{python}
 embedding_plot(filtered, "leiden", "Interactive UMAP colored by Leiden cluster")
 ```
@@ -799,6 +834,9 @@ format_table(cluster_counts)
 ```
 
 ## Methods Appendix
+
+This appendix records the concrete parameter values used in the run. It is intended
+to support reproducibility, troubleshooting, and later methods write-up.
 
 ```{python}
 pd.DataFrame(
@@ -840,3 +878,15 @@ pd.DataFrame(
     }
 )
 ```
+
+## References
+
+The workflow in this notebook is based on the Scanpy/scverse ecosystem and is rendered
+with Quarto using the Jupyter engine. The following official resources are useful for
+methodological background and format details:
+
+- Scanpy documentation: <https://scanpy.readthedocs.io/>
+- AnnData documentation: <https://anndata.readthedocs.io/>
+- Quarto with Jupyter kernels: <https://quarto.org/docs/advanced/jupyter/kernel-execution.html>
+- Quarto authoring with Jupyter: <https://quarto.org/docs/get-started/authoring/jupyter.html>
+- 10x Genomics Cell Ranger HDF5 matrices: <https://www.10xgenomics.com/support/software/cell-ranger/latest/tutorials/outputs/cr-outputs-h5-matrices>
