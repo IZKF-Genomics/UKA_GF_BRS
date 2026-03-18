@@ -1,6 +1,6 @@
 [project]
-name = "{{ ctx.params.study_name | default(ctx.project.name if ctx.project else ctx.template.id, true) }}"
-authors = "{{ ctx.params.authors }}"
+name = "{{ ctx.project.name if ctx.project else ctx.template.id }}"
+authors = "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
 
 [input]
 input_h5ad = "{{ ctx.params.input_h5ad }}"

@@ -27,7 +27,7 @@ templates:
     from hooks.scverse_scrna_prep_defaults import populate  # type: ignore
 
     ctx = SimpleNamespace(
-        params={"input_h5ad": "", "study_name": "", "authors": "", "sample_metadata": ""},
+        params={"input_h5ad": "", "sample_metadata": ""},
         project=SimpleNamespace(project_path=str(project_dir), name="Demo scRNA"),
         project_dir=str(project_dir),
         template=SimpleNamespace(id="scverse_scrna_prep"),
@@ -37,5 +37,3 @@ templates:
     populate(ctx)
 
     assert ctx.params["input_h5ad"] == "/data/projects/demo/nfcore_scrnaseq/results/cellranger/mtx_conversions/combined_filtered_matrix.h5ad"
-    assert ctx.params["study_name"] == "Demo scRNA"
-    assert ctx.params["authors"] == "Ada Lovelace"

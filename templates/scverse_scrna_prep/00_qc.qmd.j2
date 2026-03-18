@@ -1,6 +1,6 @@
 ---
 title: "00 scRNA Preprocessing QC"
-author: "{{ ctx.params.authors }}"
+author: "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
 date: "Last compiled on `r format(Sys.time(), '%d %B, %Y')`"
 jupyter: python3
 format:

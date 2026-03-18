@@ -21,7 +21,7 @@ if ! command -v pixi >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "[INFO] Running scverse_scrna_prep for {{ ctx.params.study_name | default(ctx.project.name if ctx.project else ctx.template.id, true) }}"
+echo "[INFO] Running scverse_scrna_prep for {{ ctx.project.name if ctx.project else ctx.template.id }}"
 echo "[INFO] Root: $ROOT_DIR"
 
 echo "[INFO] Installing/updating pixi environment"

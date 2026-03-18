@@ -33,19 +33,6 @@ def _find_template_entry(project_data: dict, template_id: str):
     return None
 
 
-def _authors_from_project(project_data: dict) -> str:
-    authors = project_data.get("authors")
-    if not isinstance(authors, list):
-        return ""
-    names = []
-    for author in authors:
-        if isinstance(author, dict):
-            name = author.get("name")
-            if name:
-                names.append(str(name))
-    return ", ".join(names)
-
-
 def populate(ctx) -> None:
     params = ctx.params
     project_data = _load_project_yaml(ctx)
@@ -68,12 +55,3 @@ def populate(ctx) -> None:
 
     if _needs_fill(params.get("sample_metadata")):
         params["sample_metadata"] = ""
-
-    if _needs_fill(params.get("study_name")):
-        if getattr(ctx, "project", None) and getattr(ctx.project, "name", None):
-            params["study_name"] = ctx.project.name
-        else:
-            params["study_name"] = ctx.template.id
-
-    if _needs_fill(params.get("authors")):
-        params["authors"] = _authors_from_project(project_data)

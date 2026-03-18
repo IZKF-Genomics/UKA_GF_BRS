@@ -14,18 +14,6 @@ params:
     required: false
     default: ""
     description: "Optional sample metadata CSV with a sample_id column; defaults to config/samples.csv scaffold"
-  study_name:
-    type: str
-    cli: "--study-name"
-    required: false
-    default: ""
-    description: "Optional report/project name; defaults to the BPM project name when available"
-  authors:
-    type: str
-    cli: "--authors"
-    required: false
-    default: ""
-    description: "Author string shown in the Quarto report"
   organism:
     type: str
     cli: "--organism"

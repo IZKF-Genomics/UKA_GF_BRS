@@ -11,7 +11,6 @@ description: scverse/Scanpy single-cell RNA-seq preprocessing from nf-core/scrna
 descriptor: templates/scverse_scrna_prep/template_config.yaml
 required_params: []
 optional_params:
-- authors
 - batch_key
 - condition_key
 - doublet_method
@@ -27,7 +26,6 @@ optional_params:
 - organism
 - sample_id_key
 - sample_metadata
-- study_name
 run_entry: run.sh
 publish_keys:
 - scrna_prep_h5ad
