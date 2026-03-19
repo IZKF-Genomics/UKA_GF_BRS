@@ -32,11 +32,8 @@ cd "$RUN_DIR"
 mkdir -p results
 START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-BCL_CONVERT_LOG="results/bcl_convert.log"
-FASTQC_LOG="results/fastqc.log"
-MULTIQC_LOG="results/multiqc.log"
-MANIFEST_LOG="results/fastq_manifest.log"
-CONTAMINATION_LOG="results/contamination.log"
+RUN_LOG="results/run.log"
+exec > >(tee -a "$RUN_LOG") 2>&1
 
 CONTAM_METHOD="{{ ctx.params.contamination_method }}"
 if [[ "$CONTAM_METHOD" == "none" && "{{ 'true' if ctx.params.run_fastq_screen else 'false' }}" == "true" ]]; then
@@ -93,7 +90,6 @@ DEST_DIR="./output"
 
 # Primary demultiplexing step.
 echo "Starting bcl-convert   : $DEST_DIR"
-echo "bcl-convert log        : $BCL_CONVERT_LOG"
 bcl-convert \
   --bcl-input-directory "{{ ctx.params.bcl_dir }}" \
   --output-directory "$DEST_DIR" \
@@ -102,27 +98,24 @@ bcl-convert \
   --no-lane-splitting "{{ 'true' if ctx.params.no_lane_splitting else 'false' }}" \
   --bcl-num-conversion-threads "$sub_threads" \
   --bcl-num-compression-threads "$sub_threads" \
-  --bcl-num-decompression-threads "$sub_threads" \
-  2>&1 | tee "$BCL_CONVERT_LOG"
+  --bcl-num-decompression-threads "$sub_threads"
 
 # Build FASTQ manifest and detect SE/PE libraries.
 echo "Building FASTQ manifest: results/fastq_manifest.csv"
 pixi run python ./build_fastq_manifest.py \
   --input "$DEST_DIR" \
-  --output "results/fastq_manifest.csv" \
-  2>&1 | tee "$MANIFEST_LOG"
+  --output "results/fastq_manifest.csv"
 
 # Run FastQC across the generated FASTQs.
-echo "Starting FastQC        : $FASTQC_LOG"
+echo "Starting FastQC"
 pixi run python ./process_fastqs.py \
   --mode fastqc \
   --manifest "results/fastq_manifest.csv" \
   --threads "$IDLE_CPUS" \
-  --fastqc-out "fastqc" \
-  2>&1 | tee "$FASTQC_LOG"
+  --fastqc-out "fastqc"
 
 if [[ "$CONTAM_METHOD" != "none" ]]; then
-  echo "Starting contamination : $CONTAMINATION_LOG"
+  echo "Starting contamination : $CONTAM_METHOD"
   pixi run python ./process_fastqs.py \
     --mode contamination \
     --manifest "results/fastq_manifest.csv" \
@@ -133,14 +126,13 @@ if [[ "$CONTAM_METHOD" != "none" ]]; then
     --bracken-read-length "{{ ctx.params.bracken_read_length }}" \
     --fastq-screen-out "fastq_screen" \
     --kraken2-out "kraken2" \
-    --bracken-out "bracken" \
-    2>&1 | tee "$CONTAMINATION_LOG"
+    --bracken-out "bracken"
 fi
 
 # Summarise everything with MultiQC once fastqs are ready.
-echo "Starting MultiQC       : $MULTIQC_LOG"
+echo "Starting MultiQC"
 mkdir -p multiqc
-pixi run multiqc -f . -o multiqc 2>&1 | tee "$MULTIQC_LOG"
+pixi run multiqc -f . -o multiqc
 
 # Clean up intermediate directories
 echo "Cleaning intermediates"

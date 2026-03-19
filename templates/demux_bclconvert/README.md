@@ -106,12 +106,8 @@ bpm template run demux_bclconvert
   - `build_fastq_manifest.py` helper script for FASTQ discovery and SE/PE detection.
   - `process_fastqs.py` helper script for FastQC and contamination backends.
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
+  - `results/run.log` with the full combined stdout/stderr stream from the run.
   - `results/fastq_manifest.csv` with detected read mode and paired FASTQ paths.
-  - `results/bcl_convert.log` with streamed demultiplexing output.
-  - `results/fastq_manifest.log` with manifest-generation output.
-  - `results/fastqc.log` with streamed FastQC output.
-  - `results/contamination.log` with streamed contamination-screening output.
-  - `results/multiqc.log` with streamed MultiQC output.
   - `multiqc/multiqc_report.html`.
   - `kraken2/` and `bracken/` result folders when those methods are enabled.
 
