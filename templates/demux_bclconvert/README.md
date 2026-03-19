@@ -11,6 +11,7 @@ description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, 
 descriptor: templates/demux_bclconvert/template_config.yaml
 source_of_truth:
 - templates/demux_bclconvert/run.sh.j2
+- templates/demux_bclconvert/collect_versions.sh.j2
 - templates/demux_bclconvert/template_config.yaml
 methods_file: templates/demux_bclconvert/METHODS.md
 citations_file: templates/demux_bclconvert/citations.yaml
@@ -45,7 +46,7 @@ software_version_capture:
   - fastqc --version
   - fastq_screen --version
   - multiqc --version
-render_file_count: 4
+render_file_count: 5
 ```
 <!-- AGENT_METADATA_END -->
 
@@ -81,6 +82,7 @@ bpm template run demux_bclconvert
 - Other outputs:
   - `samplesheet.csv` (rendered; overwritten by API hook when enabled).
   - `run.sh` in the run directory.
+  - `collect_versions.sh` helper script for software-version capture.
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
   - `results/bcl_convert.log` with streamed demultiplexing output.
   - `results/fastqc.log` with streamed FastQC output.
@@ -98,7 +100,7 @@ bpm template run demux_bclconvert
 - Manuscript bibliography source (for Quarto/Pandoc): `references.bib`.
 
 ## Version Provenance
-This template captures versions from tools executed in `run.sh` and writes them to `results/run_info.yaml`. The primary commands are:
+This template captures versions through `collect_versions.sh`, called from `run.sh`, and writes them to `results/run_info.yaml`. The primary commands are:
 - `bcl-convert --version`
 - `fastqc --version`
 - `fastq_screen --version`

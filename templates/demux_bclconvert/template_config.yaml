@@ -55,6 +55,7 @@ render:
   files:
     - samplesheet.csv -> samplesheet.csv
     - run.sh.j2 -> run.sh
+    - collect_versions.sh.j2 -> collect_versions.sh
     - get_threads.sh.j2 -> get_threads.sh
     - references.bib -> references.bib
 
