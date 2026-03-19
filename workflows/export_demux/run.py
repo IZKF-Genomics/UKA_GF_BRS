@@ -167,7 +167,7 @@ def _print_key_value(label: str, value: str, *, color: str = BLUE) -> None:
 
 def _strip_markdown_formatting(text: str) -> str:
     cleaned = text.strip()
-    cleaned = re.sub(r"[*_`#]+", "", cleaned)
+    cleaned = re.sub(r"[*`#]+", "", cleaned)
     cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1 (\2)", cleaned)
     return cleaned.strip()
 
