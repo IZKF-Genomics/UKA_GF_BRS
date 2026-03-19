@@ -58,6 +58,65 @@ def _strip_markdown_formatting(text: str) -> str:
     return cleaned.strip()
 
 
+def _format_export_details(text: str) -> list[str]:
+    cleaned = _strip_markdown_formatting(text)
+    if not cleaned:
+        return []
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    heading_map = {
+        "main report": "Main Report",
+        "access credentials": "Access Credentials",
+        "publisher results": "Publisher Results",
+    }
+    skip_lines = {"export complete", "your export has been successfully completed."}
+
+    output: list[str] = []
+    current_section = ""
+    current_publisher = False
+
+    for raw_line in lines:
+        normalized = raw_line.lower().strip()
+        normalized = normalized.lstrip("- ").strip()
+
+        if normalized in skip_lines:
+            continue
+
+        if normalized in heading_map:
+            if output:
+                output.append("")
+            current_section = heading_map[normalized]
+            current_publisher = current_section == "Publisher Results"
+            output.append(current_section)
+            continue
+
+        line = raw_line.lstrip("- ").strip()
+
+        if current_section == "Main Report":
+            output.append(f"- {line}")
+            continue
+
+        if current_section == "Access Credentials":
+            output.append(f"- {line}")
+            continue
+
+        if current_publisher:
+            if re.match(r"^Publisher\s+\d+\s*:", line, flags=re.I):
+                output.append(f"- {line}")
+            else:
+                output.append(f"  - {line}")
+            continue
+
+        output.append(line)
+
+    while output and output[-1] == "":
+        output.pop()
+    return output
+
+
 def _run_with_spinner(message: str, func):
     stop_event = threading.Event()
     spinner = ["|", "/", "-", "\\"]
@@ -248,7 +307,12 @@ def main() -> None:
         _print_key_value("Report URL", str(final_json["main_report"]), color=GREEN)
     if formatted_message:
         print("")
-        print(formatted_message)
+        _print_section("Export Details", CYAN)
+        export_detail_lines = _format_export_details(formatted_message)
+        if export_detail_lines:
+            print("\n".join(export_detail_lines))
+        else:
+            print(formatted_message)
 
     if plain_message:
         print("")
