@@ -4,9 +4,11 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import hashlib
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +23,7 @@ class SpeciesEntry:
     taxid: int
     fasta_url: str
     fastq_screen_label: str
+    filename: str
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,7 +55,16 @@ def as_species(entries: list[dict[str, Any]]) -> list[SpeciesEntry]:
         fasta_url = str(require(raw.get("fasta_url"), f"Species '{label}' is missing fasta_url.")).strip()
         taxid = int(require(raw.get("taxid"), f"Species '{label}' is missing taxid."))
         fastq_screen_label = str(raw.get("fastq_screen_label") or label).strip()
-        species.append(SpeciesEntry(label=label, taxid=taxid, fasta_url=fasta_url, fastq_screen_label=fastq_screen_label))
+        filename = str(raw.get("filename") or Path(fasta_url.split("?")[0]).name or f"{label}.fa.gz").strip()
+        species.append(
+            SpeciesEntry(
+                label=label,
+                taxid=taxid,
+                fasta_url=fasta_url,
+                fastq_screen_label=fastq_screen_label,
+                filename=filename,
+            )
+        )
     if not species:
         raise SystemExit("No enabled species configured. Edit contamination_db.yaml and add at least one FASTA source.")
     return species
@@ -73,11 +85,36 @@ def ensure_empty_or_force(path: Path, force: bool) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def download_file(url: str, dest: Path) -> None:
+def sha256sum(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def download_file(url: str, dest: Path, retries: int = 3, timeout: int = 120) -> tuple[str, str]:
     print(f"Downloading           : {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as response, dest.open("wb") as out:
-        shutil.copyfileobj(response, out)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    request = urllib.request.Request(url, headers={"User-Agent": "UKA_GF_BRS contamination_db/2026.03.19"})
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response, tmp.open("wb") as out:
+                shutil.copyfileobj(response, out)
+                final_url = response.geturl()
+            tmp.replace(dest)
+            return final_url, sha256sum(dest)
+        except Exception as exc:
+            last_error = exc
+            if tmp.exists():
+                tmp.unlink()
+            if attempt == retries:
+                break
+            print(f"Download retry        : {attempt}/{retries} for {dest.name}", file=sys.stderr)
+            time.sleep(2 * attempt)
+    raise SystemExit(f"Failed to download {url}: {last_error}")
 
 
 def decompress_if_needed(src: Path, dest_dir: Path) -> Path:
@@ -113,6 +150,8 @@ def write_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
             "label",
             "taxid",
             "fasta_url",
+            "final_url",
+            "sha256",
             "downloaded_file",
             "extracted_fasta",
             "normalized_fasta",
@@ -196,12 +235,11 @@ def main() -> None:
 
     manifest_rows: list[dict[str, Any]] = []
     for entry in species:
-        filename = Path(entry.fasta_url.split("?")[0]).name or f"{entry.label}.fa.gz"
-        downloaded = downloads_dir / filename
+        downloaded = downloads_dir / entry.filename
         extracted = extracted_dir / (downloaded.stem if downloaded.suffix == ".gz" else downloaded.name)
         normalized = normalized_dir / f"{entry.label}.fa"
 
-        download_file(entry.fasta_url, downloaded)
+        final_url, checksum = download_file(entry.fasta_url, downloaded)
         extracted = decompress_if_needed(downloaded, extracted_dir)
         seq_count = normalize_kraken_headers(extracted, normalized, entry.taxid, entry.label)
         manifest_rows.append(
@@ -209,6 +247,8 @@ def main() -> None:
                 "label": entry.label,
                 "taxid": entry.taxid,
                 "fasta_url": entry.fasta_url,
+                "final_url": final_url,
+                "sha256": checksum,
                 "downloaded_file": str(downloaded),
                 "extracted_fasta": str(extracted),
                 "normalized_fasta": str(normalized),
@@ -284,6 +324,8 @@ def main() -> None:
                 "label": row["label"],
                 "taxid": row["taxid"],
                 "fasta_url": row["fasta_url"],
+                "final_url": row["final_url"],
+                "sha256": row["sha256"],
                 "sequence_count": row["sequence_count"],
             }
             for row in manifest_rows

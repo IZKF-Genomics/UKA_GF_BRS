@@ -49,6 +49,7 @@ The template also updates `current` symlinks under each tool root:
   - `results/db_build_info.yaml`
   - `results/genome_manifest_resolved.csv`
   - `results/run.log`
+- Downloaded FASTAs are recorded with their resolved final URL and SHA256 checksum before staging is cleaned.
 - Kraken2 FASTA headers are normalized with `kraken:taxid` tags before the library build.
 - Bracken assets are built against the exact Kraken2 DB produced in the same run.
 - FastQ Screen Bowtie2 indexes and `fastq_screen.conf` are generated from the same species panel.
@@ -65,6 +66,7 @@ The template also updates `current` symlinks under each tool root:
   - `label`
   - `taxid`
   - `fasta_url`
+  - optional `filename`
   - optional `fastq_screen_label`
 
 ## Outputs

@@ -28,50 +28,60 @@ species:
   - label: human
     taxid: 9606
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz"
+    filename: "human.fa.gz"
     enabled: true
     fastq_screen_label: "Human"
   - label: mouse
     taxid: 10090
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz"
+    filename: "mouse.fa.gz"
     enabled: true
     fastq_screen_label: "Mouse"
   - label: rat
     taxid: 10116
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/rattus_norvegicus/dna/Rattus_norvegicus.GRCr8.dna.toplevel.fa.gz"
+    filename: "rat.fa.gz"
     enabled: true
     fastq_screen_label: "Rat"
   - label: zebrafish
     taxid: 7955
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/danio_rerio/dna/Danio_rerio.GRCz11.dna.primary_assembly.fa.gz"
+    filename: "zebrafish.fa.gz"
     enabled: true
     fastq_screen_label: "Zebrafish"
   - label: pig
     taxid: 9823
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/sus_scrofa/dna/Sus_scrofa.Sscrofa11.1.dna.toplevel.fa.gz"
+    filename: "pig.fa.gz"
     enabled: true
     fastq_screen_label: "Pig"
   - label: cow
     taxid: 9913
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/bos_taurus/dna/Bos_taurus.ARS-UCD2.0.dna.toplevel.fa.gz"
+    filename: "cow.fa.gz"
     enabled: true
     fastq_screen_label: "Cow"
   - label: chicken
     taxid: 9031
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/gallus_gallus/dna/Gallus_gallus.bGalGal1.mat.broiler.GRCg7b.dna.toplevel.fa.gz"
+    filename: "chicken.fa.gz"
     enabled: true
     fastq_screen_label: "Chicken"
   - label: dog
     taxid: 9615
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/canis_lupus_familiaris/dna/Canis_lupus_familiaris.ROS_Cfam_1.0.dna.toplevel.fa.gz"
+    filename: "dog.fa.gz"
     enabled: true
     fastq_screen_label: "Dog"
   - label: cat
     taxid: 9685
     fasta_url: "https://ftp.ensembl.org/pub/current_fasta/felis_catus/dna/Felis_catus.F.catus_Fca126_mat1.0.dna.toplevel.fa.gz"
+    filename: "cat.fa.gz"
     enabled: true
     fastq_screen_label: "Cat"
   - label: phix
     taxid: 10847
     fasta_url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id=NC_001422.1&rettype=fasta&retmode=text"
+    filename: "phix.fa"
     enabled: true
     fastq_screen_label: "PhiX"
