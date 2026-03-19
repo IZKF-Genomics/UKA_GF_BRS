@@ -1,8 +1,8 @@
 """
 Resolver: get_fastq_folder
-Purpose: Find the folder under the current template directory that contains FASTQ files
-         (excluding any path with 'Undetermined' in it), and return it as a
-         hostname-aware path string suitable for storing in project.yaml.
+Purpose: Return the FASTQ output root directory for the current template run,
+         provided that FASTQ files exist under it (excluding any path with
+         'Undetermined' in it).
 
 Return:
   str  -> "host:/abs/posix/path"
@@ -68,12 +68,13 @@ def _hostify(ctx, abs_local_path: Path) -> str:
 
 def main(ctx) -> str:
     """
-    Locate the FASTQ output directory for this template run.
+    Locate the FASTQ output root directory for this template run.
 
     Behavior:
       - Project mode: base is <project_dir>/<tpl_id>
       - Ad‑hoc mode:  base is ctx.cwd (render.into='.')
       - Prefer '<base>/output' if it exists, else use '<base>'
+      - Return the root directory itself once FASTQs are detected anywhere under it
       - Exclude any path containing 'Undetermined'
 
     Returns a hostname-aware path string.
@@ -87,27 +88,26 @@ def main(ctx) -> str:
     # Prefer the common bcl-convert layout: <base>/output
     root = (base / "output") if (base / "output").is_dir() else base
 
-    candidates: list[tuple[int, Path]] = []
-
     for dirpath, _, files in os.walk(root):
         p = Path(dirpath)
         # Exclude any path containing 'Undetermined' (case-insensitive)
         if any("undetermined" in part.lower() for part in p.parts):
             continue
 
-        # Count FASTQ files in this directory (non-recursive for this node)
-        fastq_count = sum(1 for f in files if f.lower().endswith(FASTQ_EXTS))
-        if fastq_count > 0:
-            candidates.append((fastq_count, p))
+        if any(f.lower().endswith(FASTQ_EXTS) for f in files):
+            return _hostify(ctx, root.resolve())
 
-    if not candidates:
+    if not root.exists():
         raise RuntimeError(
-            "No FASTQ files found under template directory "
-            f"('{root}'), excluding 'Undetermined' paths."
+            f"FASTQ output root not found: '{root}'. Expected demultiplexed FASTQs under this directory."
         )
 
-    # Pick the dir with the most FASTQs; tie-break by path string for determinism
-    candidates.sort(key=lambda t: (-t[0], t[1].as_posix()))
-    best = candidates[0][1]
+    if not any(root.iterdir()):
+        raise RuntimeError(
+            f"FASTQ output root exists but is empty: '{root}'. Expected demultiplexed FASTQs under this directory."
+        )
 
-    return _hostify(ctx, best.resolve())
+    raise RuntimeError(
+        "No FASTQ files found under template directory "
+        f"('{root}'), excluding 'Undetermined' paths."
+    )

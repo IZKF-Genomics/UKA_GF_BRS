@@ -30,7 +30,7 @@ FASTQ_SCREEN_LOG="results/fastq_screen.log"
 {% endif %}
 
 echo "Preparing run metadata : results/run_info.yaml"
-echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc, parallel"
+echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc"
 
 {
   echo "timestamp: \"$START_TS\""
@@ -60,7 +60,7 @@ finalize_run_info() {
 }
 trap finalize_run_info EXIT
 
-DEST_DIR="{{ '.' if ctx.params.sampleproject_subdirs else './output' }}"
+DEST_DIR="./output"
 
 # Primary demultiplexing step.
 echo "Starting bcl-convert   : $DEST_DIR"

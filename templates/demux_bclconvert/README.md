@@ -77,8 +77,9 @@ bpm template run demux_bclconvert
 ## Outputs
 - Render target (project mode): `${ctx.project_dir}/${ctx.template.id}/`.
 - Run directory: same as render target.
-- FASTQ output (`sampleproject_subdirs = true`): bcl-convert creates project subfolders.
-- FASTQ output (`sampleproject_subdirs = false`): FASTQs are written under `./output/`.
+- FASTQ output root: `./output/`.
+- FASTQ output (`sampleproject_subdirs = true`): bcl-convert creates project/sample subfolders under `./output/`.
+- FASTQ output (`sampleproject_subdirs = false`): FASTQs are written directly under `./output/`.
 - Other outputs:
   - `samplesheet.csv` (rendered; overwritten by API hook when enabled).
   - `run.sh` in the run directory.
@@ -91,7 +92,7 @@ bpm template run demux_bclconvert
   - `multiqc/multiqc_report.html`.
 
 ## Published Keys
-- `FASTQ_dir`: Host-aware path to the chosen FASTQ directory.
+- `FASTQ_dir`: Host-aware path to the FASTQ output root directory.
 - `multiqc_report`: Host-aware path to the MultiQC HTML report.
 
 ## Methods and Citations
