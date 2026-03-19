@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import re
+from pathlib import Path
+
+
+FASTQ_SUFFIXES = (".fastq.gz", ".fq.gz", ".fastq", ".fq")
+READ_RE = re.compile(r"^(?P<prefix>.+?)_R(?P<read>[12])(?:_(?P<chunk>\d+))?$")
+SAMPLE_RE = re.compile(r"^(?P<sample>.+?)(?:_S\d+)?(?:_L\d{3})?$")
+
+
+def strip_fastq_suffix(name: str) -> str:
+    for suffix in FASTQ_SUFFIXES:
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def sample_id_from_prefix(prefix: str) -> str:
+    m = SAMPLE_RE.match(prefix)
+    return m.group("sample") if m else prefix
+
+
+def discover_fastqs(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        if any("undetermined" in part.lower() for part in path.parts):
+            continue
+        if path.name.endswith(FASTQ_SUFFIXES):
+            files.append(path)
+    return files
+
+
+def build_rows(files: list[Path]) -> list[dict[str, str]]:
+    grouped: dict[str, dict[str, list[Path]]] = {}
+
+    for path in files:
+        stem = strip_fastq_suffix(path.name)
+        m = READ_RE.match(stem)
+        if m:
+            prefix = m.group("prefix")
+            read = m.group("read")
+        else:
+            prefix = stem
+            read = "1"
+        grouped.setdefault(prefix, {"1": [], "2": []})
+        grouped[prefix][read].append(path)
+
+    rows: list[dict[str, str]] = []
+    errors: list[str] = []
+
+    for prefix in sorted(grouped):
+        r1 = sorted(grouped[prefix]["1"])
+        r2 = sorted(grouped[prefix]["2"])
+        sample_id = sample_id_from_prefix(prefix)
+
+        if r2 and not r1:
+            errors.append(f"{prefix}: found R2 FASTQ(s) without R1 partner")
+            continue
+        if len(r1) > 1 or len(r2) > 1:
+            errors.append(
+                f"{prefix}: expected at most one R1 and one R2 FASTQ after grouping, found {len(r1)} R1 and {len(r2)} R2"
+            )
+            continue
+
+        if r1 and r2:
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "sample_key": prefix,
+                    "read_mode": "PE",
+                    "r1": str(r1[0].resolve()),
+                    "r2": str(r2[0].resolve()),
+                }
+            )
+        elif r1:
+            rows.append(
+                {
+                    "sample_id": sample_id,
+                    "sample_key": prefix,
+                    "read_mode": "SE",
+                    "r1": str(r1[0].resolve()),
+                    "r2": "",
+                }
+            )
+
+    if errors:
+        raise SystemExit("FASTQ pairing errors:\n- " + "\n- ".join(errors))
+
+    return rows
+
+
+def write_csv(rows: list[dict[str, str]], out_csv: Path) -> None:
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    with out_csv.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["sample_id", "sample_key", "read_mode", "r1", "r2"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Build FASTQ manifest with SE/PE detection.")
+    parser.add_argument("--input", required=True, help="FASTQ root directory")
+    parser.add_argument("--output", required=True, help="Output CSV path")
+    args = parser.parse_args()
+
+    root = Path(args.input).resolve()
+    out_csv = Path(args.output).resolve()
+
+    if not root.exists():
+        raise SystemExit(f"FASTQ root not found: {root}")
+
+    files = discover_fastqs(root)
+    if not files:
+        raise SystemExit(f"No FASTQ files found under: {root}")
+
+    rows = build_rows(files)
+    write_csv(rows, out_csv)
+
+    pe = sum(1 for row in rows if row["read_mode"] == "PE")
+    se = sum(1 for row in rows if row["read_mode"] == "SE")
+    print(f"FASTQ files discovered : {len(files)}")
+    print(f"Manifest rows          : {len(rows)}")
+    print(f"Paired-end libraries   : {pe}")
+    print(f"Single-end libraries   : {se}")
+    print(f"Manifest path          : {out_csv}")
+
+
+if __name__ == "__main__":
+    main()

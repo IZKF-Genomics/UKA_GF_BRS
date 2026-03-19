@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import csv
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run FastQC and contamination screening on demultiplexed FASTQs.")
+    parser.add_argument("--mode", choices=["fastqc", "contamination"], required=True)
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--threads", type=int, required=True)
+    parser.add_argument("--fastqc-out", default="fastqc")
+    parser.add_argument("--contamination-method", default="none")
+    parser.add_argument("--kraken2-db", default="")
+    parser.add_argument("--kraken2-confidence", type=float, default=0.0)
+    parser.add_argument("--bracken-read-length", type=int, default=0)
+    parser.add_argument("--kraken2-out", default="kraken2")
+    parser.add_argument("--bracken-out", default="bracken")
+    parser.add_argument("--fastq-screen-out", default="fastq_screen")
+    return parser.parse_args()
+
+
+def read_manifest(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        return list(csv.DictReader(fh))
+
+
+def require_db_files(method: str, kraken2_db: str, bracken_read_length: int, threads: int) -> Path:
+    db = Path(kraken2_db).resolve() if kraken2_db else None
+    if method not in {"kraken2", "kraken2_bracken"}:
+        return Path(".")
+    if db is None or not db.exists():
+        print("Kraken2 database not found.", file=sys.stderr)
+        print(f"Expected path: {kraken2_db or '<unset>'}", file=sys.stderr)
+        print("Build command:", file=sys.stderr)
+        print(f'  kraken2-build --standard --threads {max(1, threads)} --db "{kraken2_db}"', file=sys.stderr)
+        raise SystemExit(2)
+    required = ["hash.k2d", "opts.k2d", "taxo.k2d"]
+    missing = [name for name in required if not (db / name).exists()]
+    if missing:
+        print(f"Kraken2 database is incomplete: {db}", file=sys.stderr)
+        print("Missing files:", ", ".join(missing), file=sys.stderr)
+        print("Rebuild command:", file=sys.stderr)
+        print(f'  kraken2-build --standard --threads {max(1, threads)} --db "{db}"', file=sys.stderr)
+        raise SystemExit(2)
+
+    if method == "kraken2_bracken":
+        if bracken_read_length <= 0:
+            raise SystemExit("bracken_read_length must be > 0 when contamination_method=kraken2_bracken")
+        bracken_file = db / f"database{bracken_read_length}mers.kmer_distrib"
+        if not bracken_file.exists():
+            print(f"Bracken database assets for read length {bracken_read_length} not found.", file=sys.stderr)
+            print(f"Expected file: {bracken_file}", file=sys.stderr)
+            print("Build command:", file=sys.stderr)
+            print(f'  bracken-build -d "{db}" -t {max(1, threads)} -l {bracken_read_length}', file=sys.stderr)
+            raise SystemExit(2)
+
+    return db
+
+
+def run_cmd(cmd: list[str]) -> None:
+    proc = subprocess.run(cmd, check=False)
+    if proc.returncode != 0:
+        raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}")
+
+
+def run_fastqc(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for row in rows:
+        files.append(row["r1"])
+        if row.get("r2"):
+            files.append(row["r2"])
+    files = sorted(set(files))
+    print(f"FastQC files          : {len(files)}")
+    print(f"FastQC workers        : {threads}")
+    with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
+        futures = [ex.submit(run_cmd, ["fastqc", fq, "-o", str(out_dir)]) for fq in files]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def run_fastq_screen(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    files = []
+    for row in rows:
+        files.append(row["r1"])
+        if row.get("r2"):
+            files.append(row["r2"])
+    files = sorted(set(files))
+    print(f"FastQ Screen files    : {len(files)}")
+    print(f"FastQ Screen workers  : {threads}")
+    with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
+        futures = [ex.submit(run_cmd, ["fastq_screen", "--outdir", str(out_dir), fq]) for fq in files]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def kraken_cmd(row: dict[str, str], out_dir: Path, db: Path, confidence: float) -> list[str]:
+    base = row["sample_key"]
+    report = out_dir / f"{base}.kraken.report.txt"
+    output = out_dir / f"{base}.kraken.txt"
+    cmd = [
+        "kraken2",
+        "--db",
+        str(db),
+        "--threads",
+        "1",
+        "--report",
+        str(report),
+        "--output",
+        str(output),
+    ]
+    if confidence > 0:
+        cmd.extend(["--confidence", str(confidence)])
+    if row["read_mode"] == "PE":
+        cmd.extend(["--paired", row["r1"], row["r2"]])
+    else:
+        cmd.append(row["r1"])
+    return cmd
+
+
+def bracken_cmd(row: dict[str, str], kraken_dir: Path, db: Path, read_length: int, out_dir: Path) -> list[str]:
+    base = row["sample_key"]
+    report = kraken_dir / f"{base}.kraken.report.txt"
+    output = out_dir / f"{base}.bracken.txt"
+    report_out = out_dir / f"{base}.bracken.report.txt"
+    return [
+        "bracken",
+        "-d",
+        str(db),
+        "-i",
+        str(report),
+        "-o",
+        str(output),
+        "-w",
+        str(report_out),
+        "-r",
+        str(read_length),
+        "-l",
+        "S",
+    ]
+
+
+def run_kraken(rows: list[dict[str, str]], threads: int, out_dir: Path, db: Path, confidence: float) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Kraken2 libraries     : {len(rows)}")
+    print(f"Kraken2 workers       : {threads}")
+    with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
+        futures = [ex.submit(run_cmd, kraken_cmd(row, out_dir, db, confidence)) for row in rows]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def run_bracken(rows: list[dict[str, str]], threads: int, kraken_dir: Path, db: Path, read_length: int, out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Bracken libraries     : {len(rows)}")
+    print(f"Bracken workers       : {threads}")
+    with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
+        futures = [ex.submit(run_cmd, bracken_cmd(row, kraken_dir, db, read_length, out_dir)) for row in rows]
+        for fut in as_completed(futures):
+            fut.result()
+
+
+def main() -> None:
+    args = parse_args()
+    manifest = Path(args.manifest).resolve()
+    rows = read_manifest(manifest)
+    threads = max(1, args.threads)
+
+    if args.mode == "fastqc":
+        run_fastqc(rows, threads, Path(args.fastqc_out).resolve())
+        return
+
+    method = args.contamination_method.strip().lower()
+    if method == "none":
+        print("Contamination method  : none")
+        return
+
+    if method == "fastq_screen":
+        run_fastq_screen(rows, threads, Path(args.fastq_screen_out).resolve())
+        return
+
+    db = require_db_files(method, args.kraken2_db, args.bracken_read_length, threads)
+    kraken_dir = Path(args.kraken2_out).resolve()
+    run_kraken(rows, threads, kraken_dir, db, args.kraken2_confidence)
+
+    if method == "kraken2_bracken":
+        run_bracken(rows, threads, kraken_dir, db, args.bracken_read_length, Path(args.bracken_out).resolve())
+
+
+if __name__ == "__main__":
+    main()

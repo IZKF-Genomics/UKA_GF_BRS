@@ -14,17 +14,34 @@ capture_version() {
   echo "$raw"
 }
 
+capture_pixi_version() {
+  local label="$1"
+  shift
+  local raw
+  raw="$(pixi run "$@" 2>&1 | head -n 1 | tr -d '\r')" || raw="unknown"
+  if [[ -z "$raw" ]]; then
+    raw="unknown"
+  fi
+  echo "$raw"
+}
+
 yaml_escape() {
   printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
 }
 
 echo "versions:"
 echo "  bcl-convert: \"$(yaml_escape "$(capture_version bcl-convert bcl-convert --version)")\""
-echo "  fastqc: \"$(yaml_escape "$(capture_version fastqc fastqc --version)")\""
-echo "  fastq_screen: \"$(yaml_escape "$(capture_version fastq_screen fastq_screen --version)")\""
-echo "  multiqc: \"$(yaml_escape "$(capture_version multiqc multiqc --version)")\""
+echo "  pixi: \"$(yaml_escape "$(capture_version pixi pixi --version)")\""
+echo "  fastqc: \"$(yaml_escape "$(capture_pixi_version fastqc fastqc --version)")\""
+echo "  fastq_screen: \"$(yaml_escape "$(capture_pixi_version fastq_screen fastq_screen --version)")\""
+echo "  multiqc: \"$(yaml_escape "$(capture_pixi_version multiqc multiqc --version)")\""
+echo "  kraken2: \"$(yaml_escape "$(capture_pixi_version kraken2 kraken2 --version)")\""
+echo "  bracken: \"$(yaml_escape "$(capture_pixi_version bracken bracken -v)")\""
 echo "software_version_sources:"
 echo "  - \"bcl-convert --version\""
-echo "  - \"fastqc --version\""
-echo "  - \"fastq_screen --version\""
-echo "  - \"multiqc --version\""
+echo "  - \"pixi --version\""
+echo "  - \"pixi run fastqc --version\""
+echo "  - \"pixi run fastq_screen --version\""
+echo "  - \"pixi run multiqc --version\""
+echo "  - \"pixi run kraken2 --version\""
+echo "  - \"pixi run bracken -v\""

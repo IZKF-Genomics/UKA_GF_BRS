@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: required command not found in PATH: $1" >&2
+    exit 127
+  fi
+}
+
 {% if ctx.params.get("flowcell_id") %}
 echo "Flowcell ID         : {{ ctx.params.flowcell_id }}"
 {% endif %}
 echo "Thread ratio        : {{ ctx.params.thread_ratio }}"
 echo "FASTQ subdirs       : {{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
 echo "fastq_screen        : {{ 'enabled' if ctx.params.run_fastq_screen else 'disabled' }}"
+
+require_cmd bcl-convert
+require_cmd pixi
 
 # Derive per-stage threads from the current host using the bundled helper.
 THREADS=$(bash "$(dirname "${BASH_SOURCE[0]}")/get_threads.sh" "{{ ctx.params.thread_ratio }}")
@@ -25,12 +35,27 @@ START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 BCL_CONVERT_LOG="results/bcl_convert.log"
 FASTQC_LOG="results/fastqc.log"
 MULTIQC_LOG="results/multiqc.log"
-{% if ctx.params.run_fastq_screen %}
-FASTQ_SCREEN_LOG="results/fastq_screen.log"
-{% endif %}
+MANIFEST_LOG="results/fastq_manifest.log"
+CONTAMINATION_LOG="results/contamination.log"
+
+CONTAM_METHOD="{{ ctx.params.contamination_method }}"
+if [[ "$CONTAM_METHOD" == "none" && "{{ 'true' if ctx.params.run_fastq_screen else 'false' }}" == "true" ]]; then
+  CONTAM_METHOD="fastq_screen"
+fi
+
+echo "contamination method: $CONTAM_METHOD"
+if [[ "$CONTAM_METHOD" == "kraken2" || "$CONTAM_METHOD" == "kraken2_bracken" ]]; then
+  echo "kraken2 db          : {{ ctx.params.kraken2_db }}"
+fi
+if [[ "$CONTAM_METHOD" == "kraken2_bracken" ]]; then
+  echo "bracken read length : {{ ctx.params.bracken_read_length }}"
+fi
+
+echo "Installing pixi env    : pixi.toml"
+pixi install
 
 echo "Preparing run metadata : results/run_info.yaml"
-echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc"
+echo "Collecting versions    : bcl-convert, pixi, fastqc, fastq_screen, multiqc, kraken2, bracken"
 
 {
   echo "timestamp: \"$START_TS\""
@@ -42,6 +67,10 @@ echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc"
   echo "  sampleproject_subdirs: {{ 'true' if ctx.params.sampleproject_subdirs else 'false' }}"
   echo "  no_lane_splitting: {{ 'true' if ctx.params.no_lane_splitting else 'false' }}"
   echo "  run_fastq_screen: {{ 'true' if ctx.params.run_fastq_screen else 'false' }}"
+  echo "  contamination_method: \"$CONTAM_METHOD\""
+  echo "  kraken2_db: \"{{ ctx.params.kraken2_db }}\""
+  echo "  kraken2_confidence: {{ ctx.params.kraken2_confidence }}"
+  echo "  bracken_read_length: {{ ctx.params.bracken_read_length }}"
 } > results/run_info.yaml
 
 echo "Run metadata ready     : results/run_info.yaml"
@@ -76,30 +105,43 @@ bcl-convert \
   --bcl-num-decompression-threads "$sub_threads" \
   2>&1 | tee "$BCL_CONVERT_LOG"
 
-# Run FastQC in parallel across the generated FASTQs.
+# Build FASTQ manifest and detect SE/PE libraries.
+echo "Building FASTQ manifest: results/fastq_manifest.csv"
+pixi run python ./build_fastq_manifest.py \
+  --input "$DEST_DIR" \
+  --output "results/fastq_manifest.csv" \
+  2>&1 | tee "$MANIFEST_LOG"
+
+# Run FastQC across the generated FASTQs.
 echo "Starting FastQC        : $FASTQC_LOG"
-mkdir -p fastqc
-find "$DEST_DIR" -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
- parallel -0 -j "$IDLE_CPUS" "fastqc {} -o fastqc" \
+pixi run python ./process_fastqs.py \
+  --mode fastqc \
+  --manifest "results/fastq_manifest.csv" \
+  --threads "$IDLE_CPUS" \
+  --fastqc-out "fastqc" \
   2>&1 | tee "$FASTQC_LOG"
 
-{% if ctx.params.run_fastq_screen %}
-# Optional contamination screen.
-echo "Starting fastq_screen  : $FASTQ_SCREEN_LOG"
-mkdir -p fastq_screen
-find "$DEST_DIR" -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
-  parallel -0 -j "$IDLE_CPUS" "fastq_screen --outdir fastq_screen {}" \
-  2>&1 | tee "$FASTQ_SCREEN_LOG"
-{% endif %}
+if [[ "$CONTAM_METHOD" != "none" ]]; then
+  echo "Starting contamination : $CONTAMINATION_LOG"
+  pixi run python ./process_fastqs.py \
+    --mode contamination \
+    --manifest "results/fastq_manifest.csv" \
+    --threads "$IDLE_CPUS" \
+    --contamination-method "$CONTAM_METHOD" \
+    --kraken2-db "{{ ctx.params.kraken2_db }}" \
+    --kraken2-confidence "{{ ctx.params.kraken2_confidence }}" \
+    --bracken-read-length "{{ ctx.params.bracken_read_length }}" \
+    --fastq-screen-out "fastq_screen" \
+    --kraken2-out "kraken2" \
+    --bracken-out "bracken" \
+    2>&1 | tee "$CONTAMINATION_LOG"
+fi
 
 # Summarise everything with MultiQC once fastqs are ready.
 echo "Starting MultiQC       : $MULTIQC_LOG"
 mkdir -p multiqc
-multiqc -f . -o multiqc 2>&1 | tee "$MULTIQC_LOG"
+pixi run multiqc -f . -o multiqc 2>&1 | tee "$MULTIQC_LOG"
 
 # Clean up intermediate directories
 echo "Cleaning intermediates"
 [[ -d fastqc ]] && rm -rf fastqc
-{% if ctx.params.run_fastq_screen %}
-[[ -d fastq_screen ]] && rm -rf fastq_screen
-{% endif %}

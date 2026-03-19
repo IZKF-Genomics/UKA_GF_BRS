@@ -13,7 +13,11 @@ citations:
     text: "Ewels P, Magnusson M, Lundin S, Kaller M. MultiQC: summarize analysis results for multiple tools and samples in a single report. Bioinformatics (2016)."
     doi: "10.1093/bioinformatics/btw354"
     url: "https://academic.oup.com/bioinformatics/article/32/19/3047/2196507"
-  - id: gnu-parallel
-    text: "Tange O. GNU Parallel: The Command-Line Power Tool. ;login: The USENIX Magazine (2011)."
-    url: "https://www.gnu.org/software/parallel/"
-
+  - id: kraken2
+    text: "Wood DE, Lu J, Langmead B. Improved metagenomic analysis with Kraken 2. Genome Biology (2019)."
+    doi: "10.1186/s13059-019-1891-0"
+    url: "https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1891-0"
+  - id: bracken
+    text: "Lu J, Breitwieser FP, Thielen P, Salzberg SL. Bracken: estimating species abundance in metagenomics data. PeerJ Computer Science (2017)."
+    doi: "10.7717/peerj-cs.104"
+    url: "https://peerj.com/articles/cs-104/"

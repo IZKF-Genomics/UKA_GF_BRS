@@ -1,5 +1,5 @@
 id: demux_bclconvert
-description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen, and MultiQC.
+description: Demultiplex Illumina BCLs using bcl-convert, then run Pixi-managed FASTQ QC, optional contamination screening, and MultiQC.
 
 params:
   bcl_dir:
@@ -29,7 +29,27 @@ params:
     type: bool
     default: false
     cli: "--fastq-screen"
-    description: "Run fastq_screen after demultiplexing"
+    description: "Backward-compatibility switch: if contamination_method=none, use fastq_screen"
+  contamination_method:
+    type: str
+    default: "none"
+    cli: "--contamination-method"
+    description: "Contamination backend: none, fastq_screen, kraken2, or kraken2_bracken"
+  kraken2_db:
+    type: str
+    default: "/data/shared/databases/kraken2/standard/current"
+    cli: "--kraken2-db"
+    description: "Shared Kraken2 database path used for kraken2 or kraken2_bracken"
+  kraken2_confidence:
+    type: float
+    default: 0.0
+    cli: "--kraken2-confidence"
+    description: "Kraken2 confidence threshold"
+  bracken_read_length:
+    type: int
+    default: 151
+    cli: "--bracken-read-length"
+    description: "Read length for Bracken database assets"
   thread_ratio:
     type: float
     default: 0.8
@@ -46,16 +66,19 @@ params:
 
 
 tools:
-  required: [bcl-convert, fastqc, multiqc, parallel]
-  optional: [fastq_screen]
+  required: [bcl-convert, pixi]
+  optional: [mpstat]
 
 render:
   into: "${ctx.project_dir}/${ctx.template.id}/"
   adhoc_out_resolver: "resolvers.demux_out_from_bcl"
   files:
     - samplesheet.csv -> samplesheet.csv
+    - pixi.toml -> pixi.toml
     - run.sh.j2 -> run.sh
     - collect_versions.sh.j2 -> collect_versions.sh
+    - build_fastq_manifest.py.j2 -> build_fastq_manifest.py
+    - process_fastqs.py.j2 -> process_fastqs.py
     - get_threads.sh.j2 -> get_threads.sh
     - references.bib -> references.bib
 
