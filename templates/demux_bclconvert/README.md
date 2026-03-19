@@ -83,6 +83,10 @@ bpm template run demux_bclconvert
   - `samplesheet.csv` (rendered; overwritten by API hook when enabled).
   - `run.sh` in the run directory.
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
+  - `results/bcl_convert.log` with streamed demultiplexing output.
+  - `results/fastqc.log` with streamed FastQC output.
+  - `results/multiqc.log` with streamed MultiQC output.
+  - `results/fastq_screen.log` when `run_fastq_screen=true`.
   - `multiqc/multiqc_report.html`.
 
 ## Published Keys
@@ -112,3 +116,4 @@ This template captures versions from tools executed in `run.sh` and writes them 
 - Credentials: params `gf_api_name`/`gf_api_pass` or env `GF_API_NAME`/`GF_API_PASS`.
 - Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, render fails. `agendo_id` is only used on flowcell 404 responses.
 - Render aborts if samplesheet fetch fails.
+- The run script prints explicit phase banners before `bcl-convert`, FastQC, optional FastQ Screen, and MultiQC.

@@ -39,6 +39,15 @@ cd "$RUN_DIR"
 mkdir -p results
 START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+BCL_CONVERT_LOG="results/bcl_convert.log"
+FASTQC_LOG="results/fastqc.log"
+MULTIQC_LOG="results/multiqc.log"
+{% if ctx.params.run_fastq_screen %}
+FASTQ_SCREEN_LOG="results/fastq_screen.log"
+{% endif %}
+
+echo "Preparing run metadata : results/run_info.yaml"
+
 {
   echo "timestamp: \"$START_TS\""
   echo "command: \"bash run.sh\""
@@ -79,6 +88,8 @@ trap finalize_run_info EXIT
 DEST_DIR="{{ '.' if ctx.params.sampleproject_subdirs else './output' }}"
 
 # Primary demultiplexing step.
+echo "Starting bcl-convert   : $DEST_DIR"
+echo "bcl-convert log        : $BCL_CONVERT_LOG"
 bcl-convert \
   --bcl-input-directory "{{ ctx.params.bcl_dir }}" \
   --output-directory "$DEST_DIR" \
@@ -87,26 +98,32 @@ bcl-convert \
   --no-lane-splitting "{{ 'true' if ctx.params.no_lane_splitting else 'false' }}" \
   --bcl-num-conversion-threads "$sub_threads" \
   --bcl-num-compression-threads "$sub_threads" \
-  --bcl-num-decompression-threads "$sub_threads"
+  --bcl-num-decompression-threads "$sub_threads" \
+  2>&1 | tee "$BCL_CONVERT_LOG"
 
 # Run FastQC in parallel across the generated FASTQs.
+echo "Starting FastQC        : $FASTQC_LOG"
 mkdir -p fastqc
 find "$DEST_DIR" -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
- parallel -0 -j "$IDLE_CPUS" "fastqc {} -o fastqc"
+ parallel -0 -j "$IDLE_CPUS" "fastqc {} -o fastqc" \
+  2>&1 | tee "$FASTQC_LOG"
 
 {% if ctx.params.run_fastq_screen %}
 # Optional contamination screen.
-echo "Running fastq_screen..."
+echo "Starting fastq_screen  : $FASTQ_SCREEN_LOG"
 mkdir -p fastq_screen
 find "$DEST_DIR" -maxdepth 2 -type f -name "*.fastq.gz" -print0 | \
-  parallel -0 -j "$IDLE_CPUS" "fastq_screen --outdir fastq_screen {}"
+  parallel -0 -j "$IDLE_CPUS" "fastq_screen --outdir fastq_screen {}" \
+  2>&1 | tee "$FASTQ_SCREEN_LOG"
 {% endif %}
 
 # Summarise everything with MultiQC once fastqs are ready.
+echo "Starting MultiQC       : $MULTIQC_LOG"
 mkdir -p multiqc
-multiqc -f . -o multiqc
+multiqc -f . -o multiqc 2>&1 | tee "$MULTIQC_LOG"
 
 # Clean up intermediate directories
+echo "Cleaning intermediates"
 [[ -d fastqc ]] && rm -rf fastqc
 {% if ctx.params.run_fastq_screen %}
 [[ -d fastq_screen ]] && rm -rf fastq_screen
