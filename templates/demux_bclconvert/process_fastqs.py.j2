@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,11 +10,11 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run FastQC and contamination screening on demultiplexed FASTQs.")
-    parser.add_argument("--mode", choices=["fastqc", "contamination"], required=True)
+    parser = argparse.ArgumentParser(description="Run Falco QC and contamination screening on demultiplexed FASTQs.")
+    parser.add_argument("--mode", choices=["falco", "contamination"], required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--threads", type=int, required=True)
-    parser.add_argument("--fastqc-out", default="fastqc")
+    parser.add_argument("--falco-out", default="falco")
     parser.add_argument("--contamination-method", default="none")
     parser.add_argument("--kraken2-db", default="")
     parser.add_argument("--kraken2-confidence", type=float, default=0.0)
@@ -70,7 +69,17 @@ def run_cmd(cmd: list[str]) -> None:
         raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}")
 
 
-def run_fastqc(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
+def run_quiet_cmd(label: str, cmd: list[str]) -> None:
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if proc.returncode != 0:
+        if proc.stdout:
+            print(proc.stdout.rstrip(), file=sys.stderr)
+        if proc.stderr:
+            print(proc.stderr.rstrip(), file=sys.stderr)
+        raise RuntimeError(f"{label} failed ({proc.returncode}): {' '.join(cmd)}")
+
+
+def run_falco(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
     for row in rows:
@@ -78,10 +87,19 @@ def run_fastqc(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
         if row.get("r2"):
             files.append(row["r2"])
     files = sorted(set(files))
-    print(f"FastQC files          : {len(files)}")
-    print(f"FastQC workers        : {threads}")
+    total = len(files)
+    print(f"Falco files           : {total}")
+    print(f"Falco workers         : {threads}")
+
+    def worker(index: int, fq: str) -> None:
+        print(f"Falco progress        : {index}/{total} {Path(fq).name}")
+        run_quiet_cmd(
+            "falco",
+            ["falco", fq, "-o", str(out_dir)],
+        )
+
     with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
-        futures = [ex.submit(run_cmd, ["fastqc", fq, "-o", str(out_dir)]) for fq in files]
+        futures = [ex.submit(worker, index, fq) for index, fq in enumerate(files, start=1)]
         for fut in as_completed(futures):
             fut.result()
 
@@ -174,8 +192,8 @@ def main() -> None:
     rows = read_manifest(manifest)
     threads = max(1, args.threads)
 
-    if args.mode == "fastqc":
-        run_fastqc(rows, threads, Path(args.fastqc_out).resolve())
+    if args.mode == "falco":
+        run_falco(rows, threads, Path(args.falco_out).resolve())
         return
 
     method = args.contamination_method.strip().lower()

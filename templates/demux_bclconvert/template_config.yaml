@@ -1,5 +1,5 @@
 id: demux_bclconvert
-description: Demultiplex Illumina BCLs using bcl-convert, then run Pixi-managed FASTQ QC, optional contamination screening, and MultiQC.
+description: Demultiplex Illumina BCLs using bcl-convert, then run Pixi-managed Falco QC, optional contamination screening, and MultiQC.
 
 params:
   bcl_dir:

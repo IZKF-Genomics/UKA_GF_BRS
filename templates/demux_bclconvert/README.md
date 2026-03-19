@@ -6,7 +6,7 @@
 ```yaml
 id: demux_bclconvert
 kind: template
-description: Demultiplex Illumina BCLs using bcl-convert, with optional FastQC, fastq_screen,
+description: Demultiplex Illumina BCLs using bcl-convert, with optional Falco, fastq_screen,
   and MultiQC.
 descriptor: templates/demux_bclconvert/template_config.yaml
 source_of_truth:
@@ -55,7 +55,7 @@ software_version_capture:
   commands:
   - bcl-convert --version
   - pixi --version
-  - fastqc --version
+  - falco --version
   - fastq_screen --version
   - multiqc --version
   - kraken2 --version
@@ -64,7 +64,7 @@ render_file_count: 8
 ```
 <!-- AGENT_METADATA_END -->
 
-Demultiplex Illumina BCLs using the system `bcl-convert` binary, then run Pixi-managed FASTQ quality control, optional contamination screening, and MultiQC summarization.
+Demultiplex Illumina BCLs using the system `bcl-convert` binary, then run Pixi-managed Falco quality control, optional contamination screening, and MultiQC summarization.
 
 ## Usage
 Render, then run in the desired working directory (where you want outputs):
@@ -104,7 +104,7 @@ bpm template run demux_bclconvert
   - `run.sh` in the run directory.
   - `collect_versions.sh` helper script for software-version capture.
   - `build_fastq_manifest.py` helper script for FASTQ discovery and SE/PE detection.
-  - `process_fastqs.py` helper script for FastQC and contamination backends.
+  - `process_fastqs.py` helper script for Falco and contamination backends.
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
   - `results/run.log` with the full combined stdout/stderr stream from the run.
   - `results/fastq_manifest.csv` with detected read mode and paired FASTQ paths.
@@ -124,7 +124,7 @@ bpm template run demux_bclconvert
 This template captures versions through `collect_versions.sh`, called from `run.sh`, and writes them to `results/run_info.yaml`. The primary commands are:
 - `bcl-convert --version`
 - `pixi --version`
-- `pixi run fastqc --version`
+- `pixi run falco --version`
 - `pixi run fastq_screen --version`
 - `pixi run multiqc --version`
 - `pixi run kraken2 --version`
@@ -146,4 +146,4 @@ This template captures versions through `collect_versions.sh`, called from `run.
 - Credentials: params `gf_api_name`/`gf_api_pass` or env `GF_API_NAME`/`GF_API_PASS`.
 - Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, render fails. `agendo_id` is only used on flowcell 404 responses.
 - Render aborts if samplesheet fetch fails.
-- The run script prints explicit phase banners before metadata collection, demultiplexing, FASTQ-manifest generation, FastQC, optional contamination screening, and MultiQC.
+- The run script prints explicit phase banners before metadata collection, demultiplexing, FASTQ-manifest generation, Falco, optional contamination screening, and MultiQC.

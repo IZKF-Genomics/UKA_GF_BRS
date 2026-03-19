@@ -56,7 +56,7 @@ echo "Installing pixi env    : pixi.toml"
 pixi install
 
 echo "Preparing run metadata : results/run_info.yaml"
-echo "Collecting versions    : bcl-convert, pixi, fastqc, fastq_screen, multiqc, kraken2, bracken"
+echo "Collecting versions    : bcl-convert, pixi, falco, fastq_screen, multiqc, kraken2, bracken"
 
 {
   echo "timestamp: \"$START_TS\""
@@ -110,13 +110,13 @@ pixi run python ./build_fastq_manifest.py \
   --input "$DEST_DIR" \
   --output "results/fastq_manifest.csv"
 
-# Run FastQC across the generated FASTQs.
-echo "Starting FastQC"
+# Run Falco across the generated FASTQs.
+echo "Starting Falco"
 pixi run python ./process_fastqs.py \
-  --mode fastqc \
+  --mode falco \
   --manifest "results/fastq_manifest.csv" \
   --threads "$IDLE_CPUS" \
-  --fastqc-out "fastqc"
+  --falco-out "falco"
 
 if [[ "$CONTAM_METHOD" != "none" ]]; then
   echo "Starting contamination : $CONTAM_METHOD"
@@ -140,4 +140,4 @@ pixi run multiqc -f . -o multiqc
 
 # Clean up intermediate directories
 echo "Cleaning intermediates"
-[[ -d fastqc ]] && rm -rf fastqc
+[[ -d falco ]] && rm -rf falco
