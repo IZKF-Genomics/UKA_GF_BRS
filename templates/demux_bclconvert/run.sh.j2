@@ -57,7 +57,6 @@ echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc, paral
   echo "  fastqc: \"$(yaml_escape "$(capture_version fastqc fastqc --version)")\""
   echo "  fastq_screen: \"$(yaml_escape "$(capture_version fastq_screen fastq_screen --version)")\""
   echo "  multiqc: \"$(yaml_escape "$(capture_version multiqc multiqc --version)")\""
-  echo "  parallel: \"$(yaml_escape "$(capture_version parallel parallel --version)")\""
   echo "params:"
   echo "  bcl_dir: \"{{ ctx.params.bcl_dir }}\""
   echo "  thread_ratio: {{ ctx.params.thread_ratio }}"
@@ -69,7 +68,6 @@ echo "Collecting versions    : bcl-convert, fastqc, fastq_screen, multiqc, paral
   echo "  - \"fastqc --version\""
   echo "  - \"fastq_screen --version\""
   echo "  - \"multiqc --version\""
-  echo "  - \"parallel --version\""
 } > results/run_info.yaml
 
 echo "Run metadata ready     : results/run_info.yaml"

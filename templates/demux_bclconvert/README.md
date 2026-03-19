@@ -45,7 +45,6 @@ software_version_capture:
   - fastqc --version
   - fastq_screen --version
   - multiqc --version
-  - parallel --version
 render_file_count: 4
 ```
 <!-- AGENT_METADATA_END -->
@@ -104,7 +103,6 @@ This template captures versions from tools executed in `run.sh` and writes them 
 - `fastqc --version`
 - `fastq_screen --version`
 - `multiqc --version`
-- `parallel --version`
 
 ## Notes
 - Primary scientific provenance is defined by:
