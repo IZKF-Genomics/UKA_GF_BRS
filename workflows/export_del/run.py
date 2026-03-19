@@ -3,9 +3,42 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+
+def _supports_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _ansi(code: str) -> str:
+    return f"\033[{code}m" if _supports_color() else ""
+
+
+RESET = _ansi("0")
+BOLD = _ansi("1")
+BLUE = _ansi("34")
+CYAN = _ansi("36")
+GREEN = _ansi("32")
+
+
+def _color(text: str, color: str, *, bold: bool = False) -> str:
+    prefix = f"{BOLD if bold else ''}{color}"
+    return f"{prefix}{text}{RESET}" if prefix else text
+
+
+def _print_section(title: str, color: str = CYAN) -> None:
+    line = "=" * 72
+    print(_color(line, color))
+    print(_color(title, color, bold=True))
+    print(_color(line, color))
+
+
+def _print_key_value(label: str, value: str, *, color: str = BLUE) -> None:
+    print(f"{_color(label + ':', color, bold=True)} {value}")
+
 
 def load_ctx() -> dict:
     """Load BPM ctx JSON if provided."""
@@ -46,13 +79,20 @@ def main() -> None:
     except URLError as exc:
         raise SystemExit(f"Delete API request failed: {exc.reason}")
 
-    print(f"[export_del] DELETE {endpoint}")
-    print(f"[export_del] Response: {resp_body}")
+    _print_section("Export Deletion Request", BLUE)
+    _print_key_value("Endpoint", endpoint)
+    _print_key_value("Project", project_id)
 
     try:
         parsed = json.loads(resp_body)
     except json.JSONDecodeError:
+        _print_section("Deletion Result", GREEN)
+        print(resp_body)
         return
+
+    _print_section("Deletion Result", GREEN)
+    status = parsed.get("status") or parsed.get("message") or "completed"
+    _print_key_value("Status", str(status), color=GREEN)
     print(json.dumps(parsed, indent=2))
 
 

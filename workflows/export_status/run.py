@@ -3,11 +3,43 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import yaml
+
+
+def _supports_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _ansi(code: str) -> str:
+    return f"\033[{code}m" if _supports_color() else ""
+
+
+RESET = _ansi("0")
+BOLD = _ansi("1")
+BLUE = _ansi("34")
+CYAN = _ansi("36")
+GREEN = _ansi("32")
+
+
+def _color(text: str, color: str, *, bold: bool = False) -> str:
+    prefix = f"{BOLD if bold else ''}{color}"
+    return f"{prefix}{text}{RESET}" if prefix else text
+
+
+def _print_section(title: str, color: str = CYAN) -> None:
+    line = "=" * 72
+    print(_color(line, color))
+    print(_color(title, color, bold=True))
+    print(_color(line, color))
+
+
+def _print_key_value(label: str, value: str, *, color: str = BLUE) -> None:
+    print(f"{_color(label + ':', color, bold=True)} {value}")
 
 
 def load_ctx():
@@ -93,14 +125,24 @@ def main() -> None:
     except URLError as exc:
         raise SystemExit(f"Status API request failed: {exc.reason}")
 
-    print(f"[export_status] GET {endpoint}")
-    print(f"[export_status] Response: {resp_body}")
+    _print_section("Export Status Request", BLUE)
+    _print_key_value("Endpoint", endpoint)
+    _print_key_value("job_id", job_id)
 
-    # Best-effort JSON pretty print
     try:
         parsed = json.loads(resp_body)
     except json.JSONDecodeError:
+        _print_section("Export Status", GREEN)
+        print(resp_body)
         return
+
+    _print_section("Export Status", GREEN)
+    status = parsed.get("status") or parsed.get("type") or "unknown"
+    _print_key_value("Status", str(status), color=GREEN)
+    if parsed.get("job_id"):
+        _print_key_value("job_id", str(parsed["job_id"]), color=GREEN)
+    if parsed.get("main_report"):
+        _print_key_value("Report URL", str(parsed["main_report"]), color=GREEN)
     print(json.dumps(parsed, indent=2))
 
 

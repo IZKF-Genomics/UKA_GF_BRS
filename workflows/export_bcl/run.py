@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import sys
 import threading
@@ -10,7 +11,12 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
 import yaml
+
+
+POLL_INTERVAL_SECONDS = 2
+FINAL_MESSAGE_TIMEOUT_SECONDS = 3600
 
 
 def load_ctx() -> dict:
@@ -75,6 +81,101 @@ def _load_meta(run_dir: Path) -> dict:
     except Exception:
         return {}
 
+
+def _supports_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _ansi(code: str) -> str:
+    return f"\033[{code}m" if _supports_color() else ""
+
+
+RESET = _ansi("0")
+BOLD = _ansi("1")
+BLUE = _ansi("34")
+CYAN = _ansi("36")
+GREEN = _ansi("32")
+YELLOW = _ansi("33")
+
+
+def _color(text: str, color: str, *, bold: bool = False) -> str:
+    prefix = f"{BOLD if bold else ''}{color}"
+    return f"{prefix}{text}{RESET}" if prefix else text
+
+
+def _print_section(title: str, color: str = CYAN) -> None:
+    line = "=" * 72
+    print(_color(line, color))
+    print(_color(title, color, bold=True))
+    print(_color(line, color))
+
+
+def _print_key_value(label: str, value: str, *, color: str = BLUE) -> None:
+    print(f"{_color(label + ':', color, bold=True)} {value}")
+
+
+def _strip_markdown_formatting(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"[*_`#]+", "", cleaned)
+    cleaned = re.sub(r"\[(.*?)\]\((.*?)\)", r"\1 (\2)", cleaned)
+    return cleaned.strip()
+
+
+def _format_export_details(text: str) -> list[str]:
+    cleaned = _strip_markdown_formatting(text)
+    if not cleaned:
+        return []
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    if not lines:
+        return []
+
+    heading_map = {
+        "main report": "Main Report",
+        "access credentials": "Access Credentials",
+        "publisher results": "Publisher Results",
+    }
+    skip_lines = {"export complete", "your export has been successfully completed."}
+
+    output: list[str] = []
+    current_section = ""
+    current_publisher = False
+
+    for raw_line in lines:
+        normalized = raw_line.lower().strip()
+        normalized = normalized.lstrip("- ").strip()
+
+        if normalized in skip_lines:
+            continue
+
+        if normalized in heading_map:
+            if output:
+                output.append("")
+            current_section = heading_map[normalized]
+            current_publisher = current_section == "Publisher Results"
+            output.append(current_section)
+            continue
+
+        line = raw_line.lstrip("- ").strip()
+
+        if current_section in {"Main Report", "Access Credentials"}:
+            output.append(f"- {line}")
+            continue
+
+        if current_publisher:
+            if re.match(r"^Publisher\s+\d+\s*:", line, flags=re.I):
+                output.append(f"- {line}")
+            else:
+                output.append(f"  - {line}")
+            continue
+
+        output.append(line)
+
+    while output and output[-1] == "":
+        output.pop()
+    return output
+
+
 def _run_with_spinner(message: str, func):
     stop_event = threading.Event()
     spinner = ["|", "/", "-", "\\"]
@@ -114,6 +215,14 @@ def _add_if_exists(export_list: list[dict], path: Path, **kwargs) -> None:
         return
     entry = {"src": str(path.resolve()), **kwargs}
     export_list.append(entry)
+
+
+def _is_final_message_pending(exc: HTTPError, detail: str) -> bool:
+    if exc.code == 425:
+        return True
+    if exc.code == 404 and "Job not found" in detail:
+        return True
+    return False
 
 
 def main() -> None:
@@ -188,7 +297,7 @@ def main() -> None:
                 return resp.read().decode("utf-8")
 
         resp_body = _run_with_spinner(
-            "[export_bcl] Sending request to export API (waiting for response)",
+            "Submitting export job",
             _post_request,
         )
     except HTTPError as exc:
@@ -202,12 +311,17 @@ def main() -> None:
     except json.JSONDecodeError as exc:
         raise SystemExit(f"Export API returned non-JSON response: {exc}") from exc
 
-    print("[export_bcl] API response JSON:")
-    print(json.dumps(response_json, indent=2, sort_keys=True))
-
     job_id = response_json.get("job_id")
     if not isinstance(job_id, str) or not job_id:
         raise SystemExit("Export API response missing job_id")
+
+    _print_section("Export Request", BLUE)
+    _print_key_value("API endpoint", export_endpoint)
+    _print_key_value("Project", project_name)
+
+    _print_section("Job Registered", GREEN)
+    _print_key_value("job_id", job_id, color=GREEN)
+    _print_key_value("Run directory", str(run_dir), color=GREEN)
 
     final_endpoint = (
         f"{api_clean}/final_message/{job_id}"
@@ -216,58 +330,65 @@ def main() -> None:
     )
     final_req = Request(final_endpoint, method="GET")
 
-    max_attempts = 4
-    for attempt in range(1, max_attempts + 1):
-        try:
-            def _final_request():
+    def _wait_for_final_message():
+        start = time.monotonic()
+        while True:
+            if time.monotonic() - start > FINAL_MESSAGE_TIMEOUT_SECONDS:
+                raise TimeoutError(
+                    f"Timed out after {FINAL_MESSAGE_TIMEOUT_SECONDS}s waiting for final export status for job_id={job_id}"
+                )
+            try:
                 with urlopen(final_req, timeout=30) as resp:
-                    return resp.read().decode("utf-8")
-
-            final_body = _run_with_spinner(
-                f"[export_bcl] Checking final message (attempt {attempt}/{max_attempts})",
-                _final_request,
-            )
-            final_json = json.loads(final_body)
-        except HTTPError as exc:
-            if exc.code == 425 and attempt < max_attempts:
-                wait = attempt * 5
-                time.sleep(wait)
+                    return json.loads(resp.read().decode("utf-8"))
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8") if exc.fp else str(exc)
+                if _is_final_message_pending(exc, detail):
+                    time.sleep(POLL_INTERVAL_SECONDS)
+                    continue
+                raise RuntimeError(f"Unable to fetch final message: {exc.code} {detail}") from exc
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Final export message is not valid JSON: {exc}") from exc
+            except URLError:
+                time.sleep(POLL_INTERVAL_SECONDS)
                 continue
-            detail = exc.read().decode("utf-8") if exc.fp else str(exc)
-            print(f"[export_bcl] Unable to fetch final message: {exc.code} {detail}")
-            break
-        except Exception as exc:  # noqa: BLE001
-            print(f"[export_bcl] Unable to fetch final message: {exc}")
-            break
-        else:
-            formatted = (final_json.get("formatted_message") or "").strip()
-            plain = (final_json.get("message") or "").strip()
-            status = (final_json.get("status") or final_json.get("type") or "").strip()
-            job_line = f"job_id: {final_json['job_id']}" if final_json.get("job_id") else ""
-            report_line = (
-                f"main_report: {final_json['main_report']}" if final_json.get("main_report") else ""
-            )
 
-            lines = ["=" * 60, "[export_bcl] Final Export Summary"]
-            if status:
-                lines.append(f"Status: {status}")
-            lines.append("-" * 60)
-            if formatted:
-                lines.append(formatted)
-            if plain:
-                if formatted:
-                    lines.append("")
-                    lines.append("[export_bcl] Raw message:")
-                lines.append(plain)
-            if job_line or report_line:
-                lines.append("-" * 60)
-                if job_line:
-                    lines.append(job_line)
-                if report_line:
-                    lines.append(report_line)
-            lines.append("=" * 60)
-            print("\n".join(lines))
-            break
+    try:
+        final_json = _run_with_spinner(
+            "Waiting for final export status",
+            _wait_for_final_message,
+        )
+    except KeyboardInterrupt:
+        raise SystemExit(
+            f"Interrupted while waiting for final export status. job_id={job_id} is already registered."
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(str(exc)) from exc
+
+    formatted_message = _strip_markdown_formatting((final_json.get("formatted_message") or "").strip())
+    plain_message = (final_json.get("message") or "").strip()
+    status = (final_json.get("status") or final_json.get("type") or "").strip()
+
+    _print_section("Final Export Summary", GREEN)
+    if status:
+        _print_key_value("Status", status, color=GREEN)
+    if final_json.get("job_id"):
+        _print_key_value("job_id", str(final_json["job_id"]), color=GREEN)
+    if final_json.get("main_report"):
+        _print_key_value("Report URL", str(final_json["main_report"]), color=GREEN)
+
+    if formatted_message:
+        print("")
+        _print_section("Export Details", CYAN)
+        detail_lines = _format_export_details(formatted_message)
+        if detail_lines:
+            print("\n".join(detail_lines))
+        else:
+            print(formatted_message)
+
+    if plain_message:
+        print("")
+        _print_section("JSON section for MS Teams Planner", YELLOW)
+        print(plain_message)
 
 
 if __name__ == "__main__":
