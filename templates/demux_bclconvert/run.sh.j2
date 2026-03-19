@@ -8,6 +8,18 @@ require_cmd() {
   fi
 }
 
+RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+mkdir -p results
+RUN_LOG="results/run.log"
+
+if [[ -z "${DEMUX_RUN_LOG_CAPTURED:-}" ]] && command -v script >/dev/null 2>&1; then
+  export DEMUX_RUN_LOG_CAPTURED=1
+  SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  exec script -qefc "bash \"$SCRIPT_PATH\"" "$RUN_LOG"
+fi
+
 {% if ctx.params.get("flowcell_id") %}
 echo "Flowcell ID         : {{ ctx.params.flowcell_id }}"
 {% endif %}
@@ -25,15 +37,7 @@ sub_threads=$(( THREADS / 3 ))
 (( sub_threads < 1 )) && sub_threads=1
 IDLE_CPUS="$THREADS"
 
-# Switch to the render target (project mode or ad-hoc output).
-RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
-mkdir -p "$RUN_DIR"
-cd "$RUN_DIR"
-mkdir -p results
 START_TS="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-
-RUN_LOG="results/run.log"
-exec > >(tee -a "$RUN_LOG") 2>&1
 
 CONTAM_METHOD="{{ ctx.params.contamination_method }}"
 if [[ "$CONTAM_METHOD" == "none" && "{{ 'true' if ctx.params.run_fastq_screen else 'false' }}" == "true" ]]; then

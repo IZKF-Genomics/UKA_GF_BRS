@@ -136,6 +136,7 @@ This template captures versions through `collect_versions.sh`, called from `run.
   - configured values in `template_config.yaml` and rendered parameters
 - `bcl-convert` remains a system dependency and is not managed by Pixi.
 - All other QC/classification tooling is expected to come from the rendered `pixi.toml`.
+- The run script captures the full interactive terminal session with `script(1)` into `results/run.log`, so tools like `bcl-convert` can keep their native live stdout/stderr behavior while still producing one combined log file.
 - The template generates `results/fastq_manifest.csv` and automatically detects single-end versus paired-end FASTQ outputs after demultiplexing.
 - Kraken2/Bracken databases are expected under shared storage, for example `/data/shared/databases/`.
 - If required Kraken2 or Bracken assets are missing, the template fails with explicit build commands for the expected path.
