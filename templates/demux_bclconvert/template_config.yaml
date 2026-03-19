@@ -47,9 +47,9 @@ params:
     description: "Kraken2 confidence threshold"
   bracken_read_length:
     type: int
-    default: 151
+    default: 0
     cli: "--bracken-read-length"
-    description: "Read length for Bracken database assets"
+    description: "Read length for Bracken database assets; set 0 to auto-detect from FASTQs"
   thread_ratio:
     type: float
     default: 0.8

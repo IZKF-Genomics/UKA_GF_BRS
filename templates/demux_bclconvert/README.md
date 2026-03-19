@@ -83,7 +83,7 @@ bpm template run demux_bclconvert
 - `contamination_method` (str, default `none`): `none`, `fastq_screen`, `kraken2`, or `kraken2_bracken`.
 - `kraken2_db` (str, default `/data/shared/databases/kraken2/standard/current`): Shared Kraken2 database path.
 - `kraken2_confidence` (float, default `0.0`): Kraken2 confidence threshold.
-- `bracken_read_length` (int, default `151`): Read length used for Bracken database assets.
+- `bracken_read_length` (int, default `0`): Read length used for Bracken database assets. Leave at `0` to auto-detect the dominant read length from demultiplexed FASTQs.
 - `run_fastq_screen` (bool, default `false`): Backward-compatibility switch. If `contamination_method=none`, this enables `fastq_screen`.
 - `thread_ratio` (float, default `0.8`): Fraction of idle CPUs allocated to demultiplexing/QC.
 - `no_lane_splitting` (bool, default `true`): Produce one FASTQ per read/sample (not per lane).
@@ -108,6 +108,7 @@ bpm template run demux_bclconvert
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
   - `results/run.log` with the full combined stdout/stderr stream from the run.
   - `results/fastq_manifest.csv` with detected read mode and paired FASTQ paths.
+  - `results/bracken_read_length.txt` when Bracken auto-detects or resolves a read length.
   - `multiqc/multiqc_report.html`.
   - `kraken2/` and `bracken/` result folders when those methods are enabled.
 
@@ -139,6 +140,7 @@ This template captures versions through `collect_versions.sh`, called from `run.
 - The run script captures the full interactive terminal session with `script(1)` into `results/run.log`, so tools like `bcl-convert` can keep their native live stdout/stderr behavior while still producing one combined log file.
 - The template generates `results/fastq_manifest.csv` and automatically detects single-end versus paired-end FASTQ outputs after demultiplexing.
 - Kraken2/Bracken databases are expected under shared storage, for example `/data/shared/databases/`.
+- If `contamination_method=kraken2_bracken` and `bracken_read_length=0`, the template auto-detects the dominant read length from the demultiplexed FASTQs and records the resolved value in `results/run_info.yaml`.
 - If required Kraken2 or Bracken assets are missing, the template fails with explicit build commands for the expected path.
 - Post-render hook fetches samplesheet when `use_api_samplesheet=true`.
 - API URL (flowcell): `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.

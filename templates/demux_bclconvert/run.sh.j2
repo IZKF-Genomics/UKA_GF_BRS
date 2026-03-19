@@ -49,7 +49,11 @@ if [[ "$CONTAM_METHOD" == "kraken2" || "$CONTAM_METHOD" == "kraken2_bracken" ]];
   echo "kraken2 db          : {{ ctx.params.kraken2_db }}"
 fi
 if [[ "$CONTAM_METHOD" == "kraken2_bracken" ]]; then
-  echo "bracken read length : {{ ctx.params.bracken_read_length }}"
+  if [[ "{{ ctx.params.bracken_read_length }}" == "0" ]]; then
+    echo "bracken read length : auto"
+  else
+    echo "bracken read length : {{ ctx.params.bracken_read_length }}"
+  fi
 fi
 
 echo "Installing pixi env    : pixi.toml"
@@ -128,9 +132,14 @@ if [[ "$CONTAM_METHOD" != "none" ]]; then
     --kraken2-db "{{ ctx.params.kraken2_db }}" \
     --kraken2-confidence "{{ ctx.params.kraken2_confidence }}" \
     --bracken-read-length "{{ ctx.params.bracken_read_length }}" \
+    --resolved-bracken-length-out "results/bracken_read_length.txt" \
     --fastq-screen-out "fastq_screen" \
     --kraken2-out "kraken2" \
     --bracken-out "bracken"
+fi
+
+if [[ -f results/bracken_read_length.txt ]]; then
+  echo "resolved_bracken_read_length: \"$(tr -d '\r\n' < results/bracken_read_length.txt)\"" >> results/run_info.yaml
 fi
 
 # Summarise everything with MultiQC once fastqs are ready.
