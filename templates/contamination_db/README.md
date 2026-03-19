@@ -25,6 +25,7 @@ Build shared Kraken2, Bracken, and FastQ Screen contamination databases from dir
    `cd /data/shared/contamination_db && pixi install`
 3. Edit `contamination_db.yaml`:
    - choose `panel_name` and `db_version`
+   - choose `kraken2_base` (`standard` to include the official Kraken2 standard content, including bacteria; `none` for custom-only)
    - set species FASTA URLs and taxids
    - choose Bracken read lengths
 4. Run:
@@ -42,6 +43,7 @@ The template also updates `current` symlinks under each tool root:
 
 ## Design Notes
 - This template downloads FASTA files directly and does not depend on `ref_genomes`.
+- `kraken2_base: standard` starts from the official Kraken2 standard database, then adds the configured vertebrates/PhiX panel.
 - Staged FASTA files are removed after a successful build by default.
 - Provenance is preserved in:
   - `results/db_build_info.yaml`
@@ -54,6 +56,8 @@ The template also updates `current` symlinks under each tool root:
 ## Config Highlights
 - `cleanup_staging: true`
   Removes downloaded and normalized FASTA files after a successful build.
+- `kraken2_base: standard`
+  Starts from the official Kraken2 standard database, which already includes bacteria, archaea, viral references, human, and UniVec_Core. Use `none` if you want a custom-only database.
 - `force: false`
   Prevents accidental overwrite of an existing `<panel>/<version>` build.
 - `species`
@@ -70,5 +74,6 @@ The template also updates `current` symlinks under each tool root:
 
 ## Notes
 - Use a curated vertebrate panel rather than “all vertebrates” unless you truly need it.
+- The starter species panel includes human, mouse, rat, zebrafish, pig, cow, chicken, dog, cat, and PhiX. Replace the placeholder FASTA URLs with your chosen sources before running.
 - Keep `db_version` immutable once built; update the `current` symlink by building a new version.
 - If you need to inspect staged FASTAs for debugging, set `cleanup_staging: false`.

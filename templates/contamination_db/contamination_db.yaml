@@ -7,6 +7,7 @@ db_version: "v2026.03"
 threads: 32
 cleanup_staging: true
 force: false
+kraken2_base: "standard"
 
 build:
   kraken2: true
@@ -21,19 +22,56 @@ paths:
 bracken:
   read_lengths: [75, 100, 151]
 
-species: []
-  # Add one row per genome you want in the contamination panel.
-  # fasta_url can point to .fa, .fasta, .fa.gz, or .fasta.gz.
-  #
-  # Example:
-  # - label: human
-  #   taxid: 9606
-  #   fasta_url: "https://example.org/path/to/hg38.fa.gz"
-  #   enabled: true
-  #   fastq_screen_label: "Human"
-  #
-  # - label: mouse
-  #   taxid: 10090
-  #   fasta_url: "https://example.org/path/to/mm39.fa.gz"
-  #   enabled: true
-  #   fastq_screen_label: "Mouse"
+species:
+  # Replace the placeholder URLs below with the exact FASTA sources you want to use.
+  # Keep the taxids as shown unless you intentionally change species.
+  - label: human
+    taxid: 9606
+    fasta_url: "https://example.org/genomes/human.fa.gz"
+    enabled: true
+    fastq_screen_label: "Human"
+  - label: mouse
+    taxid: 10090
+    fasta_url: "https://example.org/genomes/mouse.fa.gz"
+    enabled: true
+    fastq_screen_label: "Mouse"
+  - label: rat
+    taxid: 10116
+    fasta_url: "https://example.org/genomes/rat.fa.gz"
+    enabled: true
+    fastq_screen_label: "Rat"
+  - label: zebrafish
+    taxid: 7955
+    fasta_url: "https://example.org/genomes/zebrafish.fa.gz"
+    enabled: true
+    fastq_screen_label: "Zebrafish"
+  - label: pig
+    taxid: 9823
+    fasta_url: "https://example.org/genomes/pig.fa.gz"
+    enabled: true
+    fastq_screen_label: "Pig"
+  - label: cow
+    taxid: 9913
+    fasta_url: "https://example.org/genomes/cow.fa.gz"
+    enabled: true
+    fastq_screen_label: "Cow"
+  - label: chicken
+    taxid: 9031
+    fasta_url: "https://example.org/genomes/chicken.fa.gz"
+    enabled: true
+    fastq_screen_label: "Chicken"
+  - label: dog
+    taxid: 9615
+    fasta_url: "https://example.org/genomes/dog.fa.gz"
+    enabled: true
+    fastq_screen_label: "Dog"
+  - label: cat
+    taxid: 9685
+    fasta_url: "https://example.org/genomes/cat.fa.gz"
+    enabled: true
+    fastq_screen_label: "Cat"
+  - label: phix
+    taxid: 10847
+    fasta_url: "https://example.org/genomes/phix.fa.gz"
+    enabled: true
+    fastq_screen_label: "PhiX"
