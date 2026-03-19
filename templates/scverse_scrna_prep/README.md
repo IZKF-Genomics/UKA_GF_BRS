@@ -125,6 +125,10 @@ bpm template render scverse_scrna_prep \
   --out /path/to/output
 ```
 
+If explicit input paths or sample-metadata paths use host-prefixed values such as
+`nextgen:/...`, the pre-render hook materializes them into the local filesystem
+paths used by the rendered notebook.
+
 ## Run
 
 ```bash

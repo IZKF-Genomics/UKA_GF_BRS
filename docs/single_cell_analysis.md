@@ -1,311 +1,220 @@
 # Single-Cell Analysis Plan
 
-This document defines the top-level design for future single-cell analysis templates in
-`UKA_GF_BRS`. The target is a Python-first, scverse-based template family that integrates
-cleanly with BPM project history and published outputs from upstream templates such as
-`nfcore_scrnaseq`.
+This document defines the current design for single-cell analysis templates in
+`UKA_GF_BRS`. The direction is Python-first and scverse-based, with BPM-managed
+template chaining through stable publish keys in `project.yaml`.
+
+The goal is not to reproduce the older monolithic notebook workflow inside one
+template. The goal is to build a small template family with explicit handoff
+objects, clear provenance, and separate environments where the dependency
+profiles genuinely differ.
 
 ## Goals
 
-- Standardize single-cell downstream analysis around the Scanpy/scverse ecosystem.
-- Consume `nf-core/scrnaseq` outputs directly, with minimal manual path handling.
-- Replace the older monolithic notebook approach with focused BRS templates using:
-  - `template_config.yaml`
-  - `pixi.toml`
-  - `run.sh.j2`
-  - one or more Quarto `.qmd` reports
-- Keep each template narrow enough to be maintainable and testable.
-- Define stable data contracts now so templates can be chained through `project.yaml`.
+- Standardize downstream single-cell analysis around the Scanpy/scverse ecosystem.
+- Consume `nf-core/scrnaseq` outputs directly when available.
+- Keep each template narrow, testable, and publishable.
+- Prefer one canonical primary object per template stage.
+- Preserve stage-specific outputs instead of overwriting biologically distinct states.
+- Make upstream/downstream discovery work through BPM publish keys rather than path guessing.
 
-## Current upstream contract
+## Core Design Decisions
 
-`nfcore_scrnaseq` is the upstream entry point for scRNA-seq count processing.
+### 1. One stage, one canonical object
 
-Published output:
+Each template should write one canonical primary object that represents its stage.
+
+Examples:
+- `cellbender_remove_background` -> corrected raw-count matrix
+- `scverse_scrna_prep` -> `adata.prep.h5ad`
+- `scverse_scrna_integrate` -> `adata.integrated.h5ad`
+- `scverse_scrna_annotate` -> `adata.annotated.h5ad`
+
+This object should be:
+- saved as a distinct file
+- published through one stable key
+- used as the default handoff to the next template
+
+Do not overwrite a previous biologically meaningful stage output in place.
+
+### 2. Keep stage outputs separate
+
+For single-cell data, separate files are preferable to overwriting:
+
+- safer reruns
+- easier debugging
+- clearer provenance
+- better reproducibility
+- simpler downstream chaining
+
+Recommended split:
+- persistent stage objects:
+  - biologically meaningful checkpoints
+- temporary scratch files:
+  - safe to remove with `pixi run clean`
+
+Do not keep every accidental temporary copy forever, but do keep one canonical
+object per stage.
+
+### 3. Ambient RNA correction is upstream and optional
+
+Ambient/background RNA correction is not just another QC plot. It is a raw-data
+decontamination step and should remain a separate optional upstream template.
+
+Current design:
+- `cellbender_remove_background` is the optional ambient-RNA branch
+- `scverse_scrna_prep` does not perform ambient correction internally
+- `scverse_scrna_prep` records whether the input was already corrected
+
+This keeps:
+- the contract explicit
+- the compute/runtime requirements isolated
+- the QC notebook readable
+
+### 4. Notebook-driven reporting is acceptable for prep
+
+For `scverse_scrna_prep`, the analysis logic lives directly in a Quarto notebook:
+- `00_qc.qmd`
+
+This is intentional because the prep stage is:
+- linear
+- report-oriented
+- easier for users to review when code and interpretation are in one place
+
+For later templates, move reusable or more complex logic into modules only when
+that actually improves maintainability.
+
+### 5. Every template should have an input hook and an output resolver
+
+For the single-cell template family, input discovery and output publishing should
+be treated as first-class parts of the template contract.
+
+Recommended standard:
+- one pre-render hook:
+  - resolve the best upstream published object into the local input param
+  - materialize host-prefixed paths
+  - fill provenance fields
+- one publish resolver:
+  - emit the canonical primary output path
+  - write it back to `project.yaml`
+
+This avoids:
+- manual path editing
+- inconsistent downstream handoff behavior
+- ambiguity about which object the next template should consume
+
+Current implemented examples:
+- `cellbender_remove_background`
+  - pre-render hook materializes `input_raw_matrix`
+  - publish resolver emits `cellbender_corrected_matrix`
+- `scverse_scrna_prep`
+  - pre-render hook resolves and materializes explicit or upstream matrix inputs
+  - publish resolver emits `scrna_prep_h5ad`
+
+## Current Upstream Contract
+
+### `nfcore_scrnaseq`
+
+Current publish key:
 - `templates.nfcore_scrnaseq.published.nfcore_scrnaseq_res_mt`
 
 Meaning:
-- preferred downstream `.h5ad` matrix path resolved from
+- preferred downstream `.h5ad` matrix resolved from
   `results/<aligner>/mtx_conversions/`
-- current resolver preference:
-  - `combined_filtered_matrix.h5ad`
-  - `combined_cellbender_filter_matrix.h5ad`
-  - `combined_raw_matrix.h5ad`
-  - `combined_matrix.h5ad`
-  - sample-level `.h5ad` fallbacks if combined outputs are absent
 
-This key should be the default handoff for future scRNA templates.
+Current resolver preference:
+- `combined_filtered_matrix.h5ad`
+- `combined_cellbender_filter_matrix.h5ad`
+- `combined_raw_matrix.h5ad`
+- `combined_matrix.h5ad`
+- sample-level `.h5ad` fallbacks if combined outputs are absent
 
-## Design principles
+### `cellbender_remove_background`
 
-- Do not build one giant single-cell template.
-- Separate preprocessing, integration, annotation, differential analysis, and advanced
-  modalities into distinct templates.
-- Use `.h5ad` for single-modality data and `.h5mu` for multimodal data.
-- Prefer resolver-backed upstream discovery over manual path parameters.
-- Keep compute logic in Python modules/scripts and use `.qmd` files primarily for
-  reporting and orchestration.
-- Favor robust CPU defaults; keep GPU acceleration optional.
-- Prefer sample-aware statistical methods by default, especially for differential
-  analysis.
+Current publish key:
+- `templates.cellbender_remove_background.published.cellbender_corrected_matrix`
 
-## Proposed template family
+Meaning:
+- corrected CellBender output for downstream use
 
-### 1. `cellbender_remove_background`
-
-Purpose:
-- Provide an optional upstream ambient RNA correction step for raw droplet matrices.
-- Keep ambient/background correction separate from the general Scanpy preprocessing
-  template so the data contract stays explicit.
-
-Inputs:
-- raw droplet matrix, typically `raw_feature_bc_matrix.h5`
-- optional expected cell count and CellBender tuning parameters
-
-Core tasks:
-- run `cellbender remove-background`
-- publish the corrected raw-count matrix
-- record the run parameters and output presence in a lightweight report
-
-Outputs:
-- `published.cellbender_corrected_matrix`
+Current published file:
 - `results/cellbender/cellbender_filtered.h5`
-- `00_summary.html`
 
-Notes:
-- This template should remain optional.
-- `scverse_scrna_prep` should prefer this published output over the generic
-  nf-core result matrix when both exist in project history.
+Current input handling:
+- pre-render hook materializes explicit `input_raw_matrix`
+- current supported input contract is intentionally strict:
+  - raw 10x HDF5 input
+  - `input_format=10x_h5`
 
-### 2. `scverse_scrna_prep`
+### Input preference for `scverse_scrna_prep`
 
-Purpose:
-- Load upstream matrix and metadata.
-- Run initial QC, filtering, normalization, feature selection, dimensionality reduction,
-  clustering, and baseline visualization.
+Current default resolution order:
+1. explicit `input_matrix`
+2. explicit `input_h5ad`
+3. `templates.cellbender_remove_background.published.cellbender_corrected_matrix`
+4. `templates.nfcore_scrnaseq.published.nfcore_scrnaseq_res_mt`
 
-Inputs:
-- `nfcore_scrnaseq_res_mt` from `project.yaml`
-- optional sample metadata table
-- optional project config for QC thresholds
+This preference is intentional:
+- use user override first
+- prefer dedicated ambient-corrected input when present
+- otherwise fall back to the generic nf-core downstream matrix
 
-Core tasks:
-- read `.h5ad`
-- standardize metadata columns
-- compute QC metrics
-- mitochondrial / ribosomal / hemoglobin summaries
-- cell filtering and gene filtering
-- optional doublet scoring hooks
-- normalization and log transform
-- HVG selection
-- PCA, neighbors, UMAP
-- Leiden clustering
+Current input handling:
+- pre-render hook materializes explicit host-prefixed `input_matrix`, `input_h5ad`,
+  and `sample_metadata` paths
+- if no explicit matrix input is provided, the hook resolves the best upstream
+  published object and records provenance
 
-Outputs:
-- `published.scrna_prep_h5ad`
-- `results/adata.prep.h5ad`
-- `results/tables/qc_metrics.csv`
-- `reports/00_qc.html`
-- `reports/01_embedding.html`
+## File And Object Naming Convention
 
-Default stack:
-- `scanpy`
-- `anndata`
-- `pandas`
-- `numpy`
-- `matplotlib`
-- `seaborn`
-- optional `scrublet` or `doubletdetection`
+### Single-modality objects
 
-### 3. `scverse_scrna_integrate`
+Use `.h5ad`.
 
-Purpose:
-- Correct batch effects and produce integrated embeddings while preserving the original
-  count-derived state for later analyses.
+Recommended canonical file names:
+- `adata.prep.h5ad`
+- `adata.integrated.h5ad`
+- `adata.annotated.h5ad`
+- `adata.trajectory.h5ad`
+- `adata.velocity.h5ad`
 
-Inputs:
-- `scrna_prep_h5ad`
+### Multimodal objects
 
-Core tasks:
-- evaluate batch structure
-- run one selected integration backend
-- compute integrated neighbors / UMAP
-- compare pre/post integration structure
+Use `.h5mu`.
 
-Supported methods:
-- `harmony` as the default CPU-friendly baseline
-- `bbknn`
-- `scanorama`
-- `scvi`
+Recommended canonical file names:
+- `adata.multimodal.h5mu`
 
-Outputs:
-- `published.scrna_integrated_h5ad`
-- `results/adata.integrated.h5ad`
-- `reports/00_batch_effects.html`
+### Raw / external matrix files
 
-Notes:
-- Do not force one integration method for all projects.
-- The template should expose `integration_method` and `batch_key` explicitly.
+Keep original upstream files separate from downstream `.h5ad` products.
 
-### 4. `scverse_scrna_annotate`
+Examples:
+- raw 10x input: `raw_feature_bc_matrix.h5`
+- CellBender output: `cellbender_filtered.h5`
 
-Purpose:
-- Add biological interpretation to clusters and cells using multiple annotation routes.
+Do not overwrite raw inputs.
 
-Inputs:
-- `scrna_integrated_h5ad` or `scrna_prep_h5ad`
+### Directory convention
 
-Annotation routes:
-- manual marker review
-- reference mapping with `scanpy.tl.ingest`
-- classifier-based labeling with `CellTypist`
-- deep generative mapping with `scANVI` where appropriate
+Recommended within each template:
+- `results/objects/` for stage objects when multiple objects are expected
+- `results/tables/` for machine-readable summaries
+- `results/figures/` for static exports when needed
+- `results/tmp/` for scratch intermediates
 
-Outputs:
-- `published.scrna_annotated_h5ad`
-- `results/adata.annotated.h5ad`
-- `results/tables/marker_summary.csv`
-- `reports/00_annotation.html`
+Current implemented templates do not yet use `results/objects/` consistently,
+but future templates should move in that direction.
 
-Standard obs fields:
-- `cell_type_level1`
-- `cell_type_level2`
-- `annotation_method`
-- `annotation_score`
+## Shared Data Contract
 
-### 5. `scverse_scrna_de`
-
-Purpose:
-- Run downstream comparisons after annotation, with sample-aware defaults.
-
-Inputs:
-- `scrna_annotated_h5ad`
-- comparison config
-- sample metadata with biological replicate information
-
-Core tasks:
-- define analysis groups
-- pseudobulk aggregation by sample and cell type
-- differential testing
-- visualization and enrichment
-
-Default approach:
-- pseudobulk-first differential analysis
-
-Methods to evaluate:
-- `decoupler` utilities for aggregation and enrichment
-- Python-native statistical path if sufficiently robust
-- optional R-backed edgeR/DESeq2 later only if strictly needed
-
-Outputs:
-- `results/tables/comparisons/<comparison_id>/...`
-- `reports/00_overview.html`
-- `reports/01_differential_expression.html`
-- `reports/02_enrichment.html`
-
-### 6. `scverse_scrna_trajectory`
-
-Purpose:
-- Reconstruct differentiation continua and lineage relationships.
-
-Inputs:
-- `scrna_annotated_h5ad`
-
-Methods:
-- `PAGA`
-- `DPT`
-- `CellRank` for fate probabilities
-- optional `moscot` later if needed
-
-Outputs:
-- `published.scrna_trajectory_h5ad`
-- trajectory report with lineage and pseudotime summaries
-
-### 7. `scverse_scrna_velocity`
-
-Purpose:
-- Model RNA velocity when spliced/unspliced information is available.
-
-Inputs:
-- annotated `.h5ad` with `spliced` and `unspliced` layers or compatible upstream files
-
-Methods:
-- `scvelo`
-- `CellRank` coupling when useful
-
-Outputs:
-- `published.scrna_velocity_h5ad`
-- velocity report with stream/grid embeddings and lineage interpretation
-
-Notes:
-- Keep separate from generic trajectory analysis because the input requirements differ.
-
-### 8. `scverse_spatial`
-
-Purpose:
-- Handle spatial single-cell / spatial transcriptomics analysis as a separate track.
-
-Inputs:
-- `SpatialData` or technology-specific spatial outputs
-
-Methods:
-- `spatialdata`
-- `spatialdata-io`
-- `squidpy`
-
-Outputs:
-- spatial neighborhood and niche reports
-- spatial object publish key
-
-Notes:
-- Spatial packages currently have a different dependency profile from core scRNA work.
-- Keep a dedicated Pixi environment.
-
-### 9. `scverse_scatac`
-
-Purpose:
-- Support scATAC-seq and related chromatin accessibility workflows.
-
-Inputs:
-- peak/barcode matrices or upstream scATAC outputs
-
-Methods:
-- `SnapATAC2`
-- optional `muon` integration for multimodal work
-
-Core tasks:
-- QC
-- LSI / spectral embedding
-- clustering
-- differential accessibility
-- motif and gene activity summaries
-
-### 10. `scverse_multimodal`
-
-Purpose:
-- Support RNA + ATAC or RNA + protein integration and consistency checks.
-
-Data model:
-- `.h5mu`
-
-Methods:
-- `mudata`
-- `muon`
-- selected `scvi-tools` multimodal models where justified
-
-Use cases:
-- co-embedding
-- cross-modality label consistency
-- cell type embedding checks
-- modality-aware QC
-
-## Shared data contract
-
-These keys should be standardized across templates where possible.
+These keys should be standardized across templates wherever possible.
 
 ### Metadata columns
 
 - `sample_id`
+- `sample_label`
+- `sample_display`
 - `patient_id`
 - `condition`
 - `batch`
@@ -314,12 +223,17 @@ These keys should be standardized across templates where possible.
 - `dataset_id`
 - `replicate_id`
 
-### Matrix/layer conventions
+Notes:
+- `sample_id` is the stable technical join key
+- `sample_label` is the user-editable report-facing label
+- `sample_display` is the resolved display column used in reports and plots
+
+### Layer conventions
 
 - raw counts in `layers["counts"]`
 - working normalized matrix in `X`
-- optional `layers["log1p"]` only when justified
-- velocity data in:
+- optional `layers["log1p"]` only if there is a concrete need
+- velocity layers when present:
   - `layers["spliced"]`
   - `layers["unspliced"]`
 
@@ -327,16 +241,265 @@ These keys should be standardized across templates where possible.
 
 - `X_pca`
 - `X_umap`
-- `X_tsne` only if explicitly requested
-- `X_pca_harmony`
 - `X_scvi`
-- `X_lsi` for ATAC
+- `X_pca_harmony`
+- `X_lsi`
+- `X_tsne` only when explicitly justified
 
-### Standard output publish keys
+### Provenance keys
 
-Each template should publish one primary object path for downstream discovery.
+Downstream templates should record where their input came from.
 
-Examples:
+Current prep-stage provenance fields:
+- `input_source_template`
+- `ambient_correction_applied`
+- `ambient_correction_method`
+
+These should become standard across future scverse templates.
+
+## Current Template Family
+
+### 1. `cellbender_remove_background`
+
+Purpose:
+- Optional upstream ambient RNA correction for raw droplet matrices
+
+Current scope:
+- consume raw 10x HDF5 input
+- run `cellbender remove-background`
+- publish corrected `.h5`
+- render a minimal summary report
+
+Current notes:
+- host-prefixed input paths are materialized during render
+- current supported input contract is intentionally strict:
+  - `input_format=10x_h5`
+- this template is intentionally minimal until validated on real project runs
+
+Current outputs:
+- `published.cellbender_corrected_matrix`
+- `results/cellbender/cellbender_filtered.h5`
+- `00_summary.html`
+
+### 2. `scverse_scrna_prep`
+
+Purpose:
+- baseline scRNA preprocessing and QC
+
+Current implemented behavior:
+- notebook-driven execution in Quarto
+- flexible input loading:
+  - `.h5ad`
+  - Cell Ranger `.h5`
+  - generic `10x_mtx`
+  - ParseBio directory
+  - ScaleBio directory
+- sample metadata scaffold:
+  - `config/samples.csv`
+- report-facing sample renaming through `sample_label`
+- organism inheritance from upstream `organism`, then `genome`
+- optional Scrublet scoring
+- fixed-threshold QC
+- optional per-sample MAD QC
+- interactive Plotly report
+- clustering resolution diagnostics
+- sample/condition cluster composition summaries
+- session info capture
+
+Current canonical output:
+- `published.scrna_prep_h5ad`
+- `results/adata.prep.h5ad`
+
+Current notes:
+- if fewer than 3 cells remain after QC, the notebook stops rather than trying
+  to run invalid PCA/neighbors settings
+- ambient correction is not performed inside this template
+- explicit host-prefixed input overrides are materialized during render, not only
+  auto-resolved upstream publish keys
+
+### 3. `scverse_scrna_integrate`
+
+Planned purpose:
+- batch correction and integrated embedding generation
+
+Recommended defaults:
+- `harmony` as the baseline CPU-friendly default
+
+Methods to support:
+- `harmony`
+- `bbknn`
+- `scanorama`
+- `scvi`
+
+Planned canonical output:
+- `published.scrna_integrated_h5ad`
+- `results/adata.integrated.h5ad`
+
+### 4. `scverse_scrna_annotate`
+
+Planned purpose:
+- cell and cluster annotation
+
+Annotation routes:
+- manual marker review
+- `scanpy.tl.ingest`
+- `CellTypist`
+- `scANVI`
+
+Planned canonical output:
+- `published.scrna_annotated_h5ad`
+- `results/adata.annotated.h5ad`
+
+Standard annotation fields:
+- `cell_type_level1`
+- `cell_type_level2`
+- `annotation_method`
+- `annotation_score`
+
+### 5. `scverse_scrna_de`
+
+Planned purpose:
+- downstream comparison and enrichment analysis
+
+Default analytical stance:
+- pseudobulk-first
+
+Recommended stack:
+- `decoupler`
+- Python-native enrichment/utilities
+- optional controlled R bridge later only if justified
+
+Planned outputs:
+- per-comparison tables under `results/tables/comparisons/`
+- report pages for overview, DE, and enrichment
+
+### 6. `scverse_scrna_trajectory`
+
+Planned purpose:
+- lineage and pseudotime analysis
+
+Methods:
+- `PAGA`
+- `DPT`
+- `CellRank`
+
+Planned canonical output:
+- `published.scrna_trajectory_h5ad`
+
+### 7. `scverse_scrna_velocity`
+
+Planned purpose:
+- RNA velocity analysis when spliced/unspliced information is available
+
+Methods:
+- `scvelo`
+- optional `CellRank` coupling
+
+Planned canonical output:
+- `published.scrna_velocity_h5ad`
+
+### 8. `scverse_spatial`
+
+Planned purpose:
+- spatial transcriptomics / spatial single-cell analysis
+
+Recommended stack:
+- `spatialdata`
+- `spatialdata-io`
+- `squidpy`
+
+Notes:
+- dedicated environment
+- separate dependency profile from core scRNA
+
+### 9. `scverse_scatac`
+
+Planned purpose:
+- scATAC-seq analysis
+
+Recommended stack:
+- `SnapATAC2`
+- optional `muon`
+
+Core tasks:
+- QC
+- LSI / spectral embedding
+- clustering
+- DA peaks
+- motif / gene activity
+
+### 10. `scverse_multimodal`
+
+Planned purpose:
+- RNA + ATAC or RNA + protein analysis
+
+Data model:
+- `.h5mu`
+
+Recommended stack:
+- `mudata`
+- `muon`
+- selected `scvi-tools` multimodal models
+
+Use cases:
+- co-embedding
+- cross-modality consistency
+- cell type embedding checks
+- modality-aware QC
+
+## Config Strategy
+
+Each template should use `config/project.toml` with explicit sections.
+
+Recommended sections:
+- `[project]`
+- `[input]`
+- `[metadata]`
+- `[qc]`
+- `[analysis]`
+- `[annotation]`
+- `[comparison]`
+- `[plotting]`
+- `[output]`
+
+Use CSV sidecars where the content is genuinely tabular and user-edited:
+- `config/samples.csv`
+- `config/comparisons.csv`
+- `config/group_map.csv`
+
+## Environment Strategy
+
+Do not force one `pixi.toml` to cover every modality.
+
+Recommended split:
+- one environment for core scRNA
+- one environment for spatial
+- one environment for ATAC / multimodal
+- optional GPU-enabled variants where justified
+
+Rationale:
+- dependency solve times remain manageable
+- spatial and multimodal packages evolve at different rates
+- GPU-specific methods should remain optional
+
+## Reporting Strategy
+
+For QC and early-stage templates:
+- prefer interactive figures first
+- compare `before filtering` vs `after filtering` directly
+- use one table with deltas rather than disconnected summaries
+
+For publication-oriented outputs:
+- keep the report readable and explanatory
+- store machine-readable tables in `results/tables/`
+- optionally add static figure exports later where publication layout requires them
+
+## Publish-Key Strategy
+
+Each template should publish one primary object path.
+
+Recommended keys:
+- `cellbender_corrected_matrix`
 - `scrna_prep_h5ad`
 - `scrna_integrated_h5ad`
 - `scrna_annotated_h5ad`
@@ -346,107 +509,74 @@ Examples:
 - `scatac_h5ad`
 - `multimodal_h5mu`
 
-## Config strategy
+Downstream templates should prefer:
+- explicit user input
+- then the most specific upstream published object
+- then broader generic upstream fallbacks
 
-Each template should use a local `config/project.toml` with explicit sections.
+For each template, document the full input resolution order explicitly in the
+template README and implement it in the pre-render hook rather than hiding it in
+the notebook or run script.
 
-Recommended sections:
-- `[project]`
-- `[input]`
-- `[qc]`
-- `[normalization]`
-- `[integration]`
-- `[annotation]`
-- `[comparison]`
-- `[plotting]`
-- `[output]`
+## Cleanup Policy
 
-Use CSV sidecars only where the data is naturally tabular and user-edited, for example:
-- `config/samples.csv`
-- `config/comparisons.csv`
-- `config/group_map.csv`
+Recommended default:
+- keep canonical stage outputs
+- remove only scratch and cache outputs
 
-## Environment strategy
+Examples safe to clean:
+- `.quarto/`
+- notebook caches
+- temporary conversion files
+- `results/tmp/`
 
-Do not force one `pixi.toml` to cover all single-cell modalities.
+Examples not safe to remove by default:
+- `results/adata.prep.h5ad`
+- `results/adata.integrated.h5ad`
+- `results/adata.annotated.h5ad`
+- `results/cellbender/cellbender_filtered.h5`
 
-Recommended split:
-- one environment for core scRNA templates
-- one environment for spatial templates
-- one environment for scATAC / multimodal templates
-- optional GPU variant or optional dependencies for `scvi-tools` and
-  `rapids-singlecell`
+## Implementation Order
 
-Rationale:
-- spatial and multimodal packages evolve at different rates
-- GPU dependencies should remain optional
-- smaller environments are easier to solve, cache, and support
-
-## Implementation order
-
-Build in this order:
-
-1. `scverse_scrna_prep`
-2. `scverse_scrna_integrate`
-3. `scverse_scrna_annotate`
-4. `scverse_scrna_de`
-5. `scverse_scrna_trajectory`
-6. `scverse_scrna_velocity`
-7. `scverse_spatial`
-8. `scverse_scatac`
-9. `scverse_multimodal`
+Recommended order from here:
+1. stabilize and field-test `cellbender_remove_background`
+2. field-test `scverse_scrna_prep` on real datasets
+3. implement `scverse_scrna_integrate`
+4. implement `scverse_scrna_annotate`
+5. implement `scverse_scrna_de`
+6. implement trajectory / velocity
+7. implement spatial
+8. implement scATAC
+9. implement multimodal
 
 Reasoning:
-- the first four templates cover the majority of routine facility projects
-- they establish the core `.h5ad` contract and config conventions
-- trajectory, velocity, spatial, and ATAC can then reuse those patterns
+- preprocessing and handoff design must be stable first
+- the core `.h5ad` contract should be validated before building later stages
 
-## First implementation target
+## Open Design Questions
 
-Start with `scverse_scrna_prep`.
+- Whether future templates should consistently move canonical stage objects into
+  `results/objects/` rather than template-specific top-level `results/*.h5ad`
+- Whether `scverse_scrna_prep` should auto-discover more upstream raw matrix
+  publish keys for CellBender input once `nfcore_scrnaseq` exposes them
+- Which annotation reference management strategy should be used for `CellTypist`,
+  `scANVI`, and custom atlases
+- How much GPU-specific functionality should be facility-default versus optional
+- Whether static publication exports should be generated in each template or only
+  in later presentation/report templates
 
-Minimum viable scope:
-- auto-resolve `nfcore_scrnaseq_res_mt` from `project.yaml`
-- render a `pixi.toml`
-- write `config/project.toml`
-- run QC and baseline Scanpy preprocessing
-- write one primary `.h5ad`
-- render at least one Quarto HTML report
-
-Minimum parameters:
-- `input_h5ad`
-- `sample_metadata`
-- `organism`
-- `batch_key`
-- `condition_key`
-- `doublet_method`
-
-Likely auto-resolution behavior:
-- if `input_h5ad` is not provided, use
-  `templates.nfcore_scrnaseq.published.nfcore_scrnaseq_res_mt`
-
-## Open design questions
-
-- Whether sample metadata should be auto-generated from `project.yaml` history or always
-  rendered as an editable CSV scaffold.
-- Which doublet method should be the default in CPU-only environments.
-- Whether differential analysis should remain pure Python in the first version or allow a
-  controlled R bridge for pseudobulk.
-- How far to support GPU-specific methods in facility defaults.
-- How to handle atlas/reference files for annotation in a reproducible way.
-
-## Current package direction
+## Current Package Direction
 
 The current ecosystem direction supports this design:
-- Scanpy and AnnData remain the core single-cell stack.
-- `scvi-tools` is the strongest option for advanced integration and reference mapping.
-- `decoupler` is part of the scverse ecosystem and is a good fit for pathway and activity
-  analysis.
-- `SpatialData` and `Squidpy` are the right basis for spatial work.
-- `SnapATAC2` is the leading scverse-aligned option for scATAC.
-- `MuData` / `muon` are the right containers for multimodal templates.
-- `CellRank` and `scVelo` remain the main trajectory / velocity components.
-- `rapids-singlecell` should be treated as optional acceleration, not a hard dependency.
+- `scanpy` and `anndata` remain the core stack
+- `scvi-tools` is the strongest option for advanced integration and reference mapping
+- `decoupler` is well suited for pathway and activity analysis
+- `SpatialData` and `Squidpy` are the right basis for spatial work
+- `SnapATAC2` is the leading scverse-aligned option for scATAC
+- `MuData` / `muon` are the right multimodal containers
+- `CellRank` and `scVelo` remain the main trajectory / velocity components
+- `CellBender` is the main Python option for ambient/background correction
+- `rapids-singlecell` should remain optional acceleration, not a hard dependency
 
 ## References
 
@@ -462,4 +592,5 @@ The current ecosystem direction supports this design:
 - muon: <https://muon.readthedocs.io/>
 - SnapATAC2: <https://scverse.org/SnapATAC2/>
 - rapids-singlecell: <https://rapids-singlecell.readthedocs.io/>
+- CellBender: <https://cellbender.readthedocs.io/>
 - nf-core/scrnaseq outputs: <https://nf-co.re/scrnaseq/latest/docs/output>

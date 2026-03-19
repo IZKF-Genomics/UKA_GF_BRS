@@ -65,6 +65,18 @@ def populate(ctx) -> None:
     params = ctx.params
     project_data = _load_project_yaml(ctx)
 
+    if not _needs_fill(params.get("input_h5ad")):
+        try:
+            params["input_h5ad"] = str(ctx.materialize(str(params["input_h5ad"]).strip()))
+        except Exception:
+            params["input_h5ad"] = str(params["input_h5ad"]).strip()
+
+    if not _needs_fill(params.get("input_matrix")):
+        try:
+            params["input_matrix"] = str(ctx.materialize(str(params["input_matrix"]).strip()))
+        except Exception:
+            params["input_matrix"] = str(params["input_matrix"]).strip()
+
     input_h5ad_missing = _needs_fill(params.get("input_h5ad"))
     input_matrix_missing = _needs_fill(params.get("input_matrix"))
 
@@ -124,6 +136,11 @@ def populate(ctx) -> None:
 
     if _needs_fill(params.get("sample_metadata")):
         params["sample_metadata"] = ""
+    elif not _needs_fill(params.get("sample_metadata")):
+        try:
+            params["sample_metadata"] = str(ctx.materialize(str(params["sample_metadata"]).strip()))
+        except Exception:
+            params["sample_metadata"] = str(params["sample_metadata"]).strip()
 
     if _needs_fill(params.get("organism")):
         organism = _find_any_template_param(project_data, "organism")

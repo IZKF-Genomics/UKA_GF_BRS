@@ -146,3 +146,37 @@ templates:
     assert ctx.params["input_source_template"] == "cellbender_remove_background"
     assert ctx.params["ambient_correction_applied"] is True
     assert ctx.params["ambient_correction_method"] == "cellbender"
+
+
+def test_hook_materializes_explicit_input_overrides(tmp_path: Path):
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "project.yaml").write_text("name: Demo scRNA\n", encoding="utf-8")
+
+    brs_root = Path("/data/shared/repos/UKA_GF_BRS")
+    sys.path.insert(0, str(brs_root))
+
+    from hooks.scverse_scrna_prep_defaults import populate  # type: ignore
+
+    ctx = SimpleNamespace(
+        params={
+            "input_h5ad": "nextgen:/data/projects/demo/input.h5ad",
+            "input_matrix": "",
+            "input_format": "",
+            "sample_metadata": "nextgen:/data/projects/demo/samples.csv",
+            "organism": "",
+            "input_source_template": "",
+            "ambient_correction_applied": None,
+            "ambient_correction_method": "",
+        },
+        project=SimpleNamespace(project_path=str(project_dir), name="Demo scRNA"),
+        project_dir=str(project_dir),
+        template=SimpleNamespace(id="scverse_scrna_prep"),
+        materialize=lambda p: str(p).replace("nextgen:", ""),
+    )
+
+    populate(ctx)
+
+    assert ctx.params["input_h5ad"] == "/data/projects/demo/input.h5ad"
+    assert ctx.params["sample_metadata"] == "/data/projects/demo/samples.csv"
+    assert ctx.params["input_source_template"] == "manual"
