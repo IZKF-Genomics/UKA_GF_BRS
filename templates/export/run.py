@@ -44,6 +44,19 @@ def _strip_created_resources(value):
             _strip_created_resources(v)
 
 
+def _is_final_message_pending(exc: HTTPError, detail: str) -> bool:
+    """
+    Some export-engine deployments return 425 while others briefly return
+    404 {"detail":"Job not found"} before the final message is materialized.
+    Treat both as retryable pending states.
+    """
+    if exc.code == 425:
+        return True
+    if exc.code == 404 and "Job not found" in detail:
+        return True
+    return False
+
+
 def main() -> None:
     spec = Path("export_job_spec.json")
     if not spec.exists():
@@ -124,6 +137,9 @@ def main() -> None:
     export_dir = Path.cwd()
     published = export_entry.get("published") or {}
     published["export_job_id"] = job_id
+    published.pop("export_final_path", None)
+    published.pop("export_status", None)
+    published.pop("export_main_report", None)
     export_entry["published"] = published
     _strip_created_resources(export_entry)
     safe_dump_yaml(project_path, project_data)
@@ -151,12 +167,12 @@ def main() -> None:
             )
             final_json = json.loads(final_body)
         except HTTPError as exc:
-            if exc.code == 425 and attempt < max_attempts:
+            detail = exc.read().decode("utf-8") if exc.fp else str(exc)
+            if _is_final_message_pending(exc, detail) and attempt < max_attempts:
                 wait = attempt * 5
                 print(f"[export] Final message not ready (HTTP {exc.code}); retrying in {wait}s...")
                 time.sleep(wait)
                 continue
-            detail = exc.read().decode("utf-8") if exc.fp else str(exc)
             print(f"[export] Unable to fetch final message: {exc.code} {detail}")
             break
         except Exception as exc:  # noqa: BLE001

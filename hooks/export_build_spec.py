@@ -23,6 +23,14 @@ def _load_project_templates(project_dir: Path, project_data: Dict[str, Any] | No
     return [t.get("id") for t in (data.get("templates") or []) if t.get("id")]
 
 
+def _load_project_template_entries(
+    project_dir: Path, project_data: Dict[str, Any] | None = None
+) -> List[Dict[str, Any]]:
+    data = project_data if project_data is not None else _load_project_data(project_dir)
+    entries = data.get("templates") or []
+    return [entry for entry in entries if isinstance(entry, dict) and entry.get("id")]
+
+
 def _load_published_outputs(
     project_dir: Path, project_data: Dict[str, Any] | None = None
 ) -> Dict[str, Dict[str, Any]]:
@@ -373,6 +381,7 @@ def main(ctx: Any) -> Dict[str, Any]:
 
     project_dir = Path(ctx.project_dir)
     project_data = _load_project_data(project_dir) if ctx.project else {}
+    project_templates = _load_project_template_entries(project_dir, project_data) if ctx.project else []
     used_templates = _load_project_templates(project_dir, project_data) if ctx.project else []
     published = _load_published_outputs(project_dir, project_data) if ctx.project else {}
     project_authors = _load_project_authors(project_dir, project_data) if ctx.project else []
@@ -383,67 +392,79 @@ def main(ctx: Any) -> Dict[str, Any]:
     for entry in mappings:
         if not isinstance(entry, dict):
             continue
-        tpl_id = entry.get("template_id")
-        if not tpl_id or tpl_id == "export":
+        mapping_template_id = entry.get("template_id")
+        if not mapping_template_id or mapping_template_id == "export":
             continue
-        if ctx.project and tpl_id not in used_templates:
-            continue
-
-        source_path = entry.get("src")
-        published_key = entry.get("src_published_key")
-        project_key = entry.get("src_project_key")
-        host = entry.get("host") or ctx.hostname()
-        project_host, _ = _split_host(ctx.project.project_path, host) if ctx.project else (host, "")
-        project_root = Path(ctx.materialize(ctx.project.project_path)) if ctx.project else None
-        template_root = (project_root / tpl_id).resolve() if project_root else None
-
-        if not isinstance(source_path, str) or not source_path.strip():
-            if template_root is None:
+        matching_templates: List[Dict[str, Any]] = []
+        if ctx.project:
+            matching_templates = [
+                tpl
+                for tpl in project_templates
+                if tpl.get("id") == mapping_template_id
+                or tpl.get("source_template") == mapping_template_id
+            ]
+            if not matching_templates and mapping_template_id not in used_templates:
                 continue
-            source_path = "{template_root}"
-
-        if isinstance(project_key, str) and ctx.project:
-            project_val = _resolve_project_key(project_data, project_key)
-            if isinstance(project_val, str) and project_val:
-                host, source_path = _split_host(project_val, host)
-
-        if isinstance(published_key, str) and ctx.project and source_path == entry.get("src"):
-            pub_map = published.get(tpl_id) or {}
-            pub_val = pub_map.get(published_key)
-            if isinstance(pub_val, str) and pub_val:
-                host, source_path = _split_host(pub_val, host)
-
-        if "{template_root}" in source_path and template_root is not None:
-            source_path = source_path.replace("{template_root}", str(template_root))
-            host = project_host
-
-        if os.path.isabs(source_path):
-            src = source_path
         else:
-            if project_root is None:
+            matching_templates = [{"id": mapping_template_id, "source_template": mapping_template_id}]
+
+        for template_entry in matching_templates:
+            tpl_id = str(template_entry.get("id") or mapping_template_id)
+            source_path = entry.get("src")
+            published_key = entry.get("src_published_key")
+            project_key = entry.get("src_project_key")
+            host = entry.get("host") or ctx.hostname()
+            project_host, _ = _split_host(ctx.project.project_path, host) if ctx.project else (host, "")
+            project_root = Path(ctx.materialize(ctx.project.project_path)) if ctx.project else None
+            template_root = (project_root / tpl_id).resolve() if project_root else None
+
+            if not isinstance(source_path, str) or not source_path.strip():
+                if template_root is None:
+                    continue
+                source_path = "{template_root}"
+
+            if isinstance(project_key, str) and ctx.project:
+                project_val = _resolve_project_key(project_data, project_key)
+                if isinstance(project_val, str) and project_val:
+                    host, source_path = _split_host(project_val, host)
+
+            if isinstance(published_key, str) and ctx.project and source_path == entry.get("src"):
+                pub_map = published.get(tpl_id) or {}
+                pub_val = pub_map.get(published_key)
+                if isinstance(pub_val, str) and pub_val:
+                    host, source_path = _split_host(pub_val, host)
+
+            if "{template_root}" in source_path and template_root is not None:
+                source_path = source_path.replace("{template_root}", str(template_root))
+                host = project_host
+
+            if os.path.isabs(source_path):
+                src = source_path
+            else:
+                if project_root is None:
+                    continue
+                src = str((project_root / source_path).resolve())
+                host = project_host
+
+            dest = entry.get("dest")
+            if not isinstance(dest, str):
                 continue
-            src = str((project_root / source_path).resolve())
-            host = project_host
+            dest = _render_target_dir(tpl_id, dest)
 
-        dest = entry.get("dest")
-        if not isinstance(dest, str):
-            continue
-        dest = _render_target_dir(tpl_id, dest)
+            if host == project_host and not Path(src).exists():
+                continue
 
-        if host == project_host and not Path(src).exists():
-            continue
-
-        report_links = _build_report_links(entry, Path(src), dest, host, project_host, project_data)
-        export_entry = {
-            "src": src,
-            "dest": dest,
-            "host": host,
-            "project": entry.get("project") or (ctx.project.name if ctx.project else ""),
-            "mode": entry.get("mode") or "symlink",
-        }
-        if report_links:
-            export_entry["report_links"] = report_links
-        export_list.append(export_entry)
+            report_links = _build_report_links(entry, Path(src), dest, host, project_host, project_data)
+            export_entry = {
+                "src": src,
+                "dest": dest,
+                "host": host,
+                "project": entry.get("project") or (ctx.project.name if ctx.project else ""),
+                "mode": entry.get("mode") or "symlink",
+            }
+            if report_links:
+                export_entry["report_links"] = report_links
+            export_list.append(export_entry)
 
     project_name = ctx.project.name if ctx.project else ""
     if not ctx.params.get("export_username") and project_name:

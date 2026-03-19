@@ -127,3 +127,32 @@ mappings:
       - path: "*.html"
         section: reports
         description: "DGEA reports"
+
+  ##############################################################################
+  # Illumina methylation array preprocessing
+  ##############################################################################
+  - template_id: illumina_methylation_process
+    src: "{template_root}"
+    dest: "2_Processed_data/{template_id}"
+    report_links:
+      - path: "."
+        section: processed
+        description: "This folder contains the rendered report, configuration, and processed methylation array outputs."
+      - path: "illumina_methylation_process.html"
+        section: processed
+        description: "Rendered preprocessing and clustering report."
+        link_name: "Preprocessing report"
+
+  ##############################################################################
+  # Illumina methylation array comparison reports
+  ##############################################################################
+  - template_id: illumina_methylation_compare
+    src: "{template_root}"
+    dest: "3_Reports/{template_id}"
+    report_links:
+      - path: "."
+        section: reports
+        description: "This folder contains methylation comparison reports, result tables, and configuration files."
+      - path: "reports/*.html"
+        section: reports
+        description: "Rendered comparison reports."
