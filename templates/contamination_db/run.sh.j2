@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: required command not found in PATH: $1" >&2
+    exit 127
+  fi
+}
+
+RUN_DIR="{% if ctx.project %}{{ ctx.project_dir }}/{{ ctx.template.id }}{% else %}{{ ctx.cwd }}{% endif %}"
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+mkdir -p results
+RUN_LOG="results/run.log"
+
+if [[ -z "${CONTAMINATION_DB_LOG_CAPTURED:-}" ]] && command -v script >/dev/null 2>&1; then
+  export CONTAMINATION_DB_LOG_CAPTURED=1
+  SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  exec script -qefc "bash \"$SCRIPT_PATH\"" "$RUN_LOG"
+fi
+
+require_cmd pixi
+
+echo "Run directory         : $RUN_DIR"
+echo "Config file           : contamination_db.yaml"
+echo "Installing pixi env   : pixi.toml"
+pixi install
+
+echo "Building contamination databases"
+pixi run python ./build_contamination_db.py --config ./contamination_db.yaml
+
+echo "Build complete"

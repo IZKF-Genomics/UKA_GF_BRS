@@ -1,0 +1,39 @@
+# Shared contamination-database builder configuration.
+# Edit the panel name, version, read lengths, and species URLs before running.
+
+root_dir: "/data/shared/contamination_db"
+panel_name: "vertebrate_panel"
+db_version: "v2026.03"
+threads: 32
+cleanup_staging: true
+force: false
+
+build:
+  kraken2: true
+  bracken: true
+  fastq_screen: true
+
+paths:
+  kraken2_root: "/data/shared/contamination_db/kraken2"
+  bracken_root: "/data/shared/contamination_db/bracken"
+  fastq_screen_root: "/data/shared/contamination_db/fastq_screen"
+
+bracken:
+  read_lengths: [75, 100, 151]
+
+species: []
+  # Add one row per genome you want in the contamination panel.
+  # fasta_url can point to .fa, .fasta, .fa.gz, or .fasta.gz.
+  #
+  # Example:
+  # - label: human
+  #   taxid: 9606
+  #   fasta_url: "https://example.org/path/to/hg38.fa.gz"
+  #   enabled: true
+  #   fastq_screen_label: "Human"
+  #
+  # - label: mouse
+  #   taxid: 10090
+  #   fasta_url: "https://example.org/path/to/mm39.fa.gz"
+  #   enabled: true
+  #   fastq_screen_label: "Mouse"

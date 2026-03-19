@@ -1,5 +1,7 @@
 # UKA_GF_BRS — Genomics Facility Templates
 
+Version: `2026.03.19`
+
 This repository is a Bioinformatics Resource Store (BRS) for the UKA Genomics Facility. It
 contains reusable analysis templates designed to be rendered, run, and published with the
 BPM CLI.
@@ -34,6 +36,7 @@ cd /path/to/output
 ```
 
 ## Templates
+- contamination_db: [templates/contamination_db/README.md](templates/contamination_db/README.md)
 - demux_bclconvert: [templates/demux_bclconvert/README.md](templates/demux_bclconvert/README.md)
 - dgea: [templates/dgea/README.md](templates/dgea/README.md)
 - export: [templates/export/README.md](templates/export/README.md) (report_links-based mapping table; remote links supported, host prefixes allowed)
@@ -73,6 +76,7 @@ cd /path/to/output
 - Demultiplexing: [docs/demultiplexing.md](docs/demultiplexing.md)
 - Basic analysis: [docs/basic_analysis.md](docs/basic_analysis.md)
 - Single-cell analysis plan: [docs/single_cell_analysis.md](docs/single_cell_analysis.md)
+- Shared contamination database builder: [templates/contamination_db/README.md](templates/contamination_db/README.md)
 
 ## Conventions
 - Project mode renders into `<project_dir>/<template_id>/` and updates `project.yaml`.

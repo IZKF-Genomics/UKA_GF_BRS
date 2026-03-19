@@ -1,0 +1,20 @@
+id: contamination_db
+description: "Build shared Kraken2, Bracken, and FastQ Screen contamination databases from directly downloaded FASTA inputs. Optimized for ad-hoc usage (--out)."
+
+params: {}
+
+render:
+  into: "/data/shared/contamination_db/"
+  files:
+    - run.sh.j2 -> run.sh
+    - build_contamination_db.py -> build_contamination_db.py
+    - contamination_db.yaml -> contamination_db.yaml
+    - pixi.toml -> pixi.toml
+    - README.md -> README.md
+
+run:
+  entry: "run.sh"
+
+tools:
+  required: [bash, pixi]
+  optional: [script]

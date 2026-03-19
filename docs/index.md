@@ -13,6 +13,7 @@ Use this page as the entry point for UKA_GF_BRS operations.
 - [Demultiplexing](./demultiplexing.md)
 - [Basic analysis](./basic_analysis.md)
 - [Single-cell analysis plan](./single_cell_analysis.md)
+- [Shared contamination database builder](../templates/contamination_db/README.md)
 
 ## Quick Start
 1. Add and activate this BRS.
