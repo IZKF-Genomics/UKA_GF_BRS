@@ -26,6 +26,7 @@ Build shared Kraken2, Bracken, and FastQ Screen contamination databases from dir
 3. Edit `contamination_db.yaml`:
    - choose `panel_name` and `db_version`
    - choose `kraken2_base` (`standard` to include the official Kraken2 standard content, including bacteria; `none` for custom-only)
+   - leave `kraken2_use_ftp: true` unless you know rsync works reliably on your network
    - set species FASTA URLs and taxids
    - choose Bracken read lengths
 4. Run:
@@ -59,6 +60,8 @@ The template also updates `current` symlinks under each tool root:
   Removes downloaded and normalized FASTA files after a successful build.
 - `kraken2_base: standard`
   Starts from the official Kraken2 standard database, which already includes bacteria, archaea, viral references, human, and UniVec_Core. Use `none` if you want a custom-only database.
+- `kraken2_use_ftp: true`
+  Uses Kraken2's official `--use-ftp` fallback to avoid rsync-related build failures on restricted networks.
 - `force: false`
   Prevents accidental overwrite of an existing `<panel>/<version>` build.
 - `species`

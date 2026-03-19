@@ -8,6 +8,7 @@ threads: 32
 cleanup_staging: true
 force: false
 kraken2_base: "standard"
+kraken2_use_ftp: true
 
 build:
   kraken2: true

@@ -200,6 +200,7 @@ def main() -> None:
     cleanup = bool(cfg.get("cleanup_staging", True))
     threads = int(cfg.get("threads", 1))
     kraken2_base = str(cfg.get("kraken2_base", "standard")).strip().lower()
+    kraken2_use_ftp = bool(cfg.get("kraken2_use_ftp", True))
     build_cfg = cfg.get("build", {}) or {}
     paths_cfg = cfg.get("paths", {}) or {}
     bracken_cfg = cfg.get("bracken", {}) or {}
@@ -262,10 +263,13 @@ def main() -> None:
 
     if build_cfg.get("kraken2", True):
         print(f"Building Kraken2 DB   : {kraken_dir}")
+        kraken_base_cmd = ["kraken2-build"]
+        if kraken2_use_ftp:
+            kraken_base_cmd.append("--use-ftp")
         if kraken2_base == "standard":
-            run(["kraken2-build", "--standard", "--threads", str(max(1, threads)), "--db", str(kraken_dir)])
+            run(kraken_base_cmd + ["--standard", "--threads", str(max(1, threads)), "--db", str(kraken_dir)])
         elif kraken2_base == "none":
-            run(["kraken2-build", "--download-taxonomy", "--db", str(kraken_dir)])
+            run(kraken_base_cmd + ["--download-taxonomy", "--db", str(kraken_dir)])
         else:
             raise SystemExit(f"Unsupported kraken2_base: {kraken2_base}. Use 'standard' or 'none'.")
         for row in manifest_rows:
@@ -312,6 +316,7 @@ def main() -> None:
         "threads": threads,
         "cleanup_staging": cleanup,
         "kraken2_base": kraken2_base,
+        "kraken2_use_ftp": kraken2_use_ftp,
         "paths": {
             "kraken2": str(kraken_dir),
             "bracken": str(bracken_dir),
