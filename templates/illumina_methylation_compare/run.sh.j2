@@ -35,6 +35,9 @@ echo "[INFO] Root: $ROOT_DIR"
 echo "[INFO] Installing/updating pixi environment"
 pixi install
 
+echo "[INFO] Repairing Bioconductor annotation environment if needed"
+pixi run Rscript scripts/repair_bioc_env.R
+
 SYNC_ON_RUN="$(pixi run Rscript -e 'cfg <- RcppTOML::parseTOML("config/project.toml"); v <- TRUE; if (!is.null(cfg$input$sync_samples_on_run)) v <- cfg$input$sync_samples_on_run; cat(tolower(as.character(v)))' 2>/dev/null || echo true)"
 # if [[ "$SYNC_ON_RUN" =~ ^(true|t|1|yes|y)$ ]]; then
 #   echo "[INFO] Syncing sample sheets"

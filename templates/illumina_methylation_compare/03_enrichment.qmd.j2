@@ -68,12 +68,21 @@ safe_gometh <- function(...) {
 standardize_enrichment_terms <- function(tbl) {
   tbl <- tibble::as_tibble(tbl)
   if (nrow(tbl) == 0) return(tbl)
-  if ("Term" %in% names(tbl)) return(tbl)
 
-  label_col <- intersect(c("Pathway", "Description", "NAME", "name", "ID"), names(tbl))[1]
-  if (!is.na(label_col) && length(label_col) > 0) {
-    tbl$Term <- as.character(tbl[[label_col]])
+  if (!("Term" %in% names(tbl))) {
+    label_col <- intersect(c("TERM", "Pathway", "Description", "NAME", "name", "ID"), names(tbl))[1]
+    if (!is.na(label_col) && length(label_col) > 0) {
+      tbl$Term <- as.character(tbl[[label_col]])
+    }
   }
+
+  if (!("Ont" %in% names(tbl))) {
+    ont_col <- intersect(c("ONTOLOGY", "ontology"), names(tbl))[1]
+    if (!is.na(ont_col) && length(ont_col) > 0) {
+      tbl$Ont <- as.character(tbl[[ont_col]])
+    }
+  }
+
   tbl
 }
 
@@ -82,7 +91,8 @@ build_enrichment_plot <- function(tbl, cmp_id, title_prefix, out_path, top_n = 1
   plot_tbl <- tbl
   plot_tbl <- plot_tbl[is.finite(plot_tbl$FDR) & !is.na(plot_tbl$FDR), , drop = FALSE]
   if (nrow(plot_tbl) == 0) return(FALSE)
-  plot_tbl <- dplyr::slice_min(plot_tbl, order_by = .data$FDR, n = min(top_n, nrow(plot_tbl)))
+  plot_tbl <- dplyr::slice_min(plot_tbl, order_by = .data$FDR, n = min(top_n, nrow(plot_tbl)), with_ties = FALSE)
+  plot_tbl$Term <- stringr::str_wrap(as.character(plot_tbl$Term), width = 40)
   plot_tbl <- dplyr::mutate(
     plot_tbl,
     Term = factor(.data$Term, levels = rev(.data$Term)),
@@ -98,9 +108,11 @@ build_enrichment_plot <- function(tbl, cmp_id, title_prefix, out_path, top_n = 1
     ggplot2::theme_minimal(base_size = 12) +
     ggplot2::theme(
       plot.title = ggplot2::element_text(face = "bold"),
-      panel.grid.minor = ggplot2::element_blank()
+      panel.grid.minor = ggplot2::element_blank(),
+      axis.text.y = ggplot2::element_text(size = 10)
     )
-  save_plot(p, out_path, width = 9, height = 5.5)
+  fig_height <- max(3.8, min(6.2, 0.32 * nrow(plot_tbl) + 1.2))
+  save_plot(p, out_path, width = 7.2, height = fig_height)
   TRUE
 }
 
@@ -148,14 +160,14 @@ for (cmp_id in names(dmp_by_cmp)) {
     cmp_id = cmp_id,
     title_prefix = "Top GO terms:",
     out_path = file.path("results/figures/comparisons", cmp_id, "go_terms.png"),
-    top_n = min(10, cfg$enrichment$top_n)
+    top_n = min(20, cfg$enrichment$top_n)
   )
   build_enrichment_plot(
     kegg_tbl,
     cmp_id = cmp_id,
     title_prefix = "Top KEGG pathways:",
     out_path = file.path("results/figures/comparisons", cmp_id, "kegg_terms.png"),
-    top_n = min(10, cfg$enrichment$top_n)
+    top_n = min(20, cfg$enrichment$top_n)
   )
   go_summary[[cmp_id]] <- go_tbl
   kegg_summary[[cmp_id]] <- kegg_tbl
@@ -209,7 +221,6 @@ These tables list the highest-ranked GO terms for each comparison based on the s
 for (cmp_id in names(go_summary)) {
   tbl <- go_summary[[cmp_id]]
   fig <- file.path("results/figures/comparisons", cmp_id, "go_terms.png")
-  fig_report <- file.path("..", fig)
 
   cat("### GO: ", cmp_id, "\n\n", sep = "")
   n_tested <- enrichment_inputs$n_tested_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
@@ -226,7 +237,16 @@ for (cmp_id in names(go_summary)) {
 
   if (file.exists(fig)) {
     cat("\n")
-    print(knitr::include_graphics(fig_report))
+    cat(
+      as.character(
+        htmltools::tags$img(
+          src = knitr::image_uri(normalizePath(fig, winslash = "/", mustWork = TRUE)),
+          style = "max-width: 760px; width: 100%; height: auto; display: block; margin: 1rem 0;"
+        )
+      ),
+      "\n\n",
+      sep = ""
+    )
     cat("\n")
   }
   print(report_download_link(file.path("results/tables/comparisons", cmp_id, "go_terms.csv")))
@@ -242,7 +262,6 @@ These tables list the highest-ranked KEGG pathways for each comparison using the
 for (cmp_id in names(kegg_summary)) {
   tbl <- kegg_summary[[cmp_id]]
   fig <- file.path("results/figures/comparisons", cmp_id, "kegg_terms.png")
-  fig_report <- file.path("..", fig)
 
   cat("### KEGG: ", cmp_id, "\n\n", sep = "")
   n_tested <- enrichment_inputs$n_tested_cpg[match(cmp_id, enrichment_inputs$comparison_id)]
@@ -259,7 +278,16 @@ for (cmp_id in names(kegg_summary)) {
 
   if (file.exists(fig)) {
     cat("\n")
-    print(knitr::include_graphics(fig_report))
+    cat(
+      as.character(
+        htmltools::tags$img(
+          src = knitr::image_uri(normalizePath(fig, winslash = "/", mustWork = TRUE)),
+          style = "max-width: 760px; width: 100%; height: auto; display: block; margin: 1rem 0;"
+        )
+      ),
+      "\n\n",
+      sep = ""
+    )
     cat("\n")
   }
   print(report_download_link(file.path("results/tables/comparisons", cmp_id, "kegg_terms.csv")))

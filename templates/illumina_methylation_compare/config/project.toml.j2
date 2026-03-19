@@ -18,6 +18,12 @@ primary_group_col = "{{ ctx.params.group_col }}"
 [comparisons]
 comparisons_file = "config/comparisons.csv"
 
+[batch]
+enabled = false
+method = "limma_removeBatchEffect"
+batch_col = "run_id"
+preserve_cols = ["{{ ctx.params.group_col }}"]
+
 [dmp]
 enabled = true
 use_m_values = true

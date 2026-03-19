@@ -83,15 +83,48 @@ pretty_bp <- function(x) format(round(x, 0), big.mark = ",", scientific = FALSE,
 build_region_candidates <- function(dmp_tbl, cmp_id, max_gap_bp = 1000, min_cpgs = 3, alpha = 0.05) {
   ann_tbl <- tibble::as_tibble(ann)
   if (!("Name" %in% names(ann_tbl))) ann_tbl$Name <- rownames(beta)
-  if (!("chr" %in% names(ann_tbl))) ann_tbl$chr <- ann_tbl[[intersect(c("chr", "CHR"), names(ann_tbl))[1]]]
-  if (!("pos" %in% names(ann_tbl))) ann_tbl$pos <- suppressWarnings(as.numeric(ann_tbl[[intersect(c("pos", "MAPINFO"), names(ann_tbl))[1]]]))
+  chr_col <- intersect(c("chr", "CHR"), names(ann_tbl))[1]
+  pos_col <- intersect(c("pos", "MAPINFO"), names(ann_tbl))[1]
+  if (!is.na(chr_col) && !("chr" %in% names(ann_tbl))) ann_tbl$chr <- ann_tbl[[chr_col]]
+  if (!is.na(pos_col) && !("pos" %in% names(ann_tbl))) ann_tbl$pos <- suppressWarnings(as.numeric(ann_tbl[[pos_col]]))
+
+  dmp_chr_col <- intersect(c("chr", "CHR"), names(dmp_tbl))[1]
+  dmp_pos_col <- intersect(c("pos", "MAPINFO"), names(dmp_tbl))[1]
+  if (is.na(dmp_chr_col) && !("chr" %in% names(ann_tbl))) {
+    out <- tibble::tibble(
+      comparison_id = cmp_id,
+      method = method,
+      note = "No chromosome annotation available for region aggregation"
+    )
+    return(list(table = out, regions = out, region_cpgs = list()))
+  }
+  if (is.na(dmp_pos_col) && !("pos" %in% names(ann_tbl))) {
+    out <- tibble::tibble(
+      comparison_id = cmp_id,
+      method = method,
+      note = "No genomic position annotation available for region aggregation"
+    )
+    return(list(table = out, regions = out, region_cpgs = list()))
+  }
 
   dmp2 <- tibble::as_tibble(dmp_tbl) %>%
     dplyr::mutate(
-      chr = dplyr::coalesce(as.character(.data$chr), as.character(ann_tbl$chr[match(.data$CpG, ann_tbl$Name)])),
-      pos = dplyr::coalesce(suppressWarnings(as.numeric(.data$pos)), suppressWarnings(as.numeric(ann_tbl$pos[match(.data$CpG, ann_tbl$Name)]))),
-      gene_label = dplyr::coalesce(as.character(.data$UCSC_RefGene_Name), as.character(ann_tbl$UCSC_RefGene_Name[match(.data$CpG, ann_tbl$Name)])),
-      island_label = dplyr::coalesce(as.character(.data$Relation_to_Island), as.character(ann_tbl$Relation_to_Island[match(.data$CpG, ann_tbl$Name)]))
+      chr = dplyr::coalesce(
+        if (!is.na(dmp_chr_col)) as.character(.data[[dmp_chr_col]]) else NA_character_,
+        if ("chr" %in% names(ann_tbl)) as.character(ann_tbl$chr[match(.data$CpG, ann_tbl$Name)]) else NA_character_
+      ),
+      pos = dplyr::coalesce(
+        if (!is.na(dmp_pos_col)) suppressWarnings(as.numeric(.data[[dmp_pos_col]])) else NA_real_,
+        if ("pos" %in% names(ann_tbl)) suppressWarnings(as.numeric(ann_tbl$pos[match(.data$CpG, ann_tbl$Name)])) else NA_real_
+      ),
+      gene_label = dplyr::coalesce(
+        if ("UCSC_RefGene_Name" %in% names(dmp_tbl)) as.character(.data$UCSC_RefGene_Name) else NA_character_,
+        if ("UCSC_RefGene_Name" %in% names(ann_tbl)) as.character(ann_tbl$UCSC_RefGene_Name[match(.data$CpG, ann_tbl$Name)]) else NA_character_
+      ),
+      island_label = dplyr::coalesce(
+        if ("Relation_to_Island" %in% names(dmp_tbl)) as.character(.data$Relation_to_Island) else NA_character_,
+        if ("Relation_to_Island" %in% names(ann_tbl)) as.character(ann_tbl$Relation_to_Island[match(.data$CpG, ann_tbl$Name)]) else NA_character_
+      )
     ) %>%
     dplyr::filter(.data$significant, !is.na(.data$chr), !is.na(.data$pos), .data$adj.P.Val <= alpha) %>%
     dplyr::mutate(direction = ifelse(.data$delta_beta >= 0, "target_hypermethylated", "base_hypermethylated")) %>%
@@ -341,6 +374,10 @@ report_download_link("results/tables/dmr_settings.csv")
 This summary table reports how many region candidates were found for each comparison together with basic region-size statistics and the highest-ranked region.
 
 ```{r dmr-summary}
+if (all(dmr_summary$n_region_candidates == 0, na.rm = TRUE)) {
+  cat("No DMR candidates were found for any comparison under the current settings. This usually means that the significant CpGs from the DMP step did not form clusters of at least `min_cpgs` nearby probes within `max_gap_bp`, or that there were no significant CpGs available for region aggregation.\n\n")
+}
+
 render_report_table(
   dmr_summary,
   preferred = c("comparison_id", "comparison_name", "method", "n_region_candidates", "median_width_bp", "median_cpgs_per_region", "best_region", "best_region_score"),
@@ -364,22 +401,28 @@ for (cmp_id in names(dmr_results)) {
   cat("### ", cmp_id, "\n\n", sep = "")
   cat("These region candidates summarize clusters of adjacent significant CpGs with consistent methylation direction. The table lists the highest-ranked candidates, followed by figures that summarize region importance and sample-level structure.\n\n")
 
-  print(render_report_table(
-    dplyr::slice_head(dmr_tbl, n = min(dmr_top_n, nrow(dmr_tbl))),
-    preferred = c("region_id", "chr", "start", "end", "width_bp", "n_cpg", "direction", "mean_delta_beta", "min_adj_p", "genes", "rank_score"),
-    page_length = min(dmr_top_n, 20),
-    caption = cmp_id
-  ))
+  if (!("region_id" %in% names(dmr_tbl))) {
+    note_txt <- if ("note" %in% names(dmr_tbl) && nrow(dmr_tbl) > 0) as.character(dmr_tbl$note[[1]]) else "No DMR candidates were available for this comparison."
+    cat("No region-level result table is shown for this comparison. ", note_txt, "\n\n", sep = "")
+    print(render_report_table(dmr_tbl, page_length = 10, caption = cmp_id))
+  } else {
+    print(render_report_table(
+      dplyr::slice_head(dmr_tbl, n = min(dmr_top_n, nrow(dmr_tbl))),
+      preferred = c("region_id", "chr", "start", "end", "width_bp", "n_cpg", "direction", "mean_delta_beta", "min_adj_p", "genes", "rank_score"),
+      page_length = min(dmr_top_n, 20),
+      caption = cmp_id
+    ))
+  }
 
   if (file.exists(score_fig)) {
     cat("\nThe following figure ranks the strongest region candidates for this comparison using the composite region score.\n\n")
-    print(knitr::include_graphics(file.path("..", score_fig)))
+    cat("![](", report_asset_href(score_fig), ")\n\n", sep = "")
     cat("\n")
   }
 
   if (file.exists(heatmap_fig)) {
     cat("\nThis heatmap shows the top region candidates across all samples using row-scaled mean beta values, which helps readers assess whether region-level methylation patterns separate the groups of interest.\n\n")
-    print(knitr::include_graphics(file.path("..", heatmap_fig)))
+    cat("![](", report_asset_href(heatmap_fig), ")\n\n", sep = "")
     cat("\n")
   }
 

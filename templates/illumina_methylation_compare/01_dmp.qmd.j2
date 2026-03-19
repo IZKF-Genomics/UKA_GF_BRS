@@ -264,9 +264,7 @@ for (cmp_id in names(out_results)) {
   ))
 
   if (file.exists(fig)) {
-    cat("\n")
-    print(knitr::include_graphics(normalizePath(fig, winslash = "/", mustWork = TRUE)))
-    cat("\n")
+    cat("\n![](", report_asset_href(fig), ")\n\n", sep = "")
   }
   print(report_download_link(file.path("results/tables/comparisons", cmp_id, "dmp_table.csv")))
   print(report_download_link(file.path("results/tables/comparisons", cmp_id, "dmp_significant.csv"), label = "Download significant CSV"))

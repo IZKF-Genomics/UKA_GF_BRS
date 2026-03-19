@@ -50,6 +50,13 @@ write_table(tibble::tibble(cpg_ids = cpg_ids), "results/tables/drilldown_request
 write_table(tibble::tibble(loci = loci), "results/tables/drilldown_requested_loci.csv")
 write_table(tibble::tibble(genes = genes), "results/tables/drilldown_requested_genes.csv")
 
+cpg_detail_tables <- list()
+locus_detail_tables <- list()
+gene_detail_tables <- list()
+cpg_summary_rows <- list()
+locus_summary_rows <- list()
+gene_summary_rows <- list()
+
 # CpG drilldowns over all samples
 for (cpg in cpg_ids) {
   if (!(cpg %in% rownames(beta))) next
@@ -59,7 +66,16 @@ for (cpg in cpg_ids) {
     dmp <- dmp_by_cmp[[cmp_id]]
     df[[paste0("in_dmp_", cmp_id)]] <- cpg %in% dmp$CpG
   }
-  write_table(df, file.path("results/tables", paste0("drilldown_cpg_", cpg, ".csv")))
+  out_path <- file.path("results/tables", paste0("drilldown_cpg_", cpg, ".csv"))
+  write_table(df, out_path)
+  cpg_detail_tables[[cpg]] <- list(data = df, path = out_path)
+  cpg_summary_rows[[cpg]] <- tibble::tibble(
+    cpg_id = cpg,
+    n_samples = nrow(df),
+    mean_beta = mean(df$beta, na.rm = TRUE),
+    sd_beta = stats::sd(df$beta, na.rm = TRUE),
+    found_in_dmp = any(vapply(names(dmp_by_cmp), function(cmp_id) cpg %in% dmp_by_cmp[[cmp_id]]$CpG, logical(1)))
+  )
 }
 
 # Locus drilldowns
@@ -70,7 +86,16 @@ for (loc in loci) {
   loc_tbl <- ann2 %>% dplyr::filter(.data$chr == chr, .data$pos >= start, .data$pos <= end)
   if (nrow(loc_tbl) > cfg$drilldown$max_cpgs_per_locus) loc_tbl <- dplyr::slice_head(loc_tbl, n = cfg$drilldown$max_cpgs_per_locus)
   tag <- gsub("[^A-Za-z0-9]+", "_", loc)
-  write_table(loc_tbl, file.path("results/tables", paste0("drilldown_locus_", tag, ".csv")))
+  out_path <- file.path("results/tables", paste0("drilldown_locus_", tag, ".csv"))
+  write_table(loc_tbl, out_path)
+  locus_detail_tables[[loc]] <- list(data = loc_tbl, path = out_path)
+  locus_summary_rows[[loc]] <- tibble::tibble(
+    locus = loc,
+    n_matching_cpg = nrow(loc_tbl),
+    chr = chr,
+    start = start,
+    end = end
+  )
 }
 
 # Gene drilldowns
@@ -79,8 +104,22 @@ for (gene in genes) {
   if (length(gene_cols) == 0) break
   gene_tbl <- ann2[Reduce(`|`, lapply(gene_cols, function(col) grepl(gene, ann2[[col]], fixed = TRUE))), , drop = FALSE]
   tag <- gsub("[^A-Za-z0-9]+", "_", gene)
-  write_table(gene_tbl, file.path("results/tables", paste0("drilldown_gene_", tag, ".csv")))
+  out_path <- file.path("results/tables", paste0("drilldown_gene_", tag, ".csv"))
+  write_table(gene_tbl, out_path)
+  gene_detail_tables[[gene]] <- list(data = gene_tbl, path = out_path)
+  gene_summary_rows[[gene]] <- tibble::tibble(
+    gene = gene,
+    n_matching_cpg = nrow(gene_tbl),
+    annotation_columns_used = paste(gene_cols, collapse = "; ")
+  )
 }
+
+cpg_summary_tbl <- dplyr::bind_rows(cpg_summary_rows)
+locus_summary_tbl <- dplyr::bind_rows(locus_summary_rows)
+gene_summary_tbl <- dplyr::bind_rows(gene_summary_rows)
+write_table(cpg_summary_tbl, "results/tables/drilldown_cpg_summary.csv")
+write_table(locus_summary_tbl, "results/tables/drilldown_locus_summary.csv")
+write_table(gene_summary_tbl, "results/tables/drilldown_gene_summary.csv")
 ```
 
 ## Method
@@ -116,4 +155,100 @@ These gene symbols are used to retrieve annotation-linked probes for targeted ge
 ```{r requested-genes}
 render_report_table(tibble::tibble(genes = genes), page_length = 20)
 report_download_link("results/tables/drilldown_requested_genes.csv")
+```
+
+## CpG Drilldown Summary
+
+This summary table reports whether each requested CpG was found in the combined methylation matrix and gives basic beta-value summary statistics across all samples.
+
+```{r cpg-drilldown-summary}
+render_report_table(
+  cpg_summary_tbl,
+  preferred = c("cpg_id", "n_samples", "mean_beta", "sd_beta", "found_in_dmp"),
+  page_length = 20
+)
+report_download_link("results/tables/drilldown_cpg_summary.csv")
+```
+
+## CpG Drilldown Details
+
+The following sections provide sample-level beta values for each requested CpG together with available sample metadata and flags indicating whether the CpG appears in any comparison-specific DMP result table.
+
+```{r cpg-drilldown-details, results='asis'}
+for (cpg in names(cpg_detail_tables)) {
+  entry <- cpg_detail_tables[[cpg]]
+  cat("### CpG: ", cpg, "\n\n", sep = "")
+  cat("This table lists the per-sample beta values for the requested CpG across the merged cohort.\n\n")
+  print(render_report_table(
+    entry$data,
+    preferred = c("sample_id", "beta", "group", "run_id", "dataset_id", "sex_reported", "age"),
+    page_length = min(25, max(10, nrow(entry$data)))
+  ))
+  print(report_download_link(entry$path))
+  cat("\n")
+}
+```
+
+## Locus Drilldown Summary
+
+This summary shows how many probes from the annotation fall into each requested genomic interval after optional truncation by the configured maximum CpGs per locus.
+
+```{r locus-drilldown-summary}
+render_report_table(
+  locus_summary_tbl,
+  preferred = c("locus", "n_matching_cpg", "chr", "start", "end"),
+  page_length = 20
+)
+report_download_link("results/tables/drilldown_locus_summary.csv")
+```
+
+## Locus Drilldown Details
+
+Each locus section lists the probes that overlap the requested interval, together with the available annotation columns carried through from the methylation manifest.
+
+```{r locus-drilldown-details, results='asis'}
+for (loc in names(locus_detail_tables)) {
+  entry <- locus_detail_tables[[loc]]
+  cat("### Locus: ", loc, "\n\n", sep = "")
+  cat("These rows represent the CpGs whose annotated genomic coordinates overlap the requested locus.\n\n")
+  print(render_report_table(
+    entry$data,
+    preferred = c("Name", "chr", "pos", "strand", "Relation_to_Island", "UCSC_RefGene_Name", "UCSC_RefGene_Group", "Regulatory_Feature_Group"),
+    page_length = min(25, max(10, nrow(entry$data)))
+  ))
+  print(report_download_link(entry$path))
+  cat("\n")
+}
+```
+
+## Gene Drilldown Summary
+
+This summary shows how many annotation-linked probes were retrieved for each requested gene symbol.
+
+```{r gene-drilldown-summary}
+render_report_table(
+  gene_summary_tbl,
+  preferred = c("gene", "n_matching_cpg", "annotation_columns_used"),
+  page_length = 20
+)
+report_download_link("results/tables/drilldown_gene_summary.csv")
+```
+
+## Gene Drilldown Details
+
+Each gene section lists the probes whose annotation contains the requested gene symbol in one of the supported manifest gene columns.
+
+```{r gene-drilldown-details, results='asis'}
+for (gene in names(gene_detail_tables)) {
+  entry <- gene_detail_tables[[gene]]
+  cat("### Gene: ", gene, "\n\n", sep = "")
+  cat("These rows represent probes linked to the requested gene through the available manifest gene annotations.\n\n")
+  print(render_report_table(
+    entry$data,
+    preferred = c("Name", "chr", "pos", "strand", "Relation_to_Island", "UCSC_RefGene_Name", "UCSC_RefGene_Group", "Regulatory_Feature_Group"),
+    page_length = min(25, max(10, nrow(entry$data)))
+  ))
+  print(report_download_link(entry$path))
+  cat("\n")
+}
 ```

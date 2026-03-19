@@ -72,6 +72,12 @@ parse_bool <- function(x, default = TRUE) {
   default
 }
 
+config_chr_vector <- function(x) {
+  if (is.null(x) || length(x) == 0) return(character(0))
+  out <- trimws(as.character(unlist(x, use.names = FALSE)))
+  unique(out[nzchar(out)])
+}
+
 parse_sample_list <- function(x) {
   if (is.null(x) || length(x) == 0 || is.na(x)) return(character(0))
   raw <- trimws(as.character(x[[1]]))
@@ -232,6 +238,13 @@ validate_config_schema <- function(cfg) {
   if (!has_comp) {
     log_error("Configure comparisons.comparisons_file")
   }
+  if (!is.null(cfg$batch)) {
+    valid_methods <- c("limma_removeBatchEffect")
+    method <- coalesce_chr(cfg$batch$method, "limma_removeBatchEffect")
+    if (!(method %in% valid_methods)) {
+      log_error("Unsupported batch.method:", method)
+    }
+  }
   invisible(TRUE)
 }
 
@@ -367,12 +380,13 @@ format_report_table <- function(df) {
       next
     }
 
-    if (nm_lower %in% c("pos", "start", "end", "width", "n", "n_samples", "n_common_probes")) {
+    if (nm_lower %in% c("pos", "start", "end", "width", "n", "n_samples", "n_common_probes", "n_region_candidates", "median_width_bp", "median_cpgs_per_region")) {
       tbl[[nm]] <- ifelse(is.na(col), NA_character_, format(round(col, 0), big.mark = ",", trim = TRUE, scientific = FALSE))
       next
     }
 
-    if (all(is.finite(col) | is.na(col)) && max(abs(col), na.rm = TRUE) >= 1000) {
+    finite_vals <- col[is.finite(col)]
+    if (length(finite_vals) > 0 && max(abs(finite_vals)) >= 1000) {
       tbl[[nm]] <- ifelse(is.na(col), NA_character_, format(round(col, 0), big.mark = ",", trim = TRUE, scientific = FALSE))
       next
     }
@@ -410,7 +424,7 @@ render_report_table <- function(df,
   numeric_cols <- names(selected)[vapply(selected, is.numeric, logical(1))]
   tbl <- format_report_table(selected)
   if (requireNamespace("DT", quietly = TRUE)) {
-    use_scroll_x <- ncol(tbl) > 6 || any(nchar(names(tbl)) > 18) || sum(nchar(names(tbl))) > 80
+    use_scroll_x <- ncol(tbl) > 8 || sum(nchar(names(tbl))) > 120 || any(vapply(tbl, function(col) any(nchar(as.character(utils::head(stats::na.omit(col), 20))) > 40), logical(1)))
     table_class <- if (use_scroll_x) "compact stripe hover nowrap" else "compact stripe hover"
     cap <- NULL
     if (!is.null(caption) && nzchar(caption)) {
@@ -609,6 +623,129 @@ combine_inputs <- function(runs) {
   )
 }
 
+inverse_m_to_beta <- function(m) {
+  2^m / (1 + 2^m)
+}
+
+build_batch_design <- function(pdata, preserve_cols = character(0)) {
+  preserve_cols <- unique(preserve_cols[preserve_cols %in% names(pdata)])
+  if (length(preserve_cols) == 0) return(NULL)
+
+  keep <- vapply(preserve_cols, function(col) {
+    values <- pdata[[col]]
+    values <- values[!is.na(values)]
+    length(unique(values)) > 1
+  }, logical(1))
+  preserve_cols <- preserve_cols[keep]
+  if (length(preserve_cols) == 0) return(NULL)
+
+  design_df <- pdata[, preserve_cols, drop = FALSE]
+  design_df[] <- lapply(design_df, function(x) {
+    if (is.character(x)) {
+      factor(x)
+    } else {
+      x
+    }
+  })
+  stats::model.matrix(
+    stats::as.formula(paste("~", paste(preserve_cols, collapse = " + "))),
+    data = design_df
+  )
+}
+
+build_batch_metadata <- function(obj, samples = NULL, batch_col = "run_id", preserve_cols = character(0)) {
+  pdata <- tibble::as_tibble(obj$pdata)
+  if (!("sample_id" %in% names(pdata))) {
+    pdata$sample_id <- colnames(obj$beta)
+  }
+
+  if (is.null(samples) || !("sample_id" %in% names(samples))) {
+    return(pdata)
+  }
+
+  needed_cols <- unique(c("sample_id", batch_col, preserve_cols))
+  needed_cols <- intersect(needed_cols, names(samples))
+  if (length(needed_cols) <= 1) {
+    return(pdata)
+  }
+
+  sheet_meta <- samples[, needed_cols, drop = FALSE]
+  joined <- dplyr::left_join(pdata, sheet_meta, by = "sample_id", suffix = c("", ".sheet"))
+
+  for (col in setdiff(needed_cols, "sample_id")) {
+    sheet_col <- paste0(col, ".sheet")
+    if (!(sheet_col %in% names(joined))) next
+    if (!(col %in% names(joined))) {
+      joined[[col]] <- joined[[sheet_col]]
+    } else {
+      missing_base <- is.na(joined[[col]]) | trimws(as.character(joined[[col]])) == ""
+      joined[[col]][missing_base] <- joined[[sheet_col]][missing_base]
+    }
+  }
+
+  joined[, setdiff(names(joined), grep("\\.sheet$", names(joined), value = TRUE)), drop = FALSE]
+}
+
+apply_batch_correction <- function(obj, cfg, samples = NULL) {
+  batch_cfg <- cfg$batch
+  if (is.null(batch_cfg) || !parse_bool(batch_cfg$enabled, default = FALSE)) {
+    return(obj)
+  }
+
+  method <- coalesce_chr(batch_cfg$method, "limma_removeBatchEffect")
+  batch_col <- coalesce_chr(batch_cfg$batch_col, "run_id")
+
+  preserve_cols <- config_chr_vector(batch_cfg$preserve_cols)
+  primary_group_col <- coalesce_chr(cfg$groups$primary_group_col, "")
+  if (nzchar(primary_group_col)) {
+    preserve_cols <- unique(c(primary_group_col, preserve_cols))
+  }
+  preserve_cols <- setdiff(preserve_cols, batch_col)
+  batch_pdata <- build_batch_metadata(obj, samples = samples, batch_col = batch_col, preserve_cols = preserve_cols)
+
+  if (!(batch_col %in% names(batch_pdata))) {
+    log_warn("Batch correction skipped: batch column not found after joining samples metadata:", batch_col)
+    return(obj)
+  }
+
+  batch <- batch_pdata[[batch_col]]
+  keep <- !is.na(batch) & nzchar(trimws(as.character(batch)))
+  if (!all(keep)) {
+    log_warn("Batch correction skipped: missing values detected in batch column", batch_col)
+    return(obj)
+  }
+  batch <- factor(as.character(batch))
+  if (length(unique(batch)) < 2) {
+    log_warn("Batch correction skipped: fewer than 2 batch levels in", batch_col)
+    return(obj)
+  }
+
+  design <- build_batch_design(batch_pdata, preserve_cols)
+
+  if (identical(method, "limma_removeBatchEffect")) {
+    obj$m_raw <- obj$m
+    obj$beta_raw <- obj$beta
+    obj$m <- limma::removeBatchEffect(obj$m, batch = batch, design = design)
+    obj$beta <- inverse_m_to_beta(obj$m)
+    obj$batch_correction <- list(
+      enabled = TRUE,
+      method = method,
+      batch_col = batch_col,
+      preserve_cols = preserve_cols
+    )
+    log_info(
+      "Applied batch correction using", method,
+      "with batch_col =", batch_col,
+      "and preserve_cols =",
+      if (length(preserve_cols) > 0) paste(preserve_cols, collapse = ",") else "<none>"
+    )
+    return(obj)
+  }
+
+  log_warn("Batch correction skipped: unsupported method", method)
+  obj
+}
+
 build_runs_from_table <- function(runs_df, allowed_samples = character(0)) {
   enabled <- vapply(runs_df$enabled, parse_bool, logical(1), default = TRUE)
   runs_df <- runs_df[enabled, , drop = FALSE]
@@ -649,7 +786,9 @@ load_analysis_inputs <- function(cfg, samples = NULL) {
   run_info <- resolve_run_table(cfg)
   if (!is.null(run_info$runs) && nrow(run_info$runs) > 0) {
     runs <- build_runs_from_table(run_info$runs, allowed_samples = allowed_samples)
-    return(combine_inputs(runs))
+    combined <- combine_inputs(runs)
+    combined <- apply_batch_correction(combined, cfg, samples = samples)
+    return(combined)
   }
   log_error("No enabled input runs found in", run_info$path)
 }

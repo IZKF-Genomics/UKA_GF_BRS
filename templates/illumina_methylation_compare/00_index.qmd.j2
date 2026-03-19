@@ -25,6 +25,7 @@ if (!requireNamespace("plotly", quietly = TRUE)) log_error("Package 'plotly' is 
 if (!requireNamespace("htmlwidgets", quietly = TRUE)) log_error("Package 'htmlwidgets' is required")
 if (!requireNamespace("uwot", quietly = TRUE)) log_error("Package 'uwot' is required")
 if (!requireNamespace("Rtsne", quietly = TRUE)) log_error("Package 'Rtsne' is required")
+if (!requireNamespace("pheatmap", quietly = TRUE)) log_error("Package 'pheatmap' is required")
 samples <- load_samples("config/samples.csv")
 gm <- load_group_map(coalesce_chr(cfg$input$group_map_file, "config/group_map.csv"))
 samples <- apply_group_map(samples, gm, group_col = cfg$groups$primary_group_col)
@@ -54,6 +55,42 @@ obj <- load_analysis_inputs(cfg, samples)
 beta <- get_beta_matrix(obj)
 pdata <- get_pdata(obj)
 meta <- merge_input_metadata(beta, pdata, samples)
+
+batch_cfg <- cfg$batch
+batch_configured <- !is.null(batch_cfg) && parse_bool(batch_cfg$enabled, default = FALSE)
+batch_applied <- !is.null(obj$batch_correction) && isTRUE(obj$batch_correction$enabled)
+batch_method <- if (batch_applied) {
+  coalesce_chr(obj$batch_correction$method, "")
+} else {
+  coalesce_chr(if (!is.null(batch_cfg)) batch_cfg$method else NULL, "")
+}
+batch_col <- if (batch_applied) {
+  coalesce_chr(obj$batch_correction$batch_col, "")
+} else {
+  coalesce_chr(if (!is.null(batch_cfg)) batch_cfg$batch_col else NULL, "")
+}
+batch_preserve <- if (batch_applied) {
+  config_chr_vector(obj$batch_correction$preserve_cols)
+} else {
+  config_chr_vector(if (!is.null(batch_cfg)) batch_cfg$preserve_cols else NULL)
+}
+batch_status <- dplyr::case_when(
+  batch_applied ~ "Applied",
+  batch_configured ~ "Configured but not applied",
+  TRUE ~ "Disabled"
+)
+batch_tbl <- tibble::tibble(
+  metric = c("status", "configured", "applied", "method", "batch_column", "preserved_covariates"),
+  value = c(
+    batch_status,
+    as.character(batch_configured),
+    as.character(batch_applied),
+    ifelse(nzchar(batch_method), batch_method, NA_character_),
+    ifelse(nzchar(batch_col), batch_col, NA_character_),
+    ifelse(length(batch_preserve) > 0, paste(batch_preserve, collapse = ", "), NA_character_)
+  )
+)
+write_table(batch_tbl, "results/tables/batch_correction_summary.csv")
 
 embedding_palette <- function(values) {
   vals <- sort(unique(as.character(stats::na.omit(values))))
@@ -233,6 +270,134 @@ write_table(pca_df, "results/tables/all_samples_pca.csv")
 write_table(umap_df, "results/tables/all_samples_umap.csv")
 write_table(tsne_df, "results/tables/all_samples_tsne.csv")
 
+heatmap_n <- min(150, nrow(beta))
+heatmap_idx <- order(matrixStats::rowVars(beta), decreasing = TRUE)
+if (length(heatmap_idx) > heatmap_n) heatmap_idx <- heatmap_idx[seq_len(heatmap_n)]
+heatmap_mat <- beta[heatmap_idx, , drop = FALSE]
+heatmap_mat_scaled <- t(scale(t(heatmap_mat)))
+heatmap_mat_scaled[is.na(heatmap_mat_scaled)] <- 0
+
+heatmap_annotation <- meta[match(colnames(heatmap_mat_scaled), meta$sample_id), , drop = FALSE]
+rownames(heatmap_annotation) <- heatmap_annotation$sample_id
+annotation_cols <- intersect(c(group_col, "run_id", "dataset_id"), names(heatmap_annotation))
+heatmap_annotation <- heatmap_annotation[, annotation_cols, drop = FALSE]
+if (ncol(heatmap_annotation) == 0) heatmap_annotation <- NULL
+
+annotation_colors <- list()
+if (!is.null(heatmap_annotation)) {
+  heatmap_annotation <- as.data.frame(heatmap_annotation, stringsAsFactors = FALSE)
+  for (nm in names(heatmap_annotation)) {
+    heatmap_annotation[[nm]] <- factor(as.character(heatmap_annotation[[nm]]))
+    palette_vals <- embedding_palette(as.character(heatmap_annotation[[nm]]))
+    if (length(palette_vals) > 0) annotation_colors[[nm]] <- palette_vals
+  }
+}
+
+heatmap_breaks <- seq(-2.5, 2.5, length.out = 101)
+heatmap_palette <- grDevices::colorRampPalette(
+  c("#16324F", "#EDEBE4", "#8C271E")
+)(length(heatmap_breaks) - 1)
+
+sample_order <- order(
+  if (!is.null(heatmap_annotation) && group_col %in% names(heatmap_annotation)) heatmap_annotation[[group_col]] else colnames(heatmap_mat_scaled),
+  if (!is.null(heatmap_annotation) && "run_id" %in% names(heatmap_annotation)) heatmap_annotation$run_id else colnames(heatmap_mat_scaled),
+  colnames(heatmap_mat_scaled)
+)
+heatmap_mat_scaled <- heatmap_mat_scaled[, sample_order, drop = FALSE]
+if (!is.null(heatmap_annotation)) {
+  heatmap_annotation <- heatmap_annotation[sample_order, , drop = FALSE]
+}
+
+heatmap_row_order <- stats::hclust(stats::dist(heatmap_mat_scaled))$order
+heatmap_col_order <- stats::hclust(stats::dist(t(heatmap_mat_scaled)))$order
+heatmap_mat_clustered <- heatmap_mat_scaled[heatmap_row_order, heatmap_col_order, drop = FALSE]
+if (!is.null(heatmap_annotation)) {
+  heatmap_annotation <- heatmap_annotation[heatmap_col_order, , drop = FALSE]
+}
+
+interactive_heatmap_n <- min(100, nrow(heatmap_mat_clustered))
+interactive_heatmap_mat <- heatmap_mat_clustered[seq_len(interactive_heatmap_n), , drop = FALSE]
+
+dir.create("results/figures", recursive = TRUE, showWarnings = FALSE)
+pheatmap::pheatmap(
+  heatmap_mat_clustered,
+  color = heatmap_palette,
+  breaks = heatmap_breaks,
+  cluster_rows = TRUE,
+  cluster_cols = TRUE,
+  show_rownames = FALSE,
+  show_colnames = FALSE,
+  annotation_col = heatmap_annotation,
+  annotation_colors = if (!is.null(heatmap_annotation) && length(annotation_colors) == ncol(heatmap_annotation)) annotation_colors else NULL,
+  main = "Top variable CpGs: unsupervised clustered heatmap",
+  fontsize = 10,
+  fontsize_col = 8,
+  fontsize_row = 6,
+  treeheight_row = 35,
+  treeheight_col = 40,
+  angle_col = 45,
+  border_color = NA,
+  legend = TRUE,
+  annotation_legend = TRUE,
+  cellwidth = NA,
+  cellheight = 8,
+  filename = "results/figures/all_samples_heatmap.png",
+  width = 8.6,
+  height = 9.5
+)
+
+write_table(
+  tibble::tibble(cpg_id = rownames(heatmap_mat), variance = matrixStats::rowVars(heatmap_mat)),
+  "results/tables/all_samples_heatmap_top_variable_cpgs.csv"
+)
+
+heatmap_hover <- matrix(
+  "",
+  nrow = nrow(interactive_heatmap_mat),
+  ncol = ncol(interactive_heatmap_mat),
+  dimnames = dimnames(interactive_heatmap_mat)
+)
+for (row_i in seq_len(nrow(interactive_heatmap_mat))) {
+  cpg <- rownames(interactive_heatmap_mat)[row_i]
+  for (col_i in seq_len(ncol(interactive_heatmap_mat))) {
+    sid <- colnames(interactive_heatmap_mat)[col_i]
+    meta_row <- meta[match(sid, meta$sample_id), , drop = FALSE]
+    group_val <- if ("group" %in% names(meta_row)) as.character(meta_row$group[[1]]) else ""
+    run_val <- if ("run_id" %in% names(meta_row)) as.character(meta_row$run_id[[1]]) else ""
+    heatmap_hover[row_i, col_i] <- paste0(
+      "Sample: ", sid,
+      "<br>CpG: ", cpg,
+      "<br>Group: ", group_val,
+      "<br>Run: ", run_val,
+      "<br>Scaled beta: ", sprintf("%.3f", interactive_heatmap_mat[row_i, col_i])
+    )
+  }
+}
+
+plotly_heatmap_widget <- plotly::plot_ly(
+  x = colnames(interactive_heatmap_mat),
+  y = rownames(interactive_heatmap_mat),
+  z = interactive_heatmap_mat,
+  type = "heatmap",
+  colorscale = list(
+    list(0.0, "#16324F"),
+    list(0.5, "#EDEBE4"),
+    list(1.0, "#8C271E")
+  ),
+  text = heatmap_hover,
+  hoverinfo = "text+z",
+  zmin = min(heatmap_breaks),
+  zmax = max(heatmap_breaks),
+  colorbar = list(title = "Scaled beta")
+) |>
+  plotly::layout(
+    title = list(text = "Interactive unsupervised heatmap (Plotly)"),
+    xaxis = list(title = "", tickangle = 45, automargin = TRUE),
+    yaxis = list(title = "", automargin = TRUE),
+    margin = list(l = 120, r = 30, t = 60, b = 120)
+  )
+save_widget(plotly_heatmap_widget, "results/widgets/heatmap_plotly.html")
+
 pca_plotly_2d <- build_plotly_2d(pca_df, "PC1", "PC2", group_col, "PCA 2D")
 pca_plotly_3d <- build_plotly_3d(pca_df, "PC1", "PC2", "PC3", group_col, "PCA 3D")
 umap_plotly_2d <- build_plotly_2d(umap_df, "UMAP1", "UMAP2", group_col, "UMAP 2D")
@@ -246,15 +411,16 @@ save_widget(tsne_plotly_2d, "results/widgets/tsne_2d.html")
 save_widget(pca_plotly_3d, "results/widgets/pca_3d.html")
 save_widget(umap_plotly_3d, "results/widgets/umap_3d.html")
 save_widget(tsne_plotly_3d, "results/widgets/tsne_3d.html")
+
+embed_widget_iframe <- function(path, height = "720px") {
+  widget_html <- paste(readLines(path, warn = FALSE, encoding = "UTF-8"), collapse = "\n")
+  htmltools::tags$iframe(
+    srcdoc = widget_html,
+    style = paste0("width:100%; height:", height, "; border:none;"),
+    loading = "lazy"
+  )
+}
 ```
-
-## Method
-
-This report is the cohort-level overview for the combined methylation analysis. It loads the enabled upstream runs, harmonizes probe identifiers across array versions, restricts the analysis to probes shared by all enabled runs, and then merges the sample metadata and methylation matrices into one joint dataset.
-
-The unsupervised visualizations are built from the merged matrix after selecting the most variable probes across all samples. PCA summarizes the dominant linear axes of variation, whereas UMAP and t-SNE provide nonlinear embeddings that help reveal local neighborhood structure and compact subgroups that may not be obvious in PCA alone.
-
-The static figures are intended for manuscript-style viewing, while the interactive Plotly panels allow readers to inspect sample labels and rotate the three-dimensional embeddings. The coordinate tables and widget files shown in this report are written to the `results/` directory so they can be reused outside the HTML report.
 
 ## Overview
 
@@ -265,17 +431,21 @@ render_report_table(overview_tbl, page_length = 10)
 report_download_link("results/tables/overview_table.csv")
 ```
 
-## Enabled Comparisons
+## Method
 
-These are the comparison definitions that passed configuration loading and will be used by downstream DMP, DMR, enrichment, and drilldown steps.
+This report is the cohort-level overview for the combined methylation analysis. It loads the enabled upstream runs, harmonizes probe identifiers across array versions, restricts the analysis to probes shared by all enabled runs, and then merges the sample metadata and methylation matrices into one joint dataset.
 
-```{r enabled-comparisons}
-render_report_table(
-  comparisons,
-  preferred = c("comparison_id", "comparison_name", "base_group", "target_group", "alpha", "delta_beta_min"),
-  page_length = 10
-)
-report_download_link("results/tables/enabled_comparisons.csv")
+The unsupervised visualizations are built from the merged matrix after selecting the most variable probes across all samples. PCA summarizes the dominant linear axes of variation, whereas UMAP and t-SNE provide nonlinear embeddings that help reveal local neighborhood structure and compact subgroups that may not be obvious in PCA alone.
+
+The static figures are intended for manuscript-style viewing, while the interactive Plotly panels allow readers to inspect sample labels and rotate the three-dimensional embeddings. The coordinate tables and widget files shown in this report are written to the `results/` directory so they can be reused outside the HTML report.
+
+## Batch Correction
+
+This section records whether batch correction was configured and whether it was actually applied to the merged methylation object used in the report. When enabled, the pipeline applies `limma::removeBatchEffect()` to merged M-values and preserves the listed biological covariates in the design.
+
+```{r batch-correction}
+render_report_table(batch_tbl, page_length = 10)
+report_download_link("results/tables/batch_correction_summary.csv")
 ```
 
 ## Input Runs
@@ -291,6 +461,19 @@ if (!is.null(run_summary)) {
   )
   report_download_link("results/tables/input_run_summary.csv")
 } else cat("Input run summary not found yet.\n")
+```
+
+## Enabled Comparisons
+
+These are the comparison definitions that passed configuration loading and will be used by downstream DMP, DMR, enrichment, and drilldown steps.
+
+```{r enabled-comparisons}
+render_report_table(
+  comparisons,
+  preferred = c("comparison_id", "comparison_name", "base_group", "target_group", "alpha", "delta_beta_min"),
+  page_length = 10
+)
+report_download_link("results/tables/enabled_comparisons.csv")
 ```
 
 ## Publication Figures
@@ -324,6 +507,18 @@ knitr::include_graphics("results/figures/all_samples_tsne.png")
 report_download_link("results/tables/all_samples_tsne.csv")
 ```
 
+## Interactive Heatmap
+
+This section uses the top 100 variable CpGs from the clustered matrix so that the widget remains responsive while still preserving the strongest unsupervised methylation structure.
+
+### Plotly Heatmap
+
+This Plotly heatmap uses the same clustered order and blue-neutral-red color scale defined in the setup section.
+
+```{r heatmap-plotly, results='asis'}
+embed_widget_iframe("results/widgets/heatmap_plotly.html", height = "900px")
+```
+
 ## Interactive 2D Embeddings
 
 These interactive 2D plots support zooming, panning, and hover inspection of sample identity, group, run, and embedding coordinates.
@@ -331,28 +526,19 @@ These interactive 2D plots support zooming, panning, and hover inspection of sam
 ### PCA
 
 ```{r pca-plotly-2d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/pca_2d.html",
-  style = "width:100%; height:720px; border:none;"
-)
+embed_widget_iframe("results/widgets/pca_2d.html", height = "720px")
 ```
 
 ### UMAP
 
 ```{r umap-plotly-2d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/umap_2d.html",
-  style = "width:100%; height:720px; border:none;"
-)
+embed_widget_iframe("results/widgets/umap_2d.html", height = "720px")
 ```
 
 ### t-SNE
 
 ```{r tsne-plotly-2d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/tsne_2d.html",
-  style = "width:100%; height:720px; border:none;"
-)
+embed_widget_iframe("results/widgets/tsne_2d.html", height = "720px")
 ```
 
 ## Interactive 3D Embeddings
@@ -362,56 +548,19 @@ These 3D views provide an additional axis for structure inspection and are usefu
 ### PCA
 
 ```{r pca-plotly-3d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/pca_3d.html",
-  style = "width:100%; height:760px; border:none;"
-)
+embed_widget_iframe("results/widgets/pca_3d.html", height = "760px")
 ```
 
 ### UMAP
 
 ```{r umap-plotly-3d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/umap_3d.html",
-  style = "width:100%; height:760px; border:none;"
-)
+embed_widget_iframe("results/widgets/umap_3d.html", height = "760px")
 ```
 
 ### t-SNE
 
 ```{r tsne-plotly-3d, results='asis'}
-htmltools::tags$iframe(
-  src = "../results/widgets/tsne_3d.html",
-  style = "width:100%; height:760px; border:none;"
-)
-```
-
-## All-Sample Visualization Tables
-
-The following coordinate tables provide the exact embedding values behind the static and interactive all-sample plots.
-
-```{r embedding-tables, results='asis'}
-cat("### PCA Coordinates\n\n")
-print(render_report_table(
-  pca_df,
-  preferred = c("sample_id", "PC1", "PC2", "PC3", "group", "run_id"),
-  page_length = 10
-))
-print(report_download_link("results/tables/all_samples_pca.csv"))
-cat("\n\n### UMAP Coordinates\n\n")
-print(render_report_table(
-  umap_df,
-  preferred = c("sample_id", "UMAP1", "UMAP2", "UMAP3", "group", "run_id"),
-  page_length = 10
-))
-print(report_download_link("results/tables/all_samples_umap.csv"))
-cat("\n\n### t-SNE Coordinates\n\n")
-print(render_report_table(
-  tsne_df,
-  preferred = c("sample_id", "TSNE1", "TSNE2", "TSNE3", "group", "run_id"),
-  page_length = 10
-))
-print(report_download_link("results/tables/all_samples_tsne.csv"))
+embed_widget_iframe("results/widgets/tsne_3d.html", height = "760px")
 ```
 
 ## DMP Summary
