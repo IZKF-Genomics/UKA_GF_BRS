@@ -39,10 +39,6 @@ if [[ "$EXPECTED_CELLS" != "0" ]]; then
   CMD+=(--expected-cells "$EXPECTED_CELLS")
 fi
 
-if [[ "$INPUT_FORMAT" == "10x_mtx" ]]; then
-  echo "[WARN] CellBender typically expects a raw 10x HDF5 matrix; verify that your installed CellBender version supports this input."
-fi
-
 printf '[INFO] CellBender command:'
 printf ' %q' "${CMD[@]}"
 printf '\n'

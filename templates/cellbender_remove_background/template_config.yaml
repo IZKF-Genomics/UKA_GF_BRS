@@ -13,7 +13,7 @@ params:
     cli: "--input-format"
     required: false
     default: "10x_h5"
-    description: "Raw matrix format for CellBender: 10x_h5 or 10x_mtx"
+    description: "Raw matrix format for CellBender; currently only 10x_h5 is supported"
   expected_cells:
     type: int
     cli: "--expected-cells"
@@ -63,6 +63,10 @@ render:
 
 run:
   entry: "run.sh"
+
+hooks:
+  pre_render:
+    - hooks.cellbender_remove_background_defaults:populate
 
 publish:
   cellbender_corrected_matrix:

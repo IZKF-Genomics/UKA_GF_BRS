@@ -34,6 +34,11 @@ Scope:
 - publish the corrected matrix for downstream templates
 - render a minimal run summary
 
+Current input contract:
+- `input_raw_matrix` should point to a raw 10x HDF5 matrix such as `raw_feature_bc_matrix.h5`
+- host-prefixed project paths are materialized during render
+- `input_format` is currently restricted to `10x_h5`
+
 ## Render
 
 ```bash
@@ -54,6 +59,9 @@ bpm template render cellbender_remove_background \
   --dir /path/to/project
 ```
 
+If your matrix path in `project.yaml` uses a host prefix such as `nextgen:/...`, the
+pre-render hook materializes it into the local filesystem path used by the run script.
+
 ## Run
 
 ```bash
@@ -73,5 +81,9 @@ Published output:
 ## Notes
 
 - This template is intended for raw droplet inputs, not downstream filtered `.h5ad` objects.
+- BPM publishing is enabled through the `cellbender_corrected_matrix` publish key, so
+  after `bpm template run cellbender_remove_background --dir <project>`, the resulting
+  HDF5 path is written to `project.yaml` under
+  `templates[].published.cellbender_corrected_matrix`.
 - `scverse_scrna_prep` prefers this published output over `nfcore_scrnaseq_res_mt` when both are present.
 - The current scaffold is intentionally minimal; diagnostics and automatic raw-matrix discovery can be added once real project runs are validated.
