@@ -11,6 +11,6 @@ echo "[INFO] Installing/updating pixi environment"
 pixi install
 
 echo "[INFO] Rendering 00_qc.qmd"
-pixi run render
+pixi run quarto render 00_qc.qmd --to html --no-clean
 
 echo "[INFO] Complete. Results written to results/ and 00_qc.html"
