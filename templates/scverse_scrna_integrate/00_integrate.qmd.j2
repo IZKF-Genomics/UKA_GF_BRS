@@ -4,8 +4,17 @@ author: "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.proj
 format:
   html:
     toc: true
-    code-fold: false
+    toc-depth: 3
+    toc-expand: 3
+    toc-location: left
+    html-math-method: katex
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    page-layout: full
+    html-table-processing: none
     df-print: paged
+    theme: lumen
 jupyter: python3
 ---
 
