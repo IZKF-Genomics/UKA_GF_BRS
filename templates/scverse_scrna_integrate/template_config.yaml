@@ -19,7 +19,7 @@ params:
     cli: "--integration-method"
     required: false
     default: "harmony"
-    description: "Integration backend: harmony or bbknn"
+    description: "Integration backend: harmony, bbknn, scanorama, scvi, or scanvi"
   batch_key:
     type: str
     cli: "--batch-key"
@@ -92,6 +92,48 @@ params:
     required: false
     default: 0
     description: "Optional BBKNN trim parameter; 0 keeps the library default"
+  scanvi_label_key:
+    type: str
+    cli: "--scanvi-label-key"
+    required: false
+    default: ""
+    description: "Cell label column used by scANVI; required when integration_method=scanvi"
+  scanvi_unlabeled_category:
+    type: str
+    cli: "--scanvi-unlabeled-category"
+    required: false
+    default: "Unknown"
+    description: "Category in scanvi_label_key treated as unlabeled by scANVI"
+  scvi_latent_dim:
+    type: int
+    cli: "--scvi-latent-dim"
+    required: false
+    default: 30
+    description: "Latent dimension for scVI/scANVI"
+  scvi_max_epochs:
+    type: int
+    cli: "--scvi-max-epochs"
+    required: false
+    default: 200
+    description: "Maximum training epochs for scVI/scANVI"
+  scvi_gene_likelihood:
+    type: str
+    cli: "--scvi-gene-likelihood"
+    required: false
+    default: "zinb"
+    description: "Gene likelihood for scVI/scANVI: zinb, nb, poisson, or normal"
+  scvi_accelerator:
+    type: str
+    cli: "--scvi-accelerator"
+    required: false
+    default: "auto"
+    description: "Lightning accelerator for scVI/scANVI training: auto, cpu, or gpu"
+  scvi_devices:
+    type: int
+    cli: "--scvi-devices"
+    required: false
+    default: 1
+    description: "Number of devices passed to scVI/scANVI training"
   umap_min_dist:
     type: float
     cli: "--umap-min-dist"

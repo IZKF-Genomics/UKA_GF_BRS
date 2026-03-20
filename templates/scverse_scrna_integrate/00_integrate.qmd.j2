@@ -13,11 +13,9 @@ jupyter: python3
 from __future__ import annotations
 
 import importlib.metadata
-import math
 import platform
 from pathlib import Path
 
-import anndata as ad
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -32,6 +30,7 @@ except ImportError as exc:  # pragma: no cover
 
 ROOT = Path.cwd()
 CONFIG_PATH = ROOT / "config" / "project.toml"
+ALLOWED_METHODS = {"harmony", "bbknn", "scanorama", "scvi", "scanvi"}
 
 
 def load_config(path: Path) -> dict:
@@ -107,14 +106,25 @@ def format_table(df: pd.DataFrame, digits: int = 3):
     )
 
 
+def uns_dict_of_lists(df: pd.DataFrame) -> dict[str, list]:
+    if df.empty:
+        return {}
+    out: dict[str, list] = {}
+    for col in df.columns:
+        series = df[col]
+        if pd.api.types.is_categorical_dtype(series):
+            series = series.astype(str)
+        out[str(col)] = series.where(pd.notna(series), None).tolist()
+    return out
+
+
 cfg = load_config(CONFIG_PATH)
 cfg
 ```
 
 ## Load Input
 
-This section resolves the prep-stage object and verifies that the expected
-metadata columns are available before integration starts.
+This section resolves the prep-stage object and verifies that the expected metadata columns are available before integration starts.
 
 ```{python}
 input_path = Path(cfg["input"]["input_h5ad"]).resolve()
@@ -137,8 +147,10 @@ if sample_label_key not in adata.obs.columns:
 adata.obs["sample_display"] = adata.obs[sample_label_key].astype(str).fillna(adata.obs[sample_id_key].astype(str))
 
 integration_method = str(cfg["integration"]["integration_method"]).strip().lower()
-if integration_method not in {"harmony", "bbknn"}:
-    raise RuntimeError("integration_method must be 'harmony' or 'bbknn'")
+if integration_method not in ALLOWED_METHODS:
+    raise RuntimeError(
+        "integration_method must be one of: " + ", ".join(sorted(ALLOWED_METHODS))
+    )
 
 out_adata = ROOT / str(cfg["output"]["adata_file"])
 integration_summary_file = ROOT / str(cfg["output"]["integration_summary_file"])
@@ -152,54 +164,141 @@ adata
 
 ## Integration
 
-This section rebuilds the working PCA/neighborhood graph in integrated space and
-records the method-specific outputs. The goal is to produce one canonical
-integrated object for downstream annotation and comparison work.
+This section rebuilds the working representation in integrated space and records method-specific outputs. Graph-based methods operate on normalized prep-stage features. Deep generative methods use raw counts from `layers["counts"]` when present.
 
 ```{python}
 use_hvgs_only = bool(cfg["integration"]["use_hvgs_only"])
 n_pcs_requested = int(cfg["integration"]["n_pcs"])
-n_neighbors = int(cfg["integration"]["n_neighbors"])
+n_neighbors_requested = int(cfg["integration"]["n_neighbors"])
 umap_min_dist = float(cfg["integration"]["umap_min_dist"])
 cluster_resolution = float(cfg["integration"]["cluster_resolution"])
+n_unique_batches = int(adata.obs[batch_key].nunique(dropna=False))
 
 integrated = adata.copy()
+if integrated.n_obs < 3:
+    raise RuntimeError("Need at least 3 cells for integration.")
 
 if use_hvgs_only and "highly_variable" in integrated.var.columns and integrated.var["highly_variable"].any():
     integrated = integrated[:, integrated.var["highly_variable"].to_numpy()].copy()
 
-sc.pp.scale(integrated, max_value=10)
-max_pcs = min(max(2, n_pcs_requested), integrated.n_vars - 1, integrated.n_obs - 1)
-max_pcs = max(2, max_pcs)
-neighbors_k = min(max(2, n_neighbors), integrated.n_obs - 1)
+neighbors_k = min(max(2, n_neighbors_requested), integrated.n_obs - 1)
 if neighbors_k < 2:
     raise RuntimeError("Need at least 3 cells for integration.")
 
-sc.tl.pca(integrated, svd_solver="arpack", n_comps=max_pcs)
+method_notes = []
+scvi_layer = "counts" if "counts" in integrated.layers else None
+max_pcs = None
+scvi_latent_dim = None
+scanvi_label_key = str(cfg["integration"]["scanvi_label_key"]).strip()
+scanvi_unlabeled_category = str(cfg["integration"]["scanvi_unlabeled_category"]).strip() or "Unknown"
+scvi_accelerator = str(cfg["integration"]["scvi_accelerator"]).strip() or "auto"
+scvi_devices = max(1, int(cfg["integration"]["scvi_devices"]))
+scvi_max_epochs = max(1, int(cfg["integration"]["scvi_max_epochs"]))
+scvi_gene_likelihood = str(cfg["integration"]["scvi_gene_likelihood"]).strip().lower() or "zinb"
+if n_unique_batches < 2:
+    method_notes.append(
+        "Only one batch was detected. The selected integration method was still applied, but batch correction is usually unnecessary."
+    )
 
-if integration_method == "harmony":
-    sce.pp.harmony_integrate(
-        integrated,
-        key=batch_key,
-        basis="X_pca",
-        adjusted_basis="X_pca_harmony",
-        theta=float(cfg["integration"]["harmony_theta"]),
-        lambda_=float(cfg["integration"]["harmony_lambda"]),
-        max_iter_harmony=int(cfg["integration"]["harmony_max_iter"]),
-    )
-    sc.pp.neighbors(integrated, use_rep="X_pca_harmony", n_neighbors=neighbors_k)
-    integrated.uns["integration_embedding_key"] = "X_pca_harmony"
+if integration_method in {"harmony", "bbknn", "scanorama"}:
+    sc.pp.scale(integrated, max_value=10)
+    max_pcs = min(max(2, n_pcs_requested), integrated.n_vars - 1, integrated.n_obs - 1)
+    max_pcs = max(2, max_pcs)
+    sc.tl.pca(integrated, svd_solver="arpack", n_comps=max_pcs)
+
+    if integration_method == "harmony":
+        sce.pp.harmony_integrate(
+            integrated,
+            key=batch_key,
+            basis="X_pca",
+            adjusted_basis="X_pca_harmony",
+            theta=float(cfg["integration"]["harmony_theta"]),
+            lambda_=float(cfg["integration"]["harmony_lambda"]),
+            max_iter_harmony=int(cfg["integration"]["harmony_max_iter"]),
+        )
+        sc.pp.neighbors(integrated, use_rep="X_pca_harmony", n_neighbors=neighbors_k)
+        integrated.uns["integration_embedding_key"] = "X_pca_harmony"
+    elif integration_method == "bbknn":
+        trim = int(cfg["integration"]["bbknn_trim"])
+        bbknn_kwargs = dict(
+            batch_key=batch_key,
+            n_pcs=max_pcs,
+            neighbors_within_batch=int(cfg["integration"]["bbknn_neighbors_within_batch"]),
+        )
+        if trim > 0:
+            bbknn_kwargs["trim"] = trim
+        sce.pp.bbknn(integrated, **bbknn_kwargs)
+        integrated.uns["integration_embedding_key"] = "X_pca"
+    else:
+        sce.pp.scanorama_integrate(
+            integrated,
+            key=batch_key,
+            basis="X_pca",
+            adjusted_basis="X_scanorama",
+        )
+        sc.pp.neighbors(integrated, use_rep="X_scanorama", n_neighbors=neighbors_k)
+        integrated.uns["integration_embedding_key"] = "X_scanorama"
 else:
-    trim = int(cfg["integration"]["bbknn_trim"])
-    bbknn_kwargs = dict(
-        batch_key=batch_key,
-        n_pcs=max_pcs,
-        neighbors_within_batch=int(cfg["integration"]["bbknn_neighbors_within_batch"]),
+    try:
+        import scvi
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("scvi-tools is required for scvi and scanvi integration methods") from exc
+
+    scvi_latent_dim = min(max(2, int(cfg["integration"]["scvi_latent_dim"])), integrated.n_vars, integrated.n_obs - 1)
+    if scvi_latent_dim < 2:
+        raise RuntimeError("Need at least 2 latent dimensions for scVI/scANVI.")
+
+    model_adata = integrated.copy()
+    setup_kwargs = {"batch_key": batch_key}
+    if scvi_layer is not None:
+        setup_kwargs["layer"] = scvi_layer
+    else:
+        method_notes.append(
+            "No counts layer was found. scVI/scANVI fell back to X; count-like input is strongly preferred."
+        )
+
+    if integration_method == "scanvi":
+        if not scanvi_label_key:
+            raise RuntimeError("scanvi_label_key is required when integration_method=scanvi")
+        if scanvi_label_key not in model_adata.obs.columns:
+            raise RuntimeError(f"scanvi_label_key not found in obs: {scanvi_label_key}")
+        labels = model_adata.obs[scanvi_label_key].astype(str).fillna(scanvi_unlabeled_category)
+        labels = labels.replace({"nan": scanvi_unlabeled_category, "None": scanvi_unlabeled_category, "": scanvi_unlabeled_category})
+        model_adata.obs[scanvi_label_key] = pd.Categorical(labels)
+        setup_kwargs["labels_key"] = scanvi_label_key
+
+    scvi.model.SCVI.setup_anndata(model_adata, **setup_kwargs)
+    scvi_model = scvi.model.SCVI(
+        model_adata,
+        n_latent=scvi_latent_dim,
+        gene_likelihood=scvi_gene_likelihood,
     )
-    if trim > 0:
-        bbknn_kwargs["trim"] = trim
-    sce.pp.bbknn(integrated, **bbknn_kwargs)
-    integrated.uns["integration_embedding_key"] = "X_pca"
+    scvi_model.train(
+        max_epochs=scvi_max_epochs,
+        accelerator=scvi_accelerator,
+        devices=scvi_devices,
+    )
+
+    if integration_method == "scanvi":
+        scanvi_model = scvi.model.SCANVI.from_scvi_model(
+            scvi_model,
+            labels_key=scanvi_label_key,
+            unlabeled_category=scanvi_unlabeled_category,
+        )
+        scanvi_model.train(
+            max_epochs=scvi_max_epochs,
+            accelerator=scvi_accelerator,
+            devices=scvi_devices,
+        )
+        model_adata.obsm["X_scanvi"] = scanvi_model.get_latent_representation()
+        integrated = model_adata
+        integrated.uns["integration_embedding_key"] = "X_scanvi"
+    else:
+        model_adata.obsm["X_scvi"] = scvi_model.get_latent_representation()
+        integrated = model_adata
+        integrated.uns["integration_embedding_key"] = "X_scvi"
+
+    sc.pp.neighbors(integrated, use_rep=integrated.uns["integration_embedding_key"], n_neighbors=neighbors_k)
 
 sc.tl.umap(integrated, min_dist=umap_min_dist)
 sc.tl.leiden(integrated, resolution=cluster_resolution)
@@ -222,27 +321,100 @@ mixing_summary = (
 )
 mixing_summary["fraction_of_cells"] = mixing_summary["n_cells"] / integrated.n_obs
 
-integration_summary = pd.DataFrame(
-    [
-        {"field": "project_name", "value": cfg["project"]["name"]},
-        {"field": "input_h5ad", "value": str(input_path)},
-        {"field": "input_source_template", "value": cfg["input"]["input_source_template"]},
-        {"field": "integration_method", "value": integration_method},
-        {"field": "batch_key", "value": batch_key},
-        {"field": "condition_key", "value": condition_key},
-        {"field": "sample_id_key", "value": sample_id_key},
-        {"field": "sample_label_key", "value": sample_label_key},
-        {"field": "use_hvgs_only", "value": use_hvgs_only},
-        {"field": "n_pcs", "value": max_pcs},
-        {"field": "n_neighbors", "value": neighbors_k},
-        {"field": "cluster_resolution", "value": cluster_resolution},
-        {"field": "n_cells", "value": int(integrated.n_obs)},
-        {"field": "n_genes", "value": int(integrated.n_vars)},
-        {"field": "n_clusters", "value": int(integrated.obs['leiden'].nunique())},
-        {"field": "integration_embedding_key", "value": integrated.uns["integration_embedding_key"]},
-        {"field": "output_h5ad", "value": str(out_adata)},
-    ]
-)
+method_profile = {
+    "harmony": {
+        "family": "pca_correction",
+        "gpu_recommended": False,
+        "recommended_scale": "small_to_large",
+        "counts_required": False,
+        "label_key_required": False,
+    },
+    "bbknn": {
+        "family": "graph_correction",
+        "gpu_recommended": False,
+        "recommended_scale": "small_to_medium_large",
+        "counts_required": False,
+        "label_key_required": False,
+    },
+    "scanorama": {
+        "family": "manifold_stitching",
+        "gpu_recommended": False,
+        "recommended_scale": "medium_to_large",
+        "counts_required": False,
+        "label_key_required": False,
+    },
+    "scvi": {
+        "family": "deep_generative",
+        "gpu_recommended": True,
+        "recommended_scale": "medium_to_very_large",
+        "counts_required": True,
+        "label_key_required": False,
+    },
+    "scanvi": {
+        "family": "deep_generative_semi_supervised",
+        "gpu_recommended": True,
+        "recommended_scale": "medium_to_very_large",
+        "counts_required": True,
+        "label_key_required": True,
+    },
+}[integration_method]
+method_note = " ".join(method_notes)
+counts_layer_used = scvi_layer if integration_method in {"scvi", "scanvi"} and scvi_layer is not None else "no"
+
+integration_summary_rows = [
+    {"field": "project_name", "value": cfg["project"]["name"]},
+    {"field": "input_h5ad", "value": str(input_path)},
+    {"field": "input_source_template", "value": cfg["input"]["input_source_template"]},
+    {"field": "integration_method", "value": integration_method},
+    {"field": "integration_family", "value": method_profile["family"]},
+    {"field": "integration_embedding_key", "value": integrated.uns["integration_embedding_key"]},
+    {"field": "batch_key", "value": batch_key},
+    {"field": "condition_key", "value": condition_key},
+    {"field": "sample_id_key", "value": sample_id_key},
+    {"field": "sample_label_key", "value": sample_label_key},
+    {"field": "use_hvgs_only", "value": use_hvgs_only},
+    {"field": "n_neighbors", "value": neighbors_k},
+    {"field": "cluster_resolution", "value": cluster_resolution},
+    {"field": "n_cells", "value": int(integrated.n_obs)},
+    {"field": "n_genes", "value": int(integrated.n_vars)},
+    {"field": "n_batches", "value": n_unique_batches},
+    {"field": "n_clusters", "value": int(integrated.obs["leiden"].nunique())},
+    {"field": "counts_layer_used", "value": counts_layer_used},
+    {"field": "scanvi_label_key", "value": scanvi_label_key or ""},
+    {"field": "scanvi_unlabeled_category", "value": scanvi_unlabeled_category if integration_method == "scanvi" else ""},
+    {"field": "scvi_accelerator", "value": scvi_accelerator if integration_method in {"scvi", "scanvi"} else ""},
+    {"field": "scvi_devices", "value": scvi_devices if integration_method in {"scvi", "scanvi"} else ""},
+    {"field": "scvi_gene_likelihood", "value": scvi_gene_likelihood if integration_method in {"scvi", "scanvi"} else ""},
+    {"field": "scvi_max_epochs", "value": scvi_max_epochs if integration_method in {"scvi", "scanvi"} else ""},
+    {"field": "method_note", "value": method_note},
+    {"field": "output_h5ad", "value": str(out_adata)},
+]
+
+if max_pcs is not None:
+    integration_summary_rows.append({"field": "n_pcs", "value": max_pcs})
+else:
+    integration_summary_rows.append({"field": "n_pcs", "value": ""})
+
+if scvi_latent_dim is not None:
+    integration_summary_rows.append({"field": "scvi_latent_dim", "value": scvi_latent_dim})
+
+if integration_method == "harmony":
+    integration_summary_rows.extend(
+        [
+            {"field": "harmony_theta", "value": float(cfg["integration"]["harmony_theta"])},
+            {"field": "harmony_lambda", "value": float(cfg["integration"]["harmony_lambda"])},
+            {"field": "harmony_max_iter", "value": int(cfg["integration"]["harmony_max_iter"])},
+        ]
+    )
+elif integration_method == "bbknn":
+    integration_summary_rows.extend(
+        [
+            {"field": "bbknn_neighbors_within_batch", "value": int(cfg["integration"]["bbknn_neighbors_within_batch"])},
+            {"field": "bbknn_trim", "value": int(cfg["integration"]["bbknn_trim"])},
+        ]
+    )
+
+integration_summary = pd.DataFrame(integration_summary_rows)
 
 write_table(integration_summary_file, integration_summary)
 write_table(batch_mixing_summary_file, mixing_summary)
@@ -252,12 +424,21 @@ integrated.uns["integration_method"] = integration_method
 integrated.uns["input_source_template"] = cfg["input"]["input_source_template"]
 integrated.uns["integration_params"] = {
     "use_hvgs_only": bool(use_hvgs_only),
-    "n_pcs": int(max_pcs),
+    "n_pcs": int(max_pcs) if max_pcs is not None else None,
     "n_neighbors": int(neighbors_k),
     "cluster_resolution": float(cluster_resolution),
     "batch_key": batch_key,
     "condition_key": condition_key,
+    "scanvi_label_key": scanvi_label_key or None,
+    "scanvi_unlabeled_category": scanvi_unlabeled_category if integration_method == "scanvi" else None,
+    "scvi_latent_dim": int(scvi_latent_dim) if scvi_latent_dim is not None else None,
+    "scvi_max_epochs": int(scvi_max_epochs) if integration_method in {"scvi", "scanvi"} else None,
+    "scvi_gene_likelihood": scvi_gene_likelihood if integration_method in {"scvi", "scanvi"} else None,
+    "scvi_accelerator": scvi_accelerator if integration_method in {"scvi", "scanvi"} else None,
+    "scvi_devices": int(scvi_devices) if integration_method in {"scvi", "scanvi"} else None,
 }
+integrated.uns["integration_method_profile"] = method_profile
+integrated.uns["batch_mixing_summary"] = uns_dict_of_lists(mixing_summary)
 ensure_parent(out_adata)
 integrated.write_h5ad(out_adata)
 
@@ -281,7 +462,10 @@ session_info_df = pd.concat(
                 "igraph",
                 "leidenalg",
                 "bbknn",
-                "harmony-pytorch",
+                "harmonypy",
+                "scanorama",
+                "scvi-tools",
+                "torch",
                 "quarto",
             ]
         ),
@@ -295,8 +479,7 @@ integration_summary
 
 ## Overview
 
-This section summarizes the integration configuration and the resulting
-integrated object before you inspect the diagnostic figures.
+This section summarizes the integration configuration and the resulting integrated object before you inspect the diagnostic figures.
 
 ```{python}
 format_table(integration_summary)
@@ -304,8 +487,7 @@ format_table(integration_summary)
 
 ## Batch Mixing Summary
 
-This table gives a compact batch-level view of the integrated object. It is a
- quick way to check whether batches remain severely imbalanced after integration.
+This table gives a compact batch-level view of the integrated object. It is a quick way to check whether batches remain severely imbalanced after integration.
 
 ```{python}
 format_table(mixing_summary)
@@ -313,8 +495,7 @@ format_table(mixing_summary)
 
 ## Cluster Counts
 
-This table summarizes integrated Leiden cluster sizes and can be used as the
-starting point for downstream annotation planning.
+This table summarizes integrated Leiden cluster sizes and can be used as the starting point for downstream annotation planning.
 
 ```{python}
 format_table(cluster_counts)
@@ -322,8 +503,7 @@ format_table(cluster_counts)
 
 ## Integrated UMAP
 
-The figures below show the integrated embedding colored by the most important
-metadata fields for QC review.
+The figures below show the integrated embedding colored by the most important metadata fields for QC review.
 
 ```{python}
 plot_df = integrated.obs.copy()
