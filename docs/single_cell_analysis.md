@@ -259,6 +259,51 @@ These should become standard across future scverse templates.
 
 ## Current Template Family
 
+### 0. `contamination_db`
+
+Purpose:
+- shared infrastructure template for building reusable contamination references
+
+Current implemented behavior:
+- ad-hoc/shared template for `/data/shared/contamination_db`
+- direct FASTA download from official upstream sources
+- starter panel for:
+  - human
+  - mouse
+  - rat
+  - zebrafish
+  - pig
+  - cow
+  - chicken
+  - dog
+  - cat
+  - PhiX
+- `kraken2_base=standard` support:
+  - include Kraken2 standard content, including bacteria, archaea, viral references, human, and UniVec_Core
+  - then add the configured vertebrate/PhiX panel
+- Bracken build support for configured read lengths
+- FastQ Screen Bowtie2 index/config generation from the same curated panel
+- staged FASTA cleanup after successful build by default
+- download provenance capture:
+  - final resolved URL
+  - SHA256 checksum
+  - resolved genome manifest
+
+Current outputs:
+- `/data/shared/contamination_db/kraken2/<panel>/<version>/`
+- `/data/shared/contamination_db/bracken/<panel>/<version>/`
+- `/data/shared/contamination_db/fastq_screen/<panel>/<version>/`
+- `current` symlinks under each tool root
+- `results/db_build_info.yaml`
+- `results/genome_manifest_resolved.csv`
+
+Current notes:
+- this template is intentionally independent of `ref_genomes`
+- first real build validation should still proceed in stages:
+  1. Kraken2 only
+  2. Bracken
+  3. FastQ Screen
+
 ### 1. `cellbender_remove_background`
 
 Purpose:
@@ -316,6 +361,9 @@ Current notes:
 - ambient correction is not performed inside this template
 - explicit host-prefixed input overrides are materialized during render, not only
   auto-resolved upstream publish keys
+- a real-data network integration test is now present and passes on a downloaded
+  PBMC3K subset
+- that test already caught and fixed a real H5AD serialization issue in `uns`
 
 ### 3. `scverse_scrna_integrate`
 
@@ -536,22 +584,52 @@ Examples not safe to remove by default:
 - `results/adata.annotated.h5ad`
 - `results/cellbender/cellbender_filtered.h5`
 
+## Current Validation Status
+
+### Already validated on real data
+
+- `scverse_scrna_prep`
+  - downloaded PBMC3K subset
+  - full Pixi + Quarto execution path
+  - real output assertions for:
+    - `results/adata.prep.h5ad`
+    - summary tables
+    - rendered HTML report
+
+### Implemented but still awaiting staged real validation
+
+- `cellbender_remove_background`
+  - structure and publish contract implemented
+  - still needs a real CellBender run on raw droplet input
+
+- `contamination_db`
+  - downloader/build scaffold implemented
+  - starter species panel filled with real URLs
+  - still needs staged real validation:
+    1. Kraken2 base + vertebrate panel
+    2. Bracken assets
+    3. FastQ Screen indexes/config
+
 ## Implementation Order
 
 Recommended order from here:
-1. stabilize and field-test `cellbender_remove_background`
-2. field-test `scverse_scrna_prep` on real datasets
+1. stage-validate `contamination_db`
+2. stabilize and field-test `cellbender_remove_background`
 3. implement `scverse_scrna_integrate`
-4. implement `scverse_scrna_annotate`
-5. implement `scverse_scrna_de`
-6. implement trajectory / velocity
-7. implement spatial
-8. implement scATAC
-9. implement multimodal
+4. add one more `scverse_scrna_prep` integration test for direct `10x_h5` or `10x_mtx`
+5. implement `scverse_scrna_annotate`
+6. implement `scverse_scrna_de`
+7. implement trajectory / velocity
+8. implement spatial
+9. implement scATAC
+10. implement multimodal
 
 Reasoning:
-- preprocessing and handoff design must be stable first
-- the core `.h5ad` contract should be validated before building later stages
+- shared contamination references should be stabilized before making them a
+  service default in demultiplexing
+- the prep-stage `.h5ad` contract is now in much better shape and already has a
+  passing real-data integration test
+- the next missing canonical handoff stage is integrated batch-corrected analysis
 
 ## Open Design Questions
 
