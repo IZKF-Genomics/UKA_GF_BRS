@@ -186,10 +186,10 @@ scANVI only:
 
 ## Render
 
-Project mode:
+From the project directory:
 
 ```bash
-bpm template render scverse_scrna_integrate --dir /path/to/project
+bpm template render scverse_scrna_integrate
 ```
 
 With explicit method choice:
@@ -199,8 +199,7 @@ bpm template render scverse_scrna_integrate \
   --param integration_method=scvi \
   --param batch_key=batch \
   --param n_pcs=30 \
-  --param n_neighbors=15 \
-  --dir /path/to/project
+  --param n_neighbors=15
 ```
 
 scANVI example:
@@ -209,16 +208,27 @@ scANVI example:
 bpm template render scverse_scrna_integrate \
   --param integration_method=scanvi \
   --param scanvi_label_key=cell_type_coarse \
-  --param scanvi_unlabeled_category=Unknown \
-  --dir /path/to/project
+  --param scanvi_unlabeled_category=Unknown
+```
+
+From outside the project directory:
+
+```bash
+bpm template render scverse_scrna_integrate --dir /path/to/project
 ```
 
 ## Run
 
 ```bash
-bpm template run scverse_scrna_integrate --dir /path/to/project
-# or inside rendered folder
+bpm template run scverse_scrna_integrate
+# or inside the rendered template folder
 ./run.sh
+```
+
+From outside the project directory:
+
+```bash
+bpm template run scverse_scrna_integrate --dir /path/to/project
 ```
 
 ## Output Semantics
