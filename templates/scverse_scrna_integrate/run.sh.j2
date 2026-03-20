@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+echo "[INFO] Running scverse_scrna_integrate for {{ ctx.project.name if ctx.project else ctx.template.id }}"
+echo "[INFO] Root: $ROOT_DIR"
+
+echo "[INFO] Installing/updating pixi environment"
+pixi install
+
+echo "[INFO] Rendering 00_integrate.qmd"
+pixi run render
+
+echo "[INFO] Complete. Results written to results/ and 00_integrate.html"

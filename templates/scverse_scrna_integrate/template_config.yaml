@@ -1,0 +1,131 @@
+id: scverse_scrna_integrate
+description: "scverse/Scanpy single-cell RNA-seq integration from scverse_scrna_prep outputs."
+
+params:
+  input_h5ad:
+    type: str
+    cli: "--input-h5ad"
+    required: false
+    default: ""
+    description: "Explicit integrated-template input H5AD; defaults to scverse_scrna_prep published scrna_prep_h5ad when empty"
+  input_source_template:
+    type: str
+    cli: "--input-source-template"
+    required: false
+    default: ""
+    description: "Internal provenance field recording which upstream template supplied the input matrix"
+  integration_method:
+    type: str
+    cli: "--integration-method"
+    required: false
+    default: "harmony"
+    description: "Integration backend: harmony or bbknn"
+  batch_key:
+    type: str
+    cli: "--batch-key"
+    required: false
+    default: "batch"
+    description: "Batch column used for integration and diagnostic plots"
+  condition_key:
+    type: str
+    cli: "--condition-key"
+    required: false
+    default: "condition"
+    description: "Condition column used for diagnostic plots"
+  sample_id_key:
+    type: str
+    cli: "--sample-id-key"
+    required: false
+    default: "sample_id"
+    description: "Primary sample identifier column"
+  sample_label_key:
+    type: str
+    cli: "--sample-label-key"
+    required: false
+    default: "sample_display"
+    description: "Display label column used in the report when present"
+  use_hvgs_only:
+    type: bool
+    cli: "--use-hvgs-only"
+    required: false
+    default: true
+    description: "Restrict integration PCA/neighbors to highly variable genes when available"
+  n_pcs:
+    type: int
+    cli: "--n-pcs"
+    required: false
+    default: 30
+    description: "Number of principal components used for integration"
+  n_neighbors:
+    type: int
+    cli: "--n-neighbors"
+    required: false
+    default: 15
+    description: "Number of neighbors used for integrated graph construction"
+  harmony_theta:
+    type: float
+    cli: "--harmony-theta"
+    required: false
+    default: 2.0
+    description: "Harmony diversity penalty parameter"
+  harmony_lambda:
+    type: float
+    cli: "--harmony-lambda"
+    required: false
+    default: 1.0
+    description: "Harmony ridge regression penalty parameter"
+  harmony_max_iter:
+    type: int
+    cli: "--harmony-max-iter"
+    required: false
+    default: 20
+    description: "Maximum Harmony iterations"
+  bbknn_neighbors_within_batch:
+    type: int
+    cli: "--bbknn-neighbors-within-batch"
+    required: false
+    default: 3
+    description: "BBKNN neighbors per batch"
+  bbknn_trim:
+    type: int
+    cli: "--bbknn-trim"
+    required: false
+    default: 0
+    description: "Optional BBKNN trim parameter; 0 keeps the library default"
+  umap_min_dist:
+    type: float
+    cli: "--umap-min-dist"
+    required: false
+    default: 0.5
+    description: "UMAP min_dist for integrated embedding"
+  cluster_resolution:
+    type: float
+    cli: "--cluster-resolution"
+    required: false
+    default: 0.8
+    description: "Leiden resolution applied on the integrated graph"
+
+render:
+  into: "${ctx.project_dir}/${ctx.template.id}/"
+  files:
+    - README.md -> README.md
+    - pixi.toml -> pixi.toml
+    - run.sh.j2 -> run.sh
+    - .gitignore -> .gitignore
+    - config/project.toml.j2 -> config/project.toml
+    - 00_integrate.qmd.j2 -> 00_integrate.qmd
+
+run:
+  entry: "run.sh"
+
+hooks:
+  pre_render:
+    - hooks.scverse_scrna_integrate_defaults:populate
+
+publish:
+  scrna_integrated_h5ad:
+    resolver: "resolvers.get_scrna_integrated_h5ad"
+
+tools:
+  required: [pixi, quarto, jupyter]
+  optional: []

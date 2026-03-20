@@ -1,0 +1,372 @@
+---
+title: "scverse scRNA Integration"
+author: "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
+format:
+  html:
+    toc: true
+    code-fold: false
+    df-print: paged
+jupyter: python3
+---
+
+```{python}
+from __future__ import annotations
+
+import importlib.metadata
+import math
+import platform
+from pathlib import Path
+
+import anndata as ad
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import scanpy as sc
+import tomllib
+
+try:
+    import scanpy.external as sce
+except ImportError as exc:  # pragma: no cover
+    raise RuntimeError("scanpy.external is required for integration methods") from exc
+
+
+ROOT = Path.cwd()
+CONFIG_PATH = ROOT / "config" / "project.toml"
+
+
+def load_config(path: Path) -> dict:
+    with path.open("rb") as fh:
+        return tomllib.load(fh)
+
+
+def ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def write_table(path: Path, df: pd.DataFrame) -> None:
+    ensure_parent(path)
+    df.to_csv(path, index=False)
+
+
+def package_versions_table(packages: list[str]) -> pd.DataFrame:
+    rows = []
+    for package in packages:
+        try:
+            version = importlib.metadata.version(package)
+        except importlib.metadata.PackageNotFoundError:
+            version = "not installed"
+        rows.append({"package": package, "version": version})
+    return pd.DataFrame(rows)
+
+
+def format_table(df: pd.DataFrame, digits: int = 3):
+    out = df.copy()
+
+    def _fmt_text(value):
+        if pd.isna(value):
+            return ""
+        return str(value)
+
+    def _fmt_int(value):
+        if pd.isna(value):
+            return ""
+        return f"{int(round(float(value))):,}"
+
+    def _fmt_float(value):
+        if pd.isna(value):
+            return ""
+        return f"{float(value):,.{digits}f}"
+
+    formatters = {}
+    for col in out.columns:
+        series = out[col]
+        lower = str(col).lower()
+        if pd.api.types.is_integer_dtype(series):
+            formatters[col] = _fmt_int
+        elif pd.api.types.is_float_dtype(series):
+            if "fraction" in lower or "score" in lower:
+                formatters[col] = _fmt_float
+            elif lower.startswith("n_") or lower.endswith("_count") or lower.endswith("_counts"):
+                formatters[col] = _fmt_int
+            else:
+                formatters[col] = _fmt_float
+        else:
+            formatters[col] = _fmt_text
+
+    return (
+        out.style
+        .format(formatters)
+        .set_properties(**{"text-align": "left", "white-space": "nowrap"})
+        .set_table_styles(
+            [
+                {"selector": "th", "props": [("text-align", "left"), ("font-weight", "600")]},
+                {"selector": "td", "props": [("padding", "0.25rem 0.5rem")]},
+                {"selector": "table", "props": [("font-size", "0.95rem")]},
+            ]
+        )
+    )
+
+
+cfg = load_config(CONFIG_PATH)
+cfg
+```
+
+## Load Input
+
+This section resolves the prep-stage object and verifies that the expected
+metadata columns are available before integration starts.
+
+```{python}
+input_path = Path(cfg["input"]["input_h5ad"]).resolve()
+if not input_path.exists():
+    raise RuntimeError(f"Input H5AD not found: {input_path}")
+
+adata = sc.read_h5ad(input_path)
+sample_id_key = str(cfg["metadata"]["sample_id_key"]).strip() or "sample_id"
+sample_label_key = str(cfg["metadata"]["sample_label_key"]).strip() or "sample_display"
+batch_key = str(cfg["metadata"]["batch_key"]).strip() or "batch"
+condition_key = str(cfg["metadata"]["condition_key"]).strip() or "condition"
+
+for key, fallback in ((sample_id_key, "sample_id"), (batch_key, "batch"), (condition_key, "condition")):
+    if key not in adata.obs.columns:
+        adata.obs[key] = fallback
+    adata.obs[key] = adata.obs[key].astype(str).fillna("unknown")
+
+if sample_label_key not in adata.obs.columns:
+    sample_label_key = sample_id_key
+adata.obs["sample_display"] = adata.obs[sample_label_key].astype(str).fillna(adata.obs[sample_id_key].astype(str))
+
+integration_method = str(cfg["integration"]["integration_method"]).strip().lower()
+if integration_method not in {"harmony", "bbknn"}:
+    raise RuntimeError("integration_method must be 'harmony' or 'bbknn'")
+
+out_adata = ROOT / str(cfg["output"]["adata_file"])
+integration_summary_file = ROOT / str(cfg["output"]["integration_summary_file"])
+batch_mixing_summary_file = ROOT / str(cfg["output"]["batch_mixing_summary_file"])
+cluster_counts_file = ROOT / str(cfg["output"]["cluster_counts_file"])
+tables_dir = ROOT / "results" / "tables"
+tables_dir.mkdir(parents=True, exist_ok=True)
+
+adata
+```
+
+## Integration
+
+This section rebuilds the working PCA/neighborhood graph in integrated space and
+records the method-specific outputs. The goal is to produce one canonical
+integrated object for downstream annotation and comparison work.
+
+```{python}
+use_hvgs_only = bool(cfg["integration"]["use_hvgs_only"])
+n_pcs_requested = int(cfg["integration"]["n_pcs"])
+n_neighbors = int(cfg["integration"]["n_neighbors"])
+umap_min_dist = float(cfg["integration"]["umap_min_dist"])
+cluster_resolution = float(cfg["integration"]["cluster_resolution"])
+
+integrated = adata.copy()
+
+if use_hvgs_only and "highly_variable" in integrated.var.columns and integrated.var["highly_variable"].any():
+    integrated = integrated[:, integrated.var["highly_variable"].to_numpy()].copy()
+
+sc.pp.scale(integrated, max_value=10)
+max_pcs = min(max(2, n_pcs_requested), integrated.n_vars - 1, integrated.n_obs - 1)
+max_pcs = max(2, max_pcs)
+neighbors_k = min(max(2, n_neighbors), integrated.n_obs - 1)
+if neighbors_k < 2:
+    raise RuntimeError("Need at least 3 cells for integration.")
+
+sc.tl.pca(integrated, svd_solver="arpack", n_comps=max_pcs)
+
+if integration_method == "harmony":
+    sce.pp.harmony_integrate(
+        integrated,
+        key=batch_key,
+        basis="X_pca",
+        adjusted_basis="X_pca_harmony",
+        theta=float(cfg["integration"]["harmony_theta"]),
+        lambda_=float(cfg["integration"]["harmony_lambda"]),
+        max_iter_harmony=int(cfg["integration"]["harmony_max_iter"]),
+    )
+    sc.pp.neighbors(integrated, use_rep="X_pca_harmony", n_neighbors=neighbors_k)
+    integrated.uns["integration_embedding_key"] = "X_pca_harmony"
+else:
+    trim = int(cfg["integration"]["bbknn_trim"])
+    bbknn_kwargs = dict(
+        batch_key=batch_key,
+        n_pcs=max_pcs,
+        neighbors_within_batch=int(cfg["integration"]["bbknn_neighbors_within_batch"]),
+    )
+    if trim > 0:
+        bbknn_kwargs["trim"] = trim
+    sce.pp.bbknn(integrated, **bbknn_kwargs)
+    integrated.uns["integration_embedding_key"] = "X_pca"
+
+sc.tl.umap(integrated, min_dist=umap_min_dist)
+sc.tl.leiden(integrated, resolution=cluster_resolution)
+
+cluster_counts = (
+    integrated.obs.groupby("leiden", dropna=False)
+    .size()
+    .rename("n_cells")
+    .reset_index()
+    .sort_values("n_cells", ascending=False)
+)
+
+mixing_summary = (
+    integrated.obs.groupby(batch_key, dropna=False)
+    .agg(
+        n_cells=(batch_key, "size"),
+        n_clusters=("leiden", "nunique"),
+    )
+    .reset_index()
+)
+mixing_summary["fraction_of_cells"] = mixing_summary["n_cells"] / integrated.n_obs
+
+integration_summary = pd.DataFrame(
+    [
+        {"field": "project_name", "value": cfg["project"]["name"]},
+        {"field": "input_h5ad", "value": str(input_path)},
+        {"field": "input_source_template", "value": cfg["input"]["input_source_template"]},
+        {"field": "integration_method", "value": integration_method},
+        {"field": "batch_key", "value": batch_key},
+        {"field": "condition_key", "value": condition_key},
+        {"field": "sample_id_key", "value": sample_id_key},
+        {"field": "sample_label_key", "value": sample_label_key},
+        {"field": "use_hvgs_only", "value": use_hvgs_only},
+        {"field": "n_pcs", "value": max_pcs},
+        {"field": "n_neighbors", "value": neighbors_k},
+        {"field": "cluster_resolution", "value": cluster_resolution},
+        {"field": "n_cells", "value": int(integrated.n_obs)},
+        {"field": "n_genes", "value": int(integrated.n_vars)},
+        {"field": "n_clusters", "value": int(integrated.obs['leiden'].nunique())},
+        {"field": "integration_embedding_key", "value": integrated.uns["integration_embedding_key"]},
+        {"field": "output_h5ad", "value": str(out_adata)},
+    ]
+)
+
+write_table(integration_summary_file, integration_summary)
+write_table(batch_mixing_summary_file, mixing_summary)
+write_table(cluster_counts_file, cluster_counts)
+
+integrated.uns["integration_method"] = integration_method
+integrated.uns["input_source_template"] = cfg["input"]["input_source_template"]
+integrated.uns["integration_params"] = {
+    "use_hvgs_only": bool(use_hvgs_only),
+    "n_pcs": int(max_pcs),
+    "n_neighbors": int(neighbors_k),
+    "cluster_resolution": float(cluster_resolution),
+    "batch_key": batch_key,
+    "condition_key": condition_key,
+}
+ensure_parent(out_adata)
+integrated.write_h5ad(out_adata)
+
+session_info_df = pd.concat(
+    [
+        pd.DataFrame(
+            [
+                {"package": "python", "version": platform.python_version()},
+                {"package": "platform", "version": platform.platform()},
+            ]
+        ),
+        package_versions_table(
+            [
+                "scanpy",
+                "anndata",
+                "numpy",
+                "pandas",
+                "scipy",
+                "plotly",
+                "scikit-learn",
+                "igraph",
+                "leidenalg",
+                "bbknn",
+                "harmony-pytorch",
+                "quarto",
+            ]
+        ),
+    ],
+    ignore_index=True,
+)
+write_table(tables_dir / "session_info.csv", session_info_df)
+
+integration_summary
+```
+
+## Overview
+
+This section summarizes the integration configuration and the resulting
+integrated object before you inspect the diagnostic figures.
+
+```{python}
+format_table(integration_summary)
+```
+
+## Batch Mixing Summary
+
+This table gives a compact batch-level view of the integrated object. It is a
+ quick way to check whether batches remain severely imbalanced after integration.
+
+```{python}
+format_table(mixing_summary)
+```
+
+## Cluster Counts
+
+This table summarizes integrated Leiden cluster sizes and can be used as the
+starting point for downstream annotation planning.
+
+```{python}
+format_table(cluster_counts)
+```
+
+## Integrated UMAP
+
+The figures below show the integrated embedding colored by the most important
+metadata fields for QC review.
+
+```{python}
+plot_df = integrated.obs.copy()
+plot_df["umap_1"] = integrated.obsm["X_umap"][:, 0]
+plot_df["umap_2"] = integrated.obsm["X_umap"][:, 1]
+
+fig_leiden = px.scatter(
+    plot_df,
+    x="umap_1",
+    y="umap_2",
+    color="leiden",
+    hover_data=["sample_display", sample_id_key, batch_key, condition_key],
+    title="Integrated UMAP by Leiden cluster",
+    template="simple_white",
+)
+fig_leiden.update_layout(height=650)
+fig_leiden
+```
+
+```{python}
+fig_batch = px.scatter(
+    plot_df,
+    x="umap_1",
+    y="umap_2",
+    color=batch_key,
+    hover_data=["sample_display", sample_id_key, "leiden", condition_key],
+    title=f"Integrated UMAP by {batch_key}",
+    template="simple_white",
+)
+fig_batch.update_layout(height=650)
+fig_batch
+```
+
+```{python}
+fig_condition = px.scatter(
+    plot_df,
+    x="umap_1",
+    y="umap_2",
+    color=condition_key,
+    hover_data=["sample_display", sample_id_key, "leiden", batch_key],
+    title=f"Integrated UMAP by {condition_key}",
+    template="simple_white",
+)
+fig_condition.update_layout(height=650)
+fig_condition
+```

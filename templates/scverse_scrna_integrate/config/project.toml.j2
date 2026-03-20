@@ -1,0 +1,32 @@
+[project]
+name = "{{ ctx.project.name if ctx.project else ctx.template.id }}"
+authors = "{{ ctx.project.authors | map(attribute='name') | join(', ') if ctx.project and ctx.project.authors else '' }}"
+
+[input]
+input_h5ad = "{{ ctx.params.input_h5ad }}"
+input_source_template = "{{ ctx.params.input_source_template }}"
+
+[metadata]
+sample_id_key = "{{ ctx.params.sample_id_key }}"
+sample_label_key = "{{ ctx.params.sample_label_key }}"
+batch_key = "{{ ctx.params.batch_key }}"
+condition_key = "{{ ctx.params.condition_key }}"
+
+[integration]
+integration_method = "{{ ctx.params.integration_method }}"
+use_hvgs_only = {{ ctx.params.use_hvgs_only | string | lower }}
+n_pcs = {{ ctx.params.n_pcs }}
+n_neighbors = {{ ctx.params.n_neighbors }}
+harmony_theta = {{ ctx.params.harmony_theta }}
+harmony_lambda = {{ ctx.params.harmony_lambda }}
+harmony_max_iter = {{ ctx.params.harmony_max_iter }}
+bbknn_neighbors_within_batch = {{ ctx.params.bbknn_neighbors_within_batch }}
+bbknn_trim = {{ ctx.params.bbknn_trim }}
+umap_min_dist = {{ ctx.params.umap_min_dist }}
+cluster_resolution = {{ ctx.params.cluster_resolution }}
+
+[output]
+adata_file = "results/adata.integrated.h5ad"
+integration_summary_file = "results/tables/integration_summary.csv"
+batch_mixing_summary_file = "results/tables/batch_mixing_summary.csv"
+cluster_counts_file = "results/tables/cluster_counts.csv"
