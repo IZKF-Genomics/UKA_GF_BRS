@@ -259,51 +259,6 @@ These should become standard across future scverse templates.
 
 ## Current Template Family
 
-### 0. `contamination_db`
-
-Purpose:
-- shared infrastructure template for building reusable contamination references
-
-Current implemented behavior:
-- ad-hoc/shared template for `/data/shared/contamination_db`
-- direct FASTA download from official upstream sources
-- starter panel for:
-  - human
-  - mouse
-  - rat
-  - zebrafish
-  - pig
-  - cow
-  - chicken
-  - dog
-  - cat
-  - PhiX
-- `kraken2_base=standard` support:
-  - include Kraken2 standard content, including bacteria, archaea, viral references, human, and UniVec_Core
-  - then add the configured vertebrate/PhiX panel
-- Bracken build support for configured read lengths
-- FastQ Screen Bowtie2 index/config generation from the same curated panel
-- staged FASTA cleanup after successful build by default
-- download provenance capture:
-  - final resolved URL
-  - SHA256 checksum
-  - resolved genome manifest
-
-Current outputs:
-- `/data/shared/contamination_db/kraken2/<panel>/<version>/`
-- `/data/shared/contamination_db/bracken/<panel>/<version>/`
-- `/data/shared/contamination_db/fastq_screen/<panel>/<version>/`
-- `current` symlinks under each tool root
-- `results/db_build_info.yaml`
-- `results/genome_manifest_resolved.csv`
-
-Current notes:
-- this template is intentionally independent of `ref_genomes`
-- first real build validation should still proceed in stages:
-  1. Kraken2 only
-  2. Bracken
-  3. FastQ Screen
-
 ### 1. `cellbender_remove_background`
 
 Purpose:
@@ -602,31 +557,20 @@ Examples not safe to remove by default:
   - structure and publish contract implemented
   - still needs a real CellBender run on raw droplet input
 
-- `contamination_db`
-  - downloader/build scaffold implemented
-  - starter species panel filled with real URLs
-  - still needs staged real validation:
-    1. Kraken2 base + vertebrate panel
-    2. Bracken assets
-    3. FastQ Screen indexes/config
-
 ## Implementation Order
 
 Recommended order from here:
-1. stage-validate `contamination_db`
-2. stabilize and field-test `cellbender_remove_background`
-3. implement `scverse_scrna_integrate`
-4. add one more `scverse_scrna_prep` integration test for direct `10x_h5` or `10x_mtx`
-5. implement `scverse_scrna_annotate`
-6. implement `scverse_scrna_de`
-7. implement trajectory / velocity
-8. implement spatial
-9. implement scATAC
-10. implement multimodal
+1. stabilize and field-test `cellbender_remove_background`
+2. implement `scverse_scrna_integrate`
+3. add one more `scverse_scrna_prep` integration test for direct `10x_h5` or `10x_mtx`
+4. implement `scverse_scrna_annotate`
+5. implement `scverse_scrna_de`
+6. implement trajectory / velocity
+7. implement spatial
+8. implement scATAC
+9. implement multimodal
 
 Reasoning:
-- shared contamination references should be stabilized before making them a
-  service default in demultiplexing
 - the prep-stage `.h5ad` contract is now in much better shape and already has a
   passing real-data integration test
 - the next missing canonical handoff stage is integrated batch-corrected analysis
