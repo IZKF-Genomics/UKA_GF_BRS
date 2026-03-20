@@ -604,6 +604,20 @@ def package_versions_table(packages: list[str]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def uns_dict_of_lists(df: pd.DataFrame) -> dict[str, list]:
+    safe = df.copy()
+    for column in safe.columns:
+        if pd.api.types.is_bool_dtype(safe[column]):
+            safe[column] = safe[column].astype(bool)
+        elif pd.api.types.is_integer_dtype(safe[column]):
+            safe[column] = safe[column].astype(int)
+        elif pd.api.types.is_float_dtype(safe[column]):
+            safe[column] = safe[column].astype(float)
+        else:
+            safe[column] = safe[column].astype(str)
+    return {column: safe[column].tolist() for column in safe.columns}
+
+
 def format_table(df: pd.DataFrame, digits: int = 3):
     out = df.copy()
 
@@ -1053,7 +1067,7 @@ filtered.uns["ambient_correction_applied"] = ambient_correction_applied
 filtered.uns["ambient_correction_method"] = ambient_correction_method
 filtered.uns["resolved_leiden_resolution"] = resolved_leiden_resolution
 filtered.uns["resolved_leiden_resolution_source"] = leiden_resolution_source
-filtered.uns["resolution_diagnostics"] = resolution_rows
+filtered.uns["resolution_diagnostics"] = uns_dict_of_lists(resolution_diagnostics_df)
 ensure_parent(out_adata)
 filtered.write_h5ad(out_adata)
 
