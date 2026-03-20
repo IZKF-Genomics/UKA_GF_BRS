@@ -83,29 +83,33 @@ def test_scverse_scrna_prep_runs_on_real_downloaded_pbmc3k_subset(tmp_path: Path
     run_dir = tmp_path / "scverse_scrna_prep"
     run_dir.mkdir(parents=True, exist_ok=True)
     input_h5ad = run_dir / "pbmc3k_subset.h5ad"
+    dataset_script = run_dir / "make_pbmc3k_subset.py"
 
     _render_scverse_scrna_prep(run_dir, input_h5ad)
+
+    dataset_script.write_text(
+        "\n".join(
+            [
+                "import scanpy as sc",
+                f"output = r'{input_h5ad}'",
+                "adata = sc.datasets.pbmc3k()",
+                "adata = adata[:400].copy()",
+                "adata.obs['sample_id'] = 'pbmc3k'",
+                "adata.obs['batch'] = 'batch1'",
+                "adata.obs['condition'] = 'control'",
+                "adata.layers['counts'] = adata.X.copy()",
+                "adata.write_h5ad(output)",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     # Install the exact Pixi environment used by the template first, then create
     # a small H5AD from a real internet-downloaded dataset using that same stack.
     subprocess.run(["pixi", "install"], cwd=run_dir, check=True)
     subprocess.run(
-        [
-            "pixi",
-            "run",
-            "python",
-            "-c",
-            (
-                "import scanpy as sc; "
-                "adata = sc.datasets.pbmc3k(); "
-                "adata = adata[:400].copy(); "
-                "adata.obs['sample_id'] = 'pbmc3k'; "
-                "adata.obs['batch'] = 'batch1'; "
-                "adata.obs['condition'] = 'control'; "
-                "adata.layers['counts'] = adata.X.copy(); "
-                f"adata.write_h5ad(r'{input_h5ad}')"
-            ),
-        ],
+        ["pixi", "run", "python", str(dataset_script)],
         cwd=run_dir,
         check=True,
     )
