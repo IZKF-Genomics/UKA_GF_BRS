@@ -11,6 +11,11 @@ cd 251209_NB501289_0978_AHKWC7AFX7
 bpm template run demux_bclconvert
 ```
 
+Example using the template's ad-hoc output resolver:
+```bash
+bpm template render demux_bclconvert --bcl /data/raw/nextseq500_NB501289/260316_NB501289_0990_AHWCHKBGYX/ --adhoc --agendo-id 5425
+```
+
 ## Export demultiplexing output
 ```
 bpm workflow run export_demux --run-dir /data/fastq/251209_NB501289_0978_AHKWC7AFX7/ --project-name 251209_UserName_PIName_Institute_FASTQ
