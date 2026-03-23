@@ -67,14 +67,28 @@ render_file_count: 8
 Demultiplex Illumina BCLs using the system `bcl-convert` binary, then run Pixi-managed Falco quality control, optional contamination screening, and MultiQC summarization.
 
 ## Usage
-Render, then run in the desired working directory (where you want outputs):
+Render first, then run from the rendered directory. In ad-hoc mode BPM writes a `bpm.meta.yaml` into the output folder so later `bpm template run` and `bpm template publish` can reuse the same rendered context.
 
+Explicit ad-hoc output directory:
+
+```bash
+cd /data/fastq
+bpm template render demux_bclconvert \
+  --out 251209_NB501289_0978_AHKWC7AFX7 \
+  --param bcl_dir=/data/raw/nextseq500_NB501289/251209_NB501289_0978_AHKWC7AFX7
+cd 251209_NB501289_0978_AHKWC7AFX7
+bpm template run demux_bclconvert
 ```
-cd /data/fastq/
 
-bpm template render demux_bclconvert --adhoc --bcl /data/raw/nextseq500_NB501289/251209_NB501289_0978_AHKWC7AFX7/ 
+Resolver-derived ad-hoc output directory (folder name comes from the basename of `bcl_dir`):
 
-cd 250915_A01742_0505_AH2NNKDRX7
+```bash
+cd /data/fastq
+bpm template render demux_bclconvert \
+  --adhoc \
+  --bcl /data/raw/novaseq_A01742/260320_A01742_0619_AHHT35DRX7/ \
+  --agendo-id 5499
+cd 260320_A01742_0619_AHHT35DRX7
 bpm template run demux_bclconvert
 ```
 
@@ -86,8 +100,8 @@ bpm template run demux_bclconvert
 - `bracken_read_length` (int, default `0`): Read length used for Bracken database assets. Leave at `0` to auto-detect the dominant read length from demultiplexed FASTQs.
 - `run_fastq_screen` (bool, default `false`): Backward-compatibility switch. If `contamination_method=none`, this enables `fastq_screen`.
 - `thread_ratio` (float, default `0.8`): Fraction of idle CPUs allocated to demultiplexing/QC.
-- `no_lane_splitting` (bool, default `true`): Produce one FASTQ per read/sample (not per lane).
-- `sampleproject_subdirs` (bool, default `false`): Keep FASTQs in sample project subdirectories.
+- `no_lane_splitting` (bool, default `true`): Produce one FASTQ per read/sample (not per lane). Currently set via `--param no_lane_splitting=false` because no dedicated CLI flag is declared in the descriptor.
+- `sampleproject_subdirs` (bool, default `false`): Keep FASTQs in sample project subdirectories. Currently set via `--param sampleproject_subdirs=true` because no dedicated CLI flag is declared in the descriptor.
 - `use_api_samplesheet` (bool, default `true`): Retrieve `samplesheet.csv` via post-render API hook.
 - `gf_api_name` / `gf_api_pass` (optional): API credentials (env vars also supported).
 - `agendo_id` (optional): API fallback identifier when flowcell lookup fails.
@@ -99,14 +113,14 @@ bpm template run demux_bclconvert
 - FASTQ output (`sampleproject_subdirs = true`): bcl-convert creates project/sample subfolders under `./output/`.
 - FASTQ output (`sampleproject_subdirs = false`): FASTQs are written directly under `./output/`.
 - Other outputs:
-  - `samplesheet.csv` (rendered; overwritten by API hook when enabled).
+  - `samplesheet.csv` (rendered by default; replaced by the API response when found, otherwise left unchanged on API 404).
   - `pixi.toml` for non-`bcl-convert` tooling.
   - `run.sh` in the run directory.
   - `collect_versions.sh` helper script for software-version capture.
   - `build_fastq_manifest.py` helper script for FASTQ discovery and SE/PE detection.
   - `process_fastqs.py` helper script for Falco and contamination backends.
   - `results/run_info.yaml` with run metadata, selected parameters, and software versions.
-  - `results/run.log` with the full combined stdout/stderr stream from the run.
+  - `results/run.log` with the combined stdout/stderr stream when `script(1)` is available on the host.
   - `results/fastq_manifest.csv` with detected read mode and paired FASTQ paths.
   - `results/bracken_read_length.txt` when Bracken auto-detects or resolves a read length.
   - `multiqc/multiqc_report.html`.
@@ -142,10 +156,11 @@ This template captures versions through `collect_versions.sh`, called from `run.
 - Kraken2/Bracken databases are expected under shared storage, for example `/data/shared/databases/`.
 - If `contamination_method=kraken2_bracken` and `bracken_read_length=0`, the template auto-detects the dominant read length from the demultiplexed FASTQs and records the resolved value in `results/run_info.yaml`.
 - If required Kraken2 or Bracken assets are missing, the template fails with explicit build commands for the expected path.
-- Post-render hook fetches samplesheet when `use_api_samplesheet=true`.
+- Post-render hook fetches `samplesheet.csv` when `use_api_samplesheet=true`.
 - API URL (flowcell): `https://genomics.rwth-aachen.de/api/get/samplesheet/flowcell/{flowcell}`.
 - API URL (Agendo request): `https://genomics.rwth-aachen.de/api/get/samplesheet/request/{id}`.
 - Credentials: params `gf_api_name`/`gf_api_pass` or env `GF_API_NAME`/`GF_API_PASS`.
-- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; if missing, render fails. `agendo_id` is only used on flowcell 404 responses.
-- Render aborts if samplesheet fetch fails.
+- Flowcell id is derived from the last underscore-delimited token in `bcl_dir`; `agendo_id` is only queried after a flowcell-side `404 Not Found`.
+- When the API returns `404`, render continues and prints the API detail message, leaving the rendered `samplesheet.csv` in place. Other API and network errors still abort.
+- In ad-hoc mode, the output resolver derives the render directory from `Path(bcl_dir).name` unless you pass `--out` explicitly.
 - The run script prints explicit phase banners before metadata collection, demultiplexing, FASTQ-manifest generation, Falco, optional contamination screening, and MultiQC.

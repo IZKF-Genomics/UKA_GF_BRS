@@ -4,7 +4,7 @@ Use the `demux_bclconvert` template to demultiplex Illumina BCLs, then export FA
 MultiQC with `export_demux` if needed.
 
 ## Render and run (ad-hoc)
-```
+```bash
 cd /data/fastq
 bpm template render demux_bclconvert --out 251209_NB501289_0978_AHKWC7AFX7 --param bcl_dir=/data/raw/nextseq500_NB501289/251209_NB501289_0978_AHKWC7AFX7
 cd 251209_NB501289_0978_AHKWC7AFX7
@@ -13,7 +13,10 @@ bpm template run demux_bclconvert
 
 Example using the template's ad-hoc output resolver:
 ```bash
-bpm template render demux_bclconvert --bcl /data/raw/nextseq500_NB501289/260316_NB501289_0990_AHWCHKBGYX/ --adhoc --agendo-id 5425
+cd /data/fastq
+bpm template render demux_bclconvert --adhoc --bcl /data/raw/novaseq_A01742/260320_A01742_0619_AHHT35DRX7/ --agendo-id 5499
+cd 260320_A01742_0619_AHHT35DRX7
+bpm template run demux_bclconvert
 ```
 
 ## Export demultiplexing output
@@ -22,8 +25,10 @@ bpm workflow run export_demux --run-dir /data/fastq/251209_NB501289_0978_AHKWC7A
 ```
 
 ## Notes
-- Outputs land under the render directory (e.g., `output/` and `multiqc/`).
+- Outputs land under the render directory (for example `output/`, `multiqc/`, `results/`, and `bpm.meta.yaml` in ad-hoc mode).
+- The ad-hoc resolver derives the output directory from the basename of `bcl_dir` unless `--out` is given explicitly.
 - Runtime metadata is recorded in `results/run_info.yaml` (status, selected params, and software versions).
+- The API samplesheet hook runs at render time when `use_api_samplesheet=true`; API `404 Not Found` leaves the rendered `samplesheet.csv` in place and prints the API detail message.
 - `--run-dir` must be an absolute path that contains `output/` and `multiqc/`, or a
   `bpm.meta.yaml` with published paths.
 - For full parameter details, see

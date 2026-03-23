@@ -28,6 +28,16 @@ def _parse_flowcell_id(bcl_dir: str) -> str | None:
     return last[1:] if len(last) >= 2 and last[0].isalpha() else last
 
 
+def _extract_not_found_detail(resp) -> str | None:
+    try:
+        payload = resp.json()
+    except Exception:
+        return None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    detail = str(detail).strip() if detail is not None else ""
+    return detail or None
+
+
 def main(ctx) -> None:
     """
     Post-render hook: fetch samplesheet.csv from API into the run directory.
@@ -36,7 +46,8 @@ def main(ctx) -> None:
       - use_api_samplesheet (bool, default true): toggle on/off.
       - gf_api_name/gf_api_pass (params) or GF_API_NAME/GF_API_PASS (env): credentials.
 
-    Behavior: Fail-fast on any error (abort render).
+    Behavior: 404 responses are non-fatal and keep the rendered samplesheet; other
+    API and network errors abort the render.
     """
     use_api = bool((ctx.params or {}).get("use_api_samplesheet", True))
     if not use_api:
@@ -81,15 +92,34 @@ def main(ctx) -> None:
         raise RuntimeError(f"Network error fetching samplesheet: {e}")
 
     if resp.status_code != http.HTTPStatus.OK:
-        if resp.status_code == http.HTTPStatus.NOT_FOUND and agendo_id:
-            url = f"{API_BASE_REQUEST}{agendo_id}"
-            source_label = f"request {agendo_id}"
-            try:
-                resp = requests.get(url, auth=HTTPBasicAuth(user, pw), timeout=20)
-            except Exception as e:
-                raise RuntimeError(f"Network error fetching samplesheet: {e}")
-            if resp.status_code != http.HTTPStatus.OK:
-                raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
+        if resp.status_code == http.HTTPStatus.NOT_FOUND:
+            if agendo_id:
+                url = f"{API_BASE_REQUEST}{agendo_id}"
+                source_label = f"request {agendo_id}"
+                try:
+                    resp = requests.get(url, auth=HTTPBasicAuth(user, pw), timeout=20)
+                except Exception as e:
+                    raise RuntimeError(f"Network error fetching samplesheet: {e}")
+                if resp.status_code == http.HTTPStatus.NOT_FOUND:
+                    detail = _extract_not_found_detail(resp)
+                    if detail:
+                        print(f"[get_api_samplesheet] {detail}")
+                    else:
+                        print(
+                            f"[get_api_samplesheet] Warning: no samplesheet found in API for flowcell {flowcell} or request {agendo_id}; keeping rendered samplesheet.csv"
+                        )
+                    return
+                if resp.status_code != http.HTTPStatus.OK:
+                    raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
+            else:
+                detail = _extract_not_found_detail(resp)
+                if detail:
+                    print(f"[get_api_samplesheet] {detail}")
+                else:
+                    print(
+                        f"[get_api_samplesheet] Warning: no samplesheet found in API for flowcell {flowcell}; keeping rendered samplesheet.csv"
+                    )
+                return
         else:
             raise RuntimeError(f"HTTP {resp.status_code} from API for {source_label}")
 
