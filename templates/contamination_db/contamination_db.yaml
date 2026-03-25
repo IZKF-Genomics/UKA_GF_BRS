@@ -7,7 +7,7 @@ db_version: "v2026.03"
 threads: 32
 cleanup_staging: true
 force: false
-kraken2_base: "standard"
+kraken2_base: "none"
 kraken2_use_ftp: true
 
 build:

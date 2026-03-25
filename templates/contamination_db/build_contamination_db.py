@@ -94,8 +94,12 @@ def sha256sum(path: Path) -> str:
 
 
 def download_file(url: str, dest: Path, retries: int = 3, timeout: int = 120) -> tuple[str, str]:
-    print(f"Downloading           : {url}")
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        print(f"Using cached download : {dest}")
+        return url, sha256sum(dest)
+
+    print(f"Downloading           : {url}")
     tmp = dest.with_suffix(dest.suffix + ".part")
     request = urllib.request.Request(url, headers={"User-Agent": "UKA_GF_BRS contamination_db/2026.03.19"})
     last_error: Exception | None = None
@@ -199,7 +203,7 @@ def main() -> None:
     force = bool(cfg.get("force", False))
     cleanup = bool(cfg.get("cleanup_staging", True))
     threads = int(cfg.get("threads", 1))
-    kraken2_base = str(cfg.get("kraken2_base", "standard")).strip().lower()
+    kraken2_base = str(cfg.get("kraken2_base", "none")).strip().lower()
     kraken2_use_ftp = bool(cfg.get("kraken2_use_ftp", True))
     build_cfg = cfg.get("build", {}) or {}
     paths_cfg = cfg.get("paths", {}) or {}
@@ -267,7 +271,14 @@ def main() -> None:
         if kraken2_use_ftp:
             kraken_base_cmd.append("--use-ftp")
         if kraken2_base == "standard":
-            run(kraken_base_cmd + ["--standard", "--threads", str(max(1, threads)), "--db", str(kraken_dir)])
+            try:
+                run(kraken_base_cmd + ["--standard", "--threads", str(max(1, threads)), "--db", str(kraken_dir)])
+            except SystemExit as exc:
+                raise SystemExit(
+                    "kraken2-build --standard failed while downloading the upstream standard library. "
+                    "For this curated contamination panel, set kraken2_base: none in contamination_db.yaml "
+                    "to build from taxonomy plus the configured FASTAs only."
+                ) from exc
         elif kraken2_base == "none":
             run(kraken_base_cmd + ["--download-taxonomy", "--db", str(kraken_dir)])
         else:
@@ -339,7 +350,8 @@ def main() -> None:
     write_yaml(results_dir / "db_build_info.yaml", build_info)
 
     if cleanup:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(extracted_dir, ignore_errors=True)
+        shutil.rmtree(normalized_dir, ignore_errors=True)
 
     print("Resolved manifest     :", manifest_path)
     print("Build metadata        :", results_dir / "db_build_info.yaml")

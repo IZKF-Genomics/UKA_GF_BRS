@@ -16,6 +16,18 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+WORKFLOWS_DIR = Path(__file__).resolve().parents[1]
+if str(WORKFLOWS_DIR) not in sys.path:
+    sys.path.insert(0, str(WORKFLOWS_DIR))
+
+from archive_common import (
+    current_user as _shared_current_user,
+    load_active_keep_runs as _shared_load_active_keep_runs,
+    load_rules as _shared_load_rules,
+    save_rules as _shared_save_rules,
+    validate_keep_until as _shared_validate_keep_until,
+)
+
 DEFAULT_SOURCE_ROOT = "/data/raw"
 DEFAULT_TARGET_ROOT = "/mnt/nextgen2/archive/raw"
 DEFAULT_RETENTION_DAYS = 90
@@ -30,6 +42,24 @@ DEFAULT_INSTRUMENTS = [
 ]
 RUN_PREFIX_RE = re.compile(r"^(?P<prefix>\d{6})_")
 USE_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _workflow_public_id() -> str:
+    workflow_id = str(os.environ.get("BPM_WORKFLOW_ID") or "archive_rawdata").strip()
+    return workflow_id or "archive_rawdata"
+
+
+def _workflow_label() -> str:
+    return "archive_raw" if _workflow_public_id() == "archive_raw" else "archive_rawdata"
+
+
+def _workflow_manifest_prefix() -> str:
+    return "archive_raw" if _workflow_public_id() == "archive_raw" else "archive_rawdata"
+
+
+def _workflow_lock_path() -> Path:
+    # Keep one shared lock for both archive_raw and archive_rawdata aliases.
+    return Path("/tmp/archive_raw.lock")
 
 
 def _style(text: str, code: str) -> str:
@@ -74,6 +104,7 @@ class RunCandidate:
     target_instrument_path: Path
     target_run_path: Path
     size_bytes: int
+    kept_by_rule: bool = False
 
 
 def load_ctx() -> dict[str, Any]:
@@ -279,9 +310,8 @@ def _discover_candidates(
                 continue
             if entry.name in skip_runs:
                 continue
-            if entry.name in keep_run_ids:
-                continue
             try:
+                kept_by_rule = entry.name in keep_run_ids
                 size_bytes = _du_size_bytes(entry)
             except Exception as exc:  # noqa: BLE001
                 issues.append(f"Failed to calculate size for {entry}: {exc}")
@@ -299,6 +329,7 @@ def _discover_candidates(
                     target_instrument_path=dst_instrument,
                     target_run_path=dst_instrument / entry.name,
                     size_bytes=size_bytes,
+                    kept_by_rule=kept_by_rule,
                 )
             )
 
@@ -310,6 +341,205 @@ def _print_section(title: str) -> None:
     print("\n" + _title("=" * 80))
     print(_title(title))
     print(_title("=" * 80))
+
+
+def _run_archive_tui(candidates: list[RunCandidate], rules_path: Path) -> bool:
+    import curses
+
+    if not candidates:
+        return False
+
+    payload = _shared_load_rules(rules_path)
+    run_ids = [c.run_id for c in candidates]
+    existing = payload.get("runs") or {}
+    marked = {run_id: bool((existing.get(run_id) or {}).get("keep", False)) for run_id in run_ids}
+    keep_until = {run_id: (existing.get(run_id) or {}).get("keep_until") for run_id in run_ids}
+    set_by_map = {run_id: str((existing.get(run_id) or {}).get("set_by") or "-") for run_id in run_ids}
+
+    def _column_width(values: list[str], header: str, min_width: int = 0, max_width: int | None = None) -> int:
+        width = max([len(header), min_width, *(len(v) for v in values)], default=len(header))
+        if max_width is not None:
+            width = min(width, max_width)
+        return width
+
+    def _clip(value: str, width: int) -> str:
+        if width <= 0:
+            return ""
+        if len(value) <= width:
+            return value
+        if width == 1:
+            return value[:1]
+        return value[: width - 1] + "~"
+
+    def _save() -> int:
+        changed = 0
+        stamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        user = _shared_current_user()
+        runs = payload.setdefault("runs", {})
+        for candidate in candidates:
+            old = runs.get(candidate.run_id)
+            if marked.get(candidate.run_id, False):
+                rec = {
+                    "keep": True,
+                    "set_by": user,
+                    "set_at": stamp,
+                    "keep_until": keep_until.get(candidate.run_id) or None,
+                }
+                if old != rec:
+                    runs[candidate.run_id] = rec
+                    changed += 1
+            elif candidate.run_id in runs:
+                del runs[candidate.run_id]
+                changed += 1
+        _shared_save_rules(rules_path, payload)
+        return changed
+
+    def _curses_main(stdscr) -> tuple[bool, int]:
+        curses.curs_set(0)
+        stdscr.nodelay(False)
+        stdscr.keypad(True)
+        color_header = curses.A_BOLD
+        color_help = curses.A_DIM
+        color_row = curses.A_NORMAL
+        color_marked = curses.A_BOLD
+        color_selected = curses.A_REVERSE | curses.A_BOLD
+        color_status = curses.A_BOLD
+        color_summary = curses.A_DIM
+        if curses.has_colors():
+            try:
+                curses.start_color()
+                curses.use_default_colors()
+                curses.init_pair(1, curses.COLOR_CYAN, -1)
+                curses.init_pair(2, curses.COLOR_WHITE, -1)
+                curses.init_pair(3, curses.COLOR_GREEN, -1)
+                curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_CYAN)
+                curses.init_pair(5, curses.COLOR_YELLOW, -1)
+                color_header = curses.color_pair(1) | curses.A_BOLD
+                color_help = curses.color_pair(2) | curses.A_DIM
+                color_row = curses.color_pair(2)
+                color_marked = curses.color_pair(3) | curses.A_BOLD
+                color_selected = curses.color_pair(4) | curses.A_BOLD
+                color_status = curses.color_pair(5) | curses.A_BOLD
+                color_summary = curses.color_pair(2) | curses.A_DIM
+            except curses.error:
+                pass
+
+        idx = 0
+        top = 0
+        changed = False
+        owner_values = [c.owner_user for c in candidates]
+        inst_values = [c.instrument for c in candidates]
+        set_by_values = [set_by_map.get(c.run_id, "-") for c in candidates]
+
+        def _prompt_keep_until(current: str | None) -> str | None:
+            h, w = stdscr.getmaxyx()
+            prompt = "keep_until for selected run (YYYY-MM-DD, empty clears)"
+            while True:
+                curses.curs_set(1)
+                stdscr.move(h - 2, 0)
+                stdscr.clrtoeol()
+                stdscr.addnstr(h - 2, 0, prompt, w - 1)
+                stdscr.move(h - 1, 0)
+                stdscr.clrtoeol()
+                prefix = f"current={current} -> " if current else ""
+                if prefix:
+                    stdscr.addnstr(h - 1, 0, prefix, w - 1)
+                stdscr.refresh()
+                curses.echo()
+                raw = stdscr.getstr(h - 1, min(len(prefix), max(0, w - 2)), max(1, w - len(prefix) - 1))
+                curses.noecho()
+                try:
+                    return _shared_validate_keep_until(raw.decode("utf-8", errors="ignore").strip())
+                except SystemExit:
+                    stdscr.move(h - 1, 0)
+                    stdscr.clrtoeol()
+                    stdscr.addnstr(h - 1, 0, "Invalid date. Use YYYY-MM-DD.", w - 1, curses.A_BOLD)
+                    stdscr.refresh()
+                    curses.napms(900)
+                finally:
+                    curses.curs_set(0)
+
+        def _render(status: str = "") -> None:
+            nonlocal top
+            h, w = stdscr.getmaxyx()
+            stdscr.erase()
+            stdscr.addnstr(0, 0, f"{_workflow_label()} | archive candidates | runs={len(candidates)}".ljust(max(0, w - 1)), w - 1, color_header)
+            stdscr.addnstr(1, 0, "Only runs older than retention are shown. k: keep/unkeep  u: keep-until  s: save+continue  q: continue".ljust(max(0, w - 1)), w - 1, color_help)
+            list_top = 4
+            list_h = max(1, h - 6)
+            inst_col = _column_width(inst_values, "Instrument", min_width=10, max_width=24)
+            run_col = _column_width(run_ids, "Run ID", min_width=18, max_width=36)
+            owner_col = _column_width(owner_values, "Owner", min_width=5, max_width=12)
+            set_by_col = _column_width(set_by_values, "Set By", min_width=6, max_width=12)
+            row_fmt = f"{{keep:<4}} {{archive:<7}} {{inst:<{inst_col}}} {{run:<{run_col}}} {{owner:<{owner_col}}} {{ku:<10}} {{set_by:<{set_by_col}}} {{size:>10}}"
+            header = row_fmt.format(keep="Keep", archive="Archive", inst="Instrument", run="Run ID", owner="Owner", ku="Keep Until", set_by="Set By", size="Size")
+            stdscr.addnstr(3, 0, header.ljust(max(0, w - 1)), w - 1, color_help | curses.A_BOLD)
+            if idx < top:
+                top = idx
+            elif idx >= top + list_h:
+                top = idx - list_h + 1
+            for row in range(list_h):
+                pos = top + row
+                y = list_top + row
+                if pos >= len(candidates):
+                    stdscr.addnstr(y, 0, " " * max(0, w - 1), w - 1, color_row)
+                    continue
+                item = candidates[pos]
+                line = row_fmt.format(
+                    keep='yes' if marked.get(item.run_id, False) else 'no',
+                    archive='no' if marked.get(item.run_id, False) else 'yes',
+                    inst=_clip(item.instrument, inst_col),
+                    run=_clip(item.run_id, run_col),
+                    owner=_clip(item.owner_user, owner_col),
+                    ku=(keep_until.get(item.run_id) or '-'),
+                    set_by=_clip(set_by_map.get(item.run_id, '-'), set_by_col),
+                    size=_format_bytes(item.size_bytes),
+                )
+                attr = color_selected if pos == idx else (color_marked if marked.get(item.run_id, False) else color_row)
+                stdscr.addnstr(y, 0, line.ljust(max(0, w - 1)), w - 1, attr)
+            selected_count = sum(1 for c in candidates if not marked.get(c.run_id, False))
+            kept_count = len(candidates) - selected_count
+            stdscr.addnstr(h - 2, 0, f"Will archive: {selected_count}  Kept: {kept_count}  Unsaved changes: {'yes' if changed else 'no'}".ljust(max(0, w - 1)), w - 1, color_summary)
+            stdscr.addnstr(h - 1, 0, status.ljust(max(0, w - 1)), w - 1, color_status if status else color_row)
+            stdscr.refresh()
+
+        _render()
+        while True:
+            key = stdscr.getch()
+            if key == curses.KEY_UP:
+                idx = max(0, idx - 1)
+                _render()
+            elif key in (curses.KEY_DOWN, ord('j')):
+                idx = min(len(candidates) - 1, idx + 1)
+                _render()
+            elif key in (ord('k'), ord(' ')):
+                item = candidates[idx]
+                marked[item.run_id] = not marked.get(item.run_id, False)
+                changed = True
+                _render()
+            elif key == ord('u'):
+                item = candidates[idx]
+                keep_until[item.run_id] = _prompt_keep_until(keep_until.get(item.run_id))
+                if keep_until[item.run_id] is not None:
+                    marked[item.run_id] = True
+                changed = True
+                _render('keep_until updated')
+            elif key == ord('s'):
+                saved_changes = _save()
+                _render(f'Saved keep changes: {saved_changes}. Continuing...')
+                curses.napms(700)
+                return True, saved_changes
+            elif key == ord('q'):
+                if changed:
+                    _render('Unsaved changes. Press q again to discard and continue.')
+                    if stdscr.getch() == ord('q'):
+                        return False, 0
+                    _render()
+                    continue
+                return False, 0
+
+    saved, _ = curses.wrapper(_curses_main)
+    return saved
 
 
 def _print_plan(candidates: list[RunCandidate], retention_days: int, skip_runs: set[str], keep_run_ids: set[str]) -> None:
@@ -328,8 +558,9 @@ def _print_plan(candidates: list[RunCandidate], retention_days: int, skip_runs: 
     print("\nSelected runs:")
     run_col = max(32, min(50, max(len(c.run_id) for c in candidates) + 2))
     owner_col = max(8, min(14, max(len(c.owner_user) for c in candidates) + 2))
-    row_fmt = f"{{no:>4}}  {{inst:<24}} {{run:<{run_col}}}{{owner:<{owner_col}}}{{size:>12}}"
-    header = row_fmt.format(no="No.", inst="Instrument", run="Run ID", owner="Owner", size="Size")
+    status_col = 20
+    row_fmt = f"{{no:>4}}  {{inst:<24}} {{run:<{run_col}}}{{owner:<{owner_col}}}{{status:<{status_col}}}{{size:>12}}"
+    header = row_fmt.format(no="No.", inst="Instrument", run="Run ID", owner="Owner", status="Status", size="Size")
     print(_dim(header))
     print(_dim("-" * len(header)))
     for idx, item in enumerate(candidates, start=1):
@@ -339,13 +570,17 @@ def _print_plan(candidates: list[RunCandidate], retention_days: int, skip_runs: 
                 inst=item.instrument,
                 run=item.run_id,
                 owner=item.owner_user,
+                status="kept (not archived)" if item.kept_by_rule else "selected",
                 size=_format_bytes(item.size_bytes),
             )
         )
 
-    total = sum(c.size_bytes for c in candidates)
+    selected = [c for c in candidates if not c.kept_by_rule]
+    kept = [c for c in candidates if c.kept_by_rule]
+    total = sum(c.size_bytes for c in selected)
     print("\nSummary:")
-    print(_ok(f"- Run count: {len(candidates)}"))
+    print(_ok(f"- Selected run count: {len(selected)}"))
+    print(_warn(f"- Kept run count: {len(kept)}"))
     print(_ok(f"- Total size: {_format_bytes(total)}"))
 
 
@@ -369,7 +604,7 @@ def _interactive_overrides(
     instruments: list[str],
     skip_runs: set[str],
 ) -> tuple[str, str, int, list[str], set[str]]:
-    _print_section("archive_rawdata Interactive Setup")
+    _print_section(f"{_workflow_label()} Interactive Setup")
     print(_dim("Press Enter to keep defaults."))
 
     source_root = _input_with_default("Source root", source_root)
@@ -437,7 +672,7 @@ def _assert_writable_dir(path: Path) -> None:
     if not os.access(path, os.W_OK | os.X_OK):
         raise SystemExit(f"No write permission for target directory: {path}")
     try:
-        with tempfile.NamedTemporaryFile(prefix=".archive_rawdata_write_test_", dir=path, delete=True):
+        with tempfile.NamedTemporaryFile(prefix=f".{_workflow_manifest_prefix()}_write_test_", dir=path, delete=True):
             pass
     except Exception as exc:  # noqa: BLE001
         raise SystemExit(f"Cannot write to target directory {path}: {exc}") from exc
@@ -504,7 +739,25 @@ def _rsync_verify(candidate: RunCandidate) -> None:
 
 def _acquire_lock(lock_path: Path) -> int:
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-    fd = os.open(str(lock_path), flags)
+    try:
+        fd = os.open(str(lock_path), flags)
+    except FileExistsError:
+        try:
+            raw = lock_path.read_text(encoding="utf-8").strip()
+            pid = int(raw)
+        except Exception:
+            pid = None
+        if pid is not None:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                lock_path.unlink(missing_ok=True)
+                fd = os.open(str(lock_path), flags)
+            else:
+                raise
+        else:
+            lock_path.unlink(missing_ok=True)
+            fd = os.open(str(lock_path), flags)
     os.write(fd, str(os.getpid()).encode("utf-8"))
     return fd
 
@@ -596,6 +849,7 @@ def _parse_params() -> dict[str, Any]:
     parser.add_argument("--manifest-path", default="")
     parser.add_argument("--manifest-dir", default=DEFAULT_MANIFEST_DIR)
     parser.add_argument("--keep-rules-path", default=DEFAULT_KEEP_RULES_PATH)
+    parser.add_argument("--tui", nargs="?", const="true", default="true")
 
     if params:
         return params
@@ -616,6 +870,7 @@ def _parse_params() -> dict[str, Any]:
         "manifest_path": args.manifest_path,
         "manifest_dir": args.manifest_dir,
         "keep_rules_path": args.keep_rules_path,
+        "tui": args.tui,
     }
 
 
@@ -639,12 +894,13 @@ def main() -> None:
     manifest_path_raw = str(params.get("manifest_path") or "").strip()
     manifest_dir = Path(str(params.get("manifest_dir") or DEFAULT_MANIFEST_DIR)).expanduser().resolve()
     keep_rules_path = Path(str(params.get("keep_rules_path") or DEFAULT_KEEP_RULES_PATH)).expanduser().resolve()
+    tui = _parse_bool(params.get("tui"), True)
 
     if retention_days < 0:
         raise SystemExit("retention_days must be >= 0")
 
     if cleanup_requested:
-        print(_warn("[warning] cleanup in archive_rawdata is deprecated and ignored. Use archive_cleanup workflow."))
+        print(_warn(f"[warning] cleanup in {_workflow_label()} is deprecated and ignored. Use archive_cleanup workflow."))
 
     if non_interactive:
         interactive = False
@@ -667,10 +923,10 @@ def main() -> None:
         raise SystemExit(f"Source root not found or not a directory: {source_root_path}")
     if not target_root_path.exists() or not target_root_path.is_dir():
         raise SystemExit(f"Target root not found or not a directory: {target_root_path}")
-    keep_run_ids, keep_notes = _load_active_keep_runs(keep_rules_path)
+    keep_run_ids, keep_notes = _shared_load_active_keep_runs(keep_rules_path)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    default_manifest_path = manifest_dir / f"archive_rawdata_{timestamp}.json"
+    default_manifest_path = manifest_dir / f"{_workflow_manifest_prefix()}_{timestamp}.json"
     manifest_path = Path(manifest_path_raw).expanduser().resolve() if manifest_path_raw else default_manifest_path
     log_path = manifest_path.parent / f"{manifest_path.stem}.log"
 
@@ -702,29 +958,38 @@ def main() -> None:
         for note in keep_notes:
             print(_warn(f"- {note}"))
 
-    printed_plan = False
-    if interactive and sys.stdin.isatty():
-        _print_plan(candidates, retention_days, skip_runs, keep_run_ids)
-        printed_plan = True
-        skip_runs, skip_changed = _prompt_additional_skips(candidates, skip_runs)
-        if skip_changed:
-            candidates, issues2 = _discover_candidates(
-                source_root=source_root_path,
-                target_root=target_root_path,
-                instruments=instruments,
-                retention_days=retention_days,
-                skip_runs=skip_runs,
-                keep_run_ids=keep_run_ids,
-            )
-            if issues2:
-                _print_section("Discovery Notes (After Skip Updates)")
-                for issue in issues2:
-                    print(_warn(f"- {issue}"))
-            _print_plan(candidates, retention_days, skip_runs, keep_run_ids)
-    if not printed_plan:
+    if interactive and sys.stdin.isatty() and tui and candidates:
+        _run_archive_tui(candidates, keep_rules_path)
+        keep_run_ids, keep_notes = _shared_load_active_keep_runs(keep_rules_path)
+        candidates, issues = _discover_candidates(
+            source_root=source_root_path,
+            target_root=target_root_path,
+            instruments=instruments,
+            retention_days=retention_days,
+            skip_runs=skip_runs,
+            keep_run_ids=keep_run_ids,
+        )
+        if issues or keep_notes:
+            _print_section("Discovery Notes")
+            for issue in issues:
+                print(_warn(f"- {issue}"))
+            for note in keep_notes:
+                print(_warn(f"- {note}"))
+        _print_section("Archive Summary")
+        print(f"Retention days: {retention_days}")
+        print(f"Archive runs older than: {_compute_cutoff(retention_days).isoformat()} (strictly before this date)")
+        print(f"Runs protected by keep_rules: {len(keep_run_ids)}")
+        selected_candidates = [c for c in candidates if not c.kept_by_rule]
+        kept_candidates = [c for c in candidates if c.kept_by_rule]
+        print(_ok(f"Selected run count: {len(selected_candidates)}"))
+        print(_warn(f"Kept run count: {len(kept_candidates)}"))
+        print(_ok(f"Total size to archive: {_format_bytes(sum(c.size_bytes for c in selected_candidates))}"))
+    else:
         _print_plan(candidates, retention_days, skip_runs, keep_run_ids)
 
-    if not candidates:
+    selected_candidates = [c for c in candidates if not c.kept_by_rule]
+
+    if not selected_candidates:
         print(_warn("\nNothing to archive. Exiting."))
         return
 
@@ -734,14 +999,14 @@ def main() -> None:
         if not _input_yes_no("Proceed with archive/copy/verify sequence for all selected runs?", default_yes=False):
             raise SystemExit("Cancelled by user.")
 
-    lock_path = Path("/tmp/archive_rawdata.lock")
+    lock_path = _workflow_lock_path()
     try:
         lock_fd = _acquire_lock(lock_path)
     except FileExistsError:
-        raise SystemExit(f"Another archive_rawdata process is running (lock exists: {lock_path})")
+        raise SystemExit(f"Another {_workflow_label()} process is running (lock exists: {lock_path})")
 
     metadata: dict[str, Any] = {
-        "workflow_id": "archive_rawdata",
+        "workflow_id": _workflow_public_id(),
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "source_root": str(source_root_path),
         "target_root": str(target_root_path),
@@ -760,13 +1025,13 @@ def main() -> None:
     verify_failures = 0
 
     try:
-        required = sum(c.size_bytes for c in candidates)
+        required = sum(c.size_bytes for c in selected_candidates)
         _ensure_target_free_space(target_root_path, required, min_free_gb)
-        _preflight_target_paths(target_root_path, candidates)
+        _preflight_target_paths(target_root_path, selected_candidates)
 
-        _append_log(log_path, f"archive_rawdata start: runs={len(candidates)} total_size={required}")
+        _append_log(log_path, f"{_workflow_public_id()} start: runs={len(selected_candidates)} total_size={required}")
 
-        for candidate in candidates:
+        for candidate in selected_candidates:
             rec: dict[str, Any] = {
                 "instrument": candidate.instrument,
                 "run_id": candidate.run_id,
@@ -826,7 +1091,7 @@ def main() -> None:
 
         _append_log(
             log_path,
-            f"archive_rawdata done: processed={len(records)} copy_failures={copy_failures} verify_failures={verify_failures}",
+            f"{_workflow_public_id()} done: processed={len(records)} copy_failures={copy_failures} verify_failures={verify_failures}",
         )
 
         _print_section("Done")

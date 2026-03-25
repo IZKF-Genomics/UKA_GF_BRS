@@ -1,9 +1,8 @@
 # Workflow: archive_fastq
-# Archive old FASTQ run directories with rsync and verification.
-# This workflow does not delete source data; use archive_cleanup for deletion.
+# Archive old FASTQ run directories with rsync, verification, and post-verify cleanup.
 
 id: archive_fastq
-description: "Archive old FASTQ run directories and write a cleanup manifest."
+description: "Archive old FASTQ run directories, verify them, and then remove the original source run directory."
 
 params:
   source_root:
@@ -58,7 +57,13 @@ params:
     cli: "--dry-run"
     required: false
     default: false
-    description: "Plan only; do not copy."
+    description: "Plan only; do not copy or clean."
+  cleanup:
+    type: bool
+    cli: "--cleanup"
+    required: false
+    default: true
+    description: "Remove the source run directory after successful archive verification. Set false for archive-only mode."
   min_free_gb:
     type: int
     required: false
@@ -78,7 +83,13 @@ params:
     cli: "--keep-rules-path"
     required: false
     default: "/data/shared/bpm_manifests/keep_rules.yaml"
-    description: "YAML keep-rules file; active keep entries are excluded from archive selection."
+    description: "YAML keep-rules file used by the integrated TUI and archive selection."
+  tui:
+    type: bool
+    cli: "--tui"
+    required: false
+    default: true
+    description: "Open the integrated keep-rules TUI before planning when interactive=true."
   investigate:
     type: str
     cli: "--investigate"
@@ -95,8 +106,8 @@ params:
     type: str
     cli: "--exclude-patterns"
     required: false
-    default: "*.fastq.gz,*.fq.gz,.pixi,work,.renv,.Rproj.user,.nextflow,.nextflow.log*"
-    description: "Comma-separated rsync exclude patterns. Default excludes preserve FASTQs and workflow/runtime caches."
+    default: "*.fastq.gz,*.fq.gz,.pixi,work,.renv,.Rproj.user,.nextflow,.nextflow.log*,nohup.out,Logs,Reports"
+    description: "Comma-separated rsync exclude patterns for archive copy/verify. Excluded files are still removed when cleanup is enabled."
 
 run:
   entry: "run.py"

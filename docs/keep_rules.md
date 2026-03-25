@@ -1,97 +1,56 @@
 # Keep Rules
 
-This guide explains how to protect selected runs from `archive_rawdata`, `archive_fastq`, `clean_fastq`, and `archive_cleanup`.
+This guide explains how to protect selected runs from `archive_raw` and `archive_fastq`.
 
 Default rules file:
 - `/data/shared/bpm_manifests/keep_rules.yaml`
 
 ## What Keep Rules Do
-- If a run ID is in keep rules and active, archive/cleanup workflows skip it.
+- If a run ID is in keep rules and active, archive workflows skip it.
 - Active means:
   - `keep: true`
   - `keep_until` is empty, or `keep_until >= today`
 - Each entry records `set_by` and `set_at`.
 
-## 1) TUI Mode (Recommended)
-Run:
+## 1) Integrated TUI Mode (Recommended)
+
+Keep rules are normally edited inside:
 ```bash
-bpm workflow run keep_rules
+bpm workflow run archive_raw
+bpm workflow run archive_fastq
 ```
 
 Flow:
-1. choose browse root (`/data/fastq`, `/data/projects`, `/data/raw`, or custom)
-2. in TUI, navigate and mark runs
-3. save changes
+1. open the archive workflow
+2. review the single archive-candidate list
+3. toggle keep status or set `keep_until`
+4. save and continue
 
 TUI keys:
-- `Up/Down` or `k/j`: move
-- `Space`: toggle keep on selected row
+- `Up/Down` or `j`: move
+- `k`: toggle keep on selected row
 - `u`: set `keep_until` (`YYYY-MM-DD`, empty clears)
-- `s`: save
+- `s`: save and continue
 - `q`: quit
 
 Columns shown:
-- `Sel`
+- `Keep`
+- `Archive`
 - `Run ID`
+- `Owner`
 - `Keep Until`
 - `Set By`
 
-## 2) Direct CLI Mode
+`archive_fastq` may also show cleanup-only rows when the run is already archived on the target and only source removal remains.
 
-List:
-```bash
-bpm workflow run keep_rules --action list
-```
+## 2) Rules File
 
-Add:
-```bash
-# one run
-bpm workflow run keep_rules --action add --run-id 241120_A01742_0328_AHYC2WDMXY
+The rules are stored in:
+- `/data/shared/bpm_manifests/keep_rules.yaml`
 
-# multiple runs
-bpm workflow run keep_rules --action add --run-ids 250704_A01742_0465_AH227MDSXF,250818_LH00452_0279_B22YHHTLT4_6
+The archive workflows read this file automatically and update it when you save from the TUI.
 
-# with expiry
-bpm workflow run keep_rules --action add --run-id 241120_A01742_0328_AHYC2WDMXY --keep-until 2026-12-31
-```
-
-Remove:
-```bash
-# one run
-bpm workflow run keep_rules --action remove --run-id 241120_A01742_0328_AHYC2WDMXY
-
-# multiple runs
-bpm workflow run keep_rules --action remove --run-ids 250704_A01742_0465_AH227MDSXF,250818_LH00452_0279_B22YHHTLT4_6
-```
-
-Prompt browser (non-TUI):
-```bash
-bpm workflow run keep_rules --tui false --action add
-bpm workflow run keep_rules --tui false --action remove
-```
-
-## 3) Prune Stale Entries
-Preview:
-```bash
-bpm workflow run keep_rules --action prune
-```
-
-Apply:
-```bash
-bpm workflow run keep_rules --action prune --apply true --yes true
-```
-
-Custom roots:
-```bash
-bpm workflow run keep_rules --action prune --source-roots /data/raw,/data/fastq,/data/projects
-```
-
-## 4) Override Rules File Path
-```bash
-bpm workflow run keep_rules --action list --rules-path /data/shared/bpm_manifests/keep_rules.yaml
-```
-
-## 5) Example YAML
+## 3) Example YAML
 ```yaml
 schema_version: 1
 updated_at: "2026-03-12T12:00:00+01:00"
@@ -109,6 +68,5 @@ runs:
 ```
 
 ## Notes
-- If TUI cannot run (no TTY), workflow falls back to list mode.
 - `set_by` uses `SUDO_USER` first, then `USER`.
 - Keep rules are evaluated by run ID, not by full path.

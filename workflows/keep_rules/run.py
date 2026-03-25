@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from metadata import RunFolderInfo, build_run_folder_info
 
 DEFAULT_RULES_PATH = "/data/shared/bpm_manifests/keep_rules.yaml"
 DEFAULT_SOURCE_ROOTS = "/data/raw,/data/fastq"
@@ -181,8 +182,8 @@ def _save_rules(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
-def _discover_run_ids(source_roots: list[Path]) -> tuple[set[str], list[str]]:
-    found: set[str] = set()
+def _discover_runs(source_roots: list[Path]) -> tuple[dict[str, RunFolderInfo], list[str]]:
+    found: dict[str, RunFolderInfo] = {}
     notes: list[str] = []
 
     for root in source_roots:
@@ -194,14 +195,14 @@ def _discover_run_ids(source_roots: list[Path]) -> tuple[set[str], list[str]]:
             if not entry.is_dir():
                 continue
             if RUN_PREFIX_RE.match(entry.name):
-                found.add(entry.name)
+                found.setdefault(entry.name, build_run_folder_info(entry.name, entry))
                 continue
             # Scan one more level (instrument -> run).
             for sub in entry.iterdir():
                 if not sub.is_dir():
                     continue
                 if RUN_PREFIX_RE.match(sub.name):
-                    found.add(sub.name)
+                    found.setdefault(sub.name, build_run_folder_info(sub.name, sub))
     return found, notes
 
 
@@ -232,8 +233,25 @@ def _parse_index_selection(raw: str, max_index: int) -> list[int]:
     return sorted(picks)
 
 
+def _column_width(values: list[str], header: str, min_width: int = 0, max_width: int | None = None) -> int:
+    width = max([len(header), min_width, *(len(value) for value in values)], default=len(header))
+    if max_width is not None:
+        width = min(width, max_width)
+    return width
+
+
+def _clip_text(value: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(value) <= width:
+        return value
+    if width == 1:
+        return value[:1]
+    return value[: width - 1] + "~"
+
+
 def _prompt_select_run_ids(source_roots: list[Path]) -> list[str]:
-    discovered, notes = _discover_run_ids(source_roots)
+    discovered, notes = _discover_runs(source_roots)
     for note in notes:
         print(_warn(f"- {note}"))
 
@@ -252,8 +270,32 @@ def _prompt_select_run_ids(source_roots: list[Path]) -> list[str]:
 
     _print_section("Run Browser")
     print(f"Discovered runs: {len(pool)}")
+    show_project_id = any(discovered[run_id].project_id for run_id in pool)
+    run_col = _column_width(pool, "Run ID", min_width=6)
+    owner_col = _column_width([discovered[run_id].owner for run_id in pool], "Owner", min_width=5)
+    project_col = 0
+    if show_project_id:
+        project_col = _column_width(
+            [discovered[run_id].project_id or "-" for run_id in pool],
+            "Project ID",
+            min_width=10,
+        )
+
+    index_col = max(len(str(len(pool))) + 1, len("#"))
+    header_parts = [f"{'#':>{index_col}}", f"{'Run ID':<{run_col}}", f"{'Owner':<{owner_col}}"]
+    if show_project_id:
+        header_parts.append(f"{'Project ID':<{project_col}}")
+    header_parts.append("Path")
+    header = "  ".join(header_parts)
+    print(_dim(header))
+    print(_dim("-" * len(header)))
     for i, run_id in enumerate(pool, start=1):
-        print(f"{i:>4}. {run_id}")
+        info = discovered[run_id]
+        line_parts = [f"{(str(i) + '.'):>{index_col}}", f"{run_id:<{run_col}}", f"{info.owner:<{owner_col}}"]
+        if show_project_id:
+            line_parts.append(f"{(info.project_id or '-'): <{project_col}}")
+        line_parts.append(str(info.path))
+        print("  ".join(line_parts))
 
     while True:
         select_raw = _input_with_default(
@@ -332,7 +374,7 @@ def _apply_remove(payload: dict[str, Any], run_ids: list[str]) -> int:
 
 def _prune_candidates(payload: dict[str, Any], source_roots: list[Path]) -> tuple[list[str], list[str]]:
     runs = payload.get("runs") or {}
-    existing, notes = _discover_run_ids(source_roots)
+    existing, notes = _discover_runs(source_roots)
     stale = sorted([run_id for run_id in runs if run_id not in existing])
     return stale, notes
 
@@ -340,7 +382,7 @@ def _prune_candidates(payload: dict[str, Any], source_roots: list[Path]) -> tupl
 def _run_keep_tui(payload: dict[str, Any], rules_path: Path, browse_root: Path) -> None:
     import curses
 
-    discovered, notes = _discover_run_ids([browse_root])
+    discovered, notes = _discover_runs([browse_root])
     if notes:
         for note in notes:
             print(_warn(f"- {note}"))
@@ -350,6 +392,9 @@ def _run_keep_tui(payload: dict[str, Any], rules_path: Path, browse_root: Path) 
 
     runs = sorted(discovered)
     existing = payload.get("runs") or {}
+    show_project_id = any(info.project_id for info in discovered.values())
+    owner_values = [discovered[run_id].owner for run_id in runs]
+    project_values = [discovered[run_id].project_id or "-" for run_id in runs] if show_project_id else []
 
     marked: dict[str, bool] = {run_id: bool((existing.get(run_id) or {}).get("keep", False)) for run_id in runs}
     keep_until: dict[str, str | None] = {
@@ -435,9 +480,36 @@ def _run_keep_tui(payload: dict[str, Any], rules_path: Path, browse_root: Path) 
 
             list_top = 4
             list_h = max(1, h - 6)
-            run_col = max(20, min(48, w - 32))
-            row_fmt = f"{{sel:<3}} {{run:<{run_col}}} {{ku:<10}} {{set_by}}"
-            list_header = row_fmt.format(sel="Sel", run="Run ID", ku="Keep Until", set_by="Set By")
+            owner_col = _column_width(owner_values, "Owner", min_width=5, max_width=16)
+            set_by_col = _column_width(
+                [set_by_map.get(run_id, "-") for run_id in runs],
+                "Set By",
+                min_width=6,
+                max_width=20,
+            )
+            project_col = 0
+            if show_project_id:
+                project_col = _column_width(project_values, "Project ID", min_width=10, max_width=36)
+            sep_count = 5 if show_project_id else 4
+            fixed_non_run = 3 + owner_col + project_col + 10 + set_by_col + sep_count
+            available_for_run = max(12, w - fixed_non_run - 1)
+            run_col = min(_column_width(runs, "Run ID", min_width=12), available_for_run)
+            if show_project_id:
+                row_fmt = (
+                    f"{{sel:<3}} {{run:<{run_col}}} {{owner:<{owner_col}}} "
+                    f"{{project:<{project_col}}} {{ku:<10}} {{set_by:<{set_by_col}}}"
+                )
+                list_header = row_fmt.format(
+                    sel="Sel",
+                    run="Run ID",
+                    owner="Owner",
+                    project="Project ID",
+                    ku="Keep Until",
+                    set_by="Set By",
+                )
+            else:
+                row_fmt = f"{{sel:<3}} {{run:<{run_col}}} {{owner:<{owner_col}}} {{ku:<10}} {{set_by:<{set_by_col}}}"
+                list_header = row_fmt.format(sel="Sel", run="Run ID", owner="Owner", ku="Keep Until", set_by="Set By")
             stdscr.addnstr(3, 0, list_header.ljust(max(0, w - 1)), w - 1, color_help | curses.A_BOLD)
             if idx < top:
                 top = idx
@@ -452,9 +524,27 @@ def _run_keep_tui(payload: dict[str, Any], rules_path: Path, browse_root: Path) 
                     continue
                 run_id = runs[pos]
                 mark = "[x]" if marked.get(run_id, False) else "[ ]"
+                owner = _clip_text(discovered[run_id].owner, owner_col)
+                project_id = _clip_text(discovered[run_id].project_id or "-", project_col) if show_project_id else "-"
                 ku = keep_until.get(run_id) or "-"
-                set_by = set_by_map.get(run_id, "-")
-                line = row_fmt.format(sel=mark, run=run_id, ku=ku, set_by=set_by)
+                set_by = _clip_text(set_by_map.get(run_id, "-"), set_by_col)
+                if show_project_id:
+                    line = row_fmt.format(
+                        sel=mark,
+                        run=_clip_text(run_id, run_col),
+                        owner=owner,
+                        project=project_id,
+                        ku=ku,
+                        set_by=set_by,
+                    )
+                else:
+                    line = row_fmt.format(
+                        sel=mark,
+                        run=_clip_text(run_id, run_col),
+                        owner=owner,
+                        ku=ku,
+                        set_by=set_by,
+                    )
                 attr = color_selected if pos == idx else (color_marked if marked.get(run_id, False) else color_row)
                 stdscr.addnstr(y, 0, line.ljust(max(0, w - 1)), w - 1, attr)
 
