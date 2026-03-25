@@ -142,10 +142,14 @@ if [[ -f results/bracken_read_length.txt ]]; then
   echo "resolved_bracken_read_length: \"$(tr -d '\r\n' < results/bracken_read_length.txt)\"" >> results/run_info.yaml
 fi
 
-# Summarise everything with MultiQC once fastqs are ready.
+# Summarise only generated result directories with MultiQC.
 echo "Starting MultiQC"
 mkdir -p multiqc
-pixi run multiqc -f . -o multiqc
+multiqc_targets=("output" "falco")
+[[ -d fastq_screen ]] && multiqc_targets+=("fastq_screen")
+[[ -d kraken2 ]] && multiqc_targets+=("kraken2")
+[[ -d bracken ]] && multiqc_targets+=("bracken")
+pixi run multiqc -f "${multiqc_targets[@]}" -o multiqc
 
 # Clean up intermediate directories
 echo "Cleaning intermediates"

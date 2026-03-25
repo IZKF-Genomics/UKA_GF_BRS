@@ -138,6 +138,15 @@ def run_quiet_cmd(label: str, cmd: list[str]) -> None:
         raise RuntimeError(f"{label} failed ({proc.returncode}): {' '.join(cmd)}")
 
 
+def fastq_output_stem(fq: str) -> str:
+    path = Path(fq)
+    name = path.name
+    for suffix in (".fastq.gz", ".fq.gz", ".fastq", ".fq"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return path.stem
+
+
 def run_falco(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
@@ -152,9 +161,11 @@ def run_falco(rows: list[dict[str, str]], threads: int, out_dir: Path) -> None:
 
     def worker(index: int, fq: str) -> None:
         print(f"Falco progress        : {index}/{total} {Path(fq).name}")
+        sample_out_dir = out_dir / fastq_output_stem(fq)
+        sample_out_dir.mkdir(parents=True, exist_ok=True)
         run_quiet_cmd(
             "falco",
-            ["falco", fq, "-o", str(out_dir)],
+            ["falco", fq, "-o", str(sample_out_dir)],
         )
 
     with ThreadPoolExecutor(max_workers=max(1, threads)) as ex:
