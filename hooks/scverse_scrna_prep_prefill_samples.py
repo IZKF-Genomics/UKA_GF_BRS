@@ -73,6 +73,16 @@ def _infer_sample_ids_from_input_params(ctx: Any) -> list[str]:
     lower = name.lower()
 
     if local_path.is_dir():
+        if name == "per_sample_outs":
+            sample_ids: list[str] = []
+            for child in sorted(local_path.iterdir()):
+                if not child.is_dir():
+                    continue
+                count_dir = child / "count"
+                if count_dir.is_dir():
+                    sample_ids.append(child.name)
+            if sample_ids:
+                return sample_ids
         if name in {"filtered_feature_bc_matrix", "raw_feature_bc_matrix"} and local_path.parent.name:
             return [local_path.parent.name]
         return [name]

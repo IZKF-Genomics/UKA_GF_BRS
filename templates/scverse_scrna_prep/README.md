@@ -73,10 +73,23 @@ Direct manual inputs are also supported:
 - `--param input_matrix=/path/to/file.h5ad`
 - `--param input_matrix=/path/to/filtered_feature_bc_matrix.h5`
 - `--param input_matrix=/path/to/filtered_feature_bc_matrix`
+- `--param input_matrix=/path/to/per_sample_outs`
 - `--param input_matrix=/path/to/parsebio/output --param input_format=parsebio`
 - `--param input_matrix=/path/to/scalebio/output --param input_format=scalebio`
 
-Set `--param input_format=auto|h5ad|10x_h5|10x_mtx|parsebio|scalebio` when auto-detection is not sufficient.
+Recommended usage:
+- For multi-sample analysis, prefer one combined `.h5ad` that already preserves
+  sample-level metadata such as `sample_id`, `batch`, or `condition`.
+- Use direct Cell Ranger per-sample outputs for single-sample runs.
+- A Cell Ranger `per_sample_outs/` directory is supported for direct multi-sample
+  input and is loaded by concatenating each `count/sample_filtered_feature_bc_matrix.h5`
+  while preserving `sample_id`.
+- Treat a Cell Ranger aggregated `filtered_feature_bc_matrix/` directory as a
+  counts input only. It is acceptable when you already have matching sample
+  annotations elsewhere, but by itself it does not reliably preserve sample
+  identity inside the loaded AnnData object.
+
+Set `--param input_format=auto|h5ad|10x_h5|10x_mtx|parsebio|scalebio|cellranger_per_sample_outs` when auto-detection is not sufficient.
 In practice, `parsebio` is auto-detected from its directory structure, while `scalebio`
 often still benefits from an explicit `--param input_format=scalebio` because its file
 layout can overlap with generic MTX-style outputs.
@@ -142,7 +155,9 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 - `config/project.toml`: analysis configuration written at render time
 - `config/samples.csv`: editable sample metadata scaffold; post-render hook pre-fills `sample_id`
   from `nfcore_scrnaseq.published.nfcore_samplesheet` when available and otherwise
-  falls back to the direct input name; `sample_label` can be used to rename report-facing labels
+  falls back to the direct input name; `sample_label` can be used to rename report-facing labels.
+  When using direct aggregated 10x input, review this file carefully because sample names are
+  not inferred from `aggregation.csv`.
 - `00_qc.qmd`: Quarto notebook containing the preprocessing logic and report
 
 ## Outputs
@@ -170,6 +185,11 @@ bpm template run scverse_scrna_prep --dir /path/to/project
 - Input provenance is recorded in the rendered config/report via
   `input_source_template`, `ambient_correction_applied`, and
   `ambient_correction_method`.
+- For multi-sample direct 10x inputs, this template works best when the input
+  already carries sample annotations in `adata.obs` or when you provide an
+  external `sample_metadata` table that matches an existing sample identifier
+  column. A plain aggregated Cell Ranger MTX directory does not add those
+  columns on its own.
 - Scrublet support is fully Python-native. Ambient RNA correction from the older
   R-based template is not performed inside this template; use an upstream
   `cellbender_remove_background` template when available.

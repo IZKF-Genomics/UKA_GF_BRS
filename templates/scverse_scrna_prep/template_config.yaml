@@ -13,7 +13,7 @@ params:
     cli: "--input-matrix"
     required: false
     default: ""
-    description: "General input path for direct loading of H5AD, Cell Ranger .h5, or 10x matrix directory"
+    description: "General input path for direct loading of H5AD, Cell Ranger .h5, 10x matrix directory, or Cell Ranger per_sample_outs directory; for multi-sample runs prefer a combined H5AD when available"
   input_source_template:
     type: str
     cli: "--input-source-template"
@@ -37,7 +37,7 @@ params:
     cli: "--input-format"
     required: false
     default: "auto"
-    description: "Input format: auto, h5ad, 10x_h5, 10x_mtx, parsebio, or scalebio"
+    description: "Input format: auto, h5ad, 10x_h5, 10x_mtx, parsebio, scalebio, or cellranger_per_sample_outs"
   var_names:
     type: str
     cli: "--var-names"
@@ -49,7 +49,7 @@ params:
     cli: "--sample-metadata"
     required: false
     default: ""
-    description: "Optional sample metadata CSV with a sample_id column; defaults to config/samples.csv scaffold"
+    description: "Optional sample metadata CSV with a sample_id column; defaults to config/samples.csv scaffold and is especially important when direct 10x input does not already carry sample annotations"
   organism:
     type: str
     cli: "--organism"

@@ -19,12 +19,10 @@ format:
     fig-width: 10
     fig-height: 5
 execute:
-  echo: true
+  echo: false
   warning: false
   message: false
 ---
-
-## Setup
 
 ```{python}
 from pathlib import Path
@@ -42,6 +40,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
+from IPython.display import Markdown, display
 from plotly.subplots import make_subplots
 from scipy import sparse
 from scipy.stats import median_abs_deviation
@@ -112,6 +111,16 @@ def first_existing(*paths: Path) -> Path | None:
 
 def detect_input_format(path: Path) -> str:
     if path.is_dir():
+        if path.name == "per_sample_outs":
+            for child in sorted(path.iterdir()):
+                if not child.is_dir():
+                    continue
+                count_dir = child / "count"
+                if first_existing(
+                    count_dir / "sample_filtered_feature_bc_matrix.h5",
+                    count_dir / "sample_raw_feature_bc_matrix.h5",
+                ):
+                    return "cellranger_per_sample_outs"
         if first_existing(path / "count_matrix.mtx", path / "count_matrix.mtx.gz") and first_existing(
             path / "all_genes.csv", path / "all_genes.csv.gz"
         ):
@@ -233,6 +242,23 @@ def resolve_leiden_resolution(raw_value: str, n_cells: int) -> tuple[float, str]
     return 1.0, "auto"
 
 
+def describe_leiden_resolution_choice(resolution: float, source: str, n_cells: int) -> str:
+    if source == "manual":
+        return f"Leiden resolution {resolution:.2f} was selected manually from the project configuration."
+    if n_cells < 2000:
+        rule = "fewer than 2,000 retained cells -> 0.40"
+    elif n_cells < 10000:
+        rule = "2,000 to 9,999 retained cells -> 0.60"
+    elif n_cells < 50000:
+        rule = "10,000 to 49,999 retained cells -> 0.80"
+    else:
+        rule = "50,000 or more retained cells -> 1.00"
+    return (
+        f"Leiden resolution {resolution:.2f} was selected automatically because the filtered object contains "
+        f"{n_cells:,} cells; the current heuristic is {rule}."
+    )
+
+
 def parse_resolution_grid(raw: str, include_value: float) -> list[float]:
     values: list[float] = []
     for part in str(raw).split(","):
@@ -295,6 +321,40 @@ def read_scalebio(data_path: Path, var_names: str):
     return adata
 
 
+def read_cellranger_per_sample_outs(data_path: Path):
+    adatas = []
+    found_inputs = []
+    for child in sorted(data_path.iterdir()):
+        if not child.is_dir():
+            continue
+        sample_id = child.name
+        count_dir = child / "count"
+        h5_path = first_existing(
+            count_dir / "sample_filtered_feature_bc_matrix.h5",
+            count_dir / "sample_raw_feature_bc_matrix.h5",
+        )
+        if h5_path is None:
+            continue
+        adata = sc.read_10x_h5(h5_path)
+        adata.var_names_make_unique()
+        adata.obs_names = pd.Index([f"{sample_id}:{bc}" for bc in adata.obs_names.astype(str)])
+        adata.obs["sample_id"] = sample_id
+        adata.obs["library_id"] = sample_id
+        adata.obs["batch"] = sample_id
+        adatas.append(adata)
+        found_inputs.append(str(h5_path))
+
+    if not adatas:
+        raise RuntimeError(
+            f"Cell Ranger per_sample_outs directory is incomplete: {data_path}. "
+            "Expected child folders with count/sample_filtered_feature_bc_matrix.h5."
+        )
+
+    combined = sc.concat(adatas, join="outer", merge="same")
+    combined.uns["input_member_paths"] = found_inputs
+    return combined
+
+
 def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_names: str):
     chosen = str(input_matrix).strip() or str(input_h5ad).strip()
     if not chosen:
@@ -306,9 +366,9 @@ def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_
     fmt = str(input_format).strip().lower() or "auto"
     if fmt == "auto":
         fmt = detect_input_format(input_path)
-    if fmt not in {"h5ad", "10x_h5", "10x_mtx", "parsebio", "scalebio"}:
+    if fmt not in {"h5ad", "10x_h5", "10x_mtx", "parsebio", "scalebio", "cellranger_per_sample_outs"}:
         raise RuntimeError(
-            f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx, parsebio, scalebio."
+            f"Could not determine input format for '{input_path}'. Set input_format to one of: h5ad, 10x_h5, 10x_mtx, parsebio, scalebio, cellranger_per_sample_outs."
         )
     var_choice = str(var_names).strip() or "gene_symbols"
     if var_choice not in {"gene_symbols", "gene_ids"}:
@@ -320,6 +380,8 @@ def load_input_adata(input_h5ad: str, input_matrix: str, input_format: str, var_
         adata = sc.read_10x_h5(input_path)
     elif fmt == "10x_mtx":
         adata = sc.read_10x_mtx(input_path, var_names=var_choice, make_unique=True)
+    elif fmt == "cellranger_per_sample_outs":
+        adata = read_cellranger_per_sample_outs(input_path)
     elif fmt == "parsebio":
         adata = read_parsebio(input_path)
     else:
@@ -413,7 +475,7 @@ def compare_metric_figure(long_df: pd.DataFrame, metric: str, label: str) -> go.
                 opacity=0.75,
                 nbinsx=60,
                 legendgroup=stage,
-                showlegend=(idx == 1),
+                showlegend=True,
             ),
             row=1,
             col=1,
@@ -428,21 +490,14 @@ def compare_metric_figure(long_df: pd.DataFrame, metric: str, label: str) -> go.
                 line=dict(color=STAGE_COLORS[stage]),
                 box_visible=True,
                 meanline_visible=True,
-                points="outliers",
+                points=False,
                 showlegend=False,
             ),
             row=1,
             col=2,
         )
-    fig.update_layout(
-        template="simple_white",
-        barmode="overlay",
-        height=420,
-        title=f"{label}: before vs after filtering",
-        legend=dict(orientation="h", y=1.12, x=0),
-        font=dict(size=14),
-        margin=dict(l=40, r=30, t=80, b=40),
-    )
+    apply_standard_figure_layout(fig, height=420, title=f"{label}: before vs after filtering", right_margin=40)
+    fig.update_layout(barmode="overlay")
     fig.update_xaxes(title_text=label, row=1, col=1)
     fig.update_yaxes(title_text="Cell count", row=1, col=1)
     fig.update_xaxes(title_text="", row=1, col=2, categoryorder="array", categoryarray=STAGE_ORDER)
@@ -461,18 +516,10 @@ def compare_sample_metric(sample_compare_df: pd.DataFrame, metric: str, label: s
                 name=stage,
                 marker_color=STAGE_COLORS[stage],
                 boxmean=True,
-                boxpoints="outliers",
-                jitter=0.25,
+                boxpoints=False,
             )
         )
-    fig.update_layout(
-        template="simple_white",
-        height=420,
-        title=f"{label}: sample-level before vs after filtering",
-        font=dict(size=14),
-        margin=dict(l=40, r=30, t=80, b=40),
-        showlegend=False,
-    )
+    apply_standard_figure_layout(fig, height=420, title=f"{label}: sample-level before vs after filtering", show_legend=False, right_margin=40)
     fig.update_xaxes(categoryorder="array", categoryarray=STAGE_ORDER, title_text="")
     fig.update_yaxes(title_text=label)
     return fig
@@ -496,14 +543,21 @@ def embedding_plot(adata, basis: str, color_key: str, title: str) -> go.Figure:
         opacity=0.8,
         color_discrete_sequence=QUALITATIVE_SEQUENCE,
     )
-    fig.update_traces(marker=dict(size=5), selector=dict(mode="markers"))
-    fig.update_layout(height=560, font=dict(size=14), legend=dict(orientation="h"))
+    fig.update_traces(marker=dict(size=4, opacity=0.75), selector=dict(mode="markers"))
+    apply_standard_figure_layout(fig, height=620, title=title)
     return fig
 
 
 def confounder_scatter(long_df: pd.DataFrame, x: str, y: str, color_key: str, title: str) -> go.Figure:
-    plot_df = long_df[[x, y, "stage", "sample_display", "sample_id", color_key]].copy()
+    keep_cols = [x, y, "stage", "sample_display", "sample_id"]
+    if color_key not in keep_cols:
+        keep_cols.append(color_key)
+    plot_df = long_df[keep_cols].copy()
     plot_df[color_key] = plot_df[color_key].astype(str)
+    hover_data = {"sample_id": True, x: ":.3f", y: ":.3f"}
+    if color_key != "sample_display":
+        hover_data["sample_display"] = False
+        hover_data[color_key] = True
     fig = px.scatter(
         plot_df,
         x=x,
@@ -512,13 +566,14 @@ def confounder_scatter(long_df: pd.DataFrame, x: str, y: str, color_key: str, ti
         facet_col="stage",
         category_orders={"stage": STAGE_ORDER},
         hover_name="sample_display",
-        hover_data={"sample_id": True, x: ":.3f", y: ":.3f", color_key: True},
+        hover_data=hover_data,
         template="simple_white",
         opacity=0.45,
         color_discrete_sequence=QUALITATIVE_SEQUENCE,
         title=title,
     )
-    fig.update_layout(height=460, font=dict(size=14), legend=dict(orientation="h"))
+    fig.update_traces(marker=dict(size=4))
+    apply_standard_figure_layout(fig, height=520, title=title)
     return fig
 
 
@@ -533,11 +588,11 @@ def resolution_diagnostics_plot(df: pd.DataFrame) -> go.Figure:
         go.Scatter(
             x=df["resolution"],
             y=df["modularity"],
-            mode="lines+markers+text",
-            text=df["n_clusters"],
-            textposition="top center",
+            mode="lines+markers",
             name="Modularity",
             marker=dict(color="#0f766e", size=9),
+            customdata=np.column_stack([df["n_clusters"]]),
+            hovertemplate="Resolution=%{x}<br>Modularity=%{y:.3f}<br>Clusters=%{customdata[0]}<extra></extra>",
         ),
         row=1,
         col=1,
@@ -546,11 +601,11 @@ def resolution_diagnostics_plot(df: pd.DataFrame) -> go.Figure:
         go.Scatter(
             x=df["resolution"],
             y=df["davies_bouldin_score"],
-            mode="lines+markers+text",
-            text=df["n_clusters"],
-            textposition="top center",
+            mode="lines+markers",
             name="Davies-Bouldin",
             marker=dict(color="#d97706", size=9),
+            customdata=np.column_stack([df["n_clusters"]]),
+            hovertemplate="Resolution=%{x}<br>Davies-Bouldin=%{y:.3f}<br>Clusters=%{customdata[0]}<extra></extra>",
         ),
         row=1,
         col=2,
@@ -559,14 +614,7 @@ def resolution_diagnostics_plot(df: pd.DataFrame) -> go.Figure:
     for _, row in chosen.iterrows():
         fig.add_vline(x=row["resolution"], line_dash="dash", line_color="#dc2626", row=1, col=1)
         fig.add_vline(x=row["resolution"], line_dash="dash", line_color="#dc2626", row=1, col=2)
-    fig.update_layout(
-        template="simple_white",
-        height=420,
-        title="Clustering resolution diagnostics",
-        font=dict(size=14),
-        margin=dict(l=40, r=30, t=80, b=40),
-        showlegend=False,
-    )
+    apply_standard_figure_layout(fig, height=420, title="Clustering resolution diagnostics", show_legend=False, right_margin=40)
     fig.update_xaxes(title_text="Resolution", row=1, col=1)
     fig.update_xaxes(title_text="Resolution", row=1, col=2)
     fig.update_yaxes(title_text="Modularity", row=1, col=1)
@@ -575,15 +623,16 @@ def resolution_diagnostics_plot(df: pd.DataFrame) -> go.Figure:
 
 
 def composition_heatmap(df: pd.DataFrame, title: str) -> go.Figure:
+    show_text = df.shape[0] <= 10 and df.shape[1] <= 10
     fig = px.imshow(
         df,
         aspect="auto",
         color_continuous_scale="Tealgrn",
-        text_auto=".2f",
+        text_auto=".2f" if show_text else False,
         template="simple_white",
         title=title,
     )
-    fig.update_layout(height=max(420, 50 + 28 * df.shape[0]), font=dict(size=13), margin=dict(l=40, r=30, t=80, b=40))
+    fig.update_layout(height=max(420, 50 + 28 * df.shape[0]), font=dict(size=13), margin=dict(l=40, r=60, t=70, b=40))
     fig.update_xaxes(title_text="Cluster")
     fig.update_yaxes(title_text="")
     return fig
@@ -622,8 +671,18 @@ def uns_dict_of_lists(df: pd.DataFrame) -> dict[str, list]:
     return {column: safe[column].tolist() for column in safe.columns}
 
 
-def format_table(df: pd.DataFrame, digits: int = 3):
+def format_table(df: pd.DataFrame, digits: int = 2):
     out = df.copy()
+    source_series = {col: out[col] for col in out.columns}
+    if "sample_display" in out.columns:
+        out = out.rename(columns={"sample_display": "sample"})
+        source_series["sample"] = source_series["sample_display"]
+    if "sample_id" in out.columns:
+        out = out.drop(columns=["sample_id"])
+
+    def _clean_label(name: str) -> str:
+        label = str(name).replace("_", " ").strip()
+        return label[:1].upper() + label[1:] if label else label
 
     def _fmt_text(value):
         if pd.isna(value):
@@ -645,46 +704,116 @@ def format_table(df: pd.DataFrame, digits: int = 3):
             return ""
         return f"{100 * float(value):.{max(1, digits - 1)}f}%"
 
+    rename_map = {col: _clean_label(col) for col in out.columns}
+    out = out.rename(columns=rename_map)
+
+    numeric_columns = set()
+
     formatters = {}
-    for col in out.columns:
+    for col, clean_col in rename_map.items():
         lower = str(col).lower()
-        series = out[col]
+        series = source_series[col]
         if pd.api.types.is_integer_dtype(series):
-            formatters[col] = _fmt_int
+            formatters[clean_col] = _fmt_int
+            numeric_columns.add(clean_col)
         elif pd.api.types.is_float_dtype(series):
             if "fraction" in lower:
-                formatters[col] = _fmt_fraction
+                formatters[clean_col] = _fmt_fraction
             elif lower.startswith("n_") or lower.endswith("_count") or lower.endswith("_counts") or lower.endswith("_cells") or lower.endswith("_genes"):
-                formatters[col] = _fmt_int
+                formatters[clean_col] = _fmt_int
             else:
-                formatters[col] = _fmt_float
+                formatters[clean_col] = _fmt_float
+            numeric_columns.add(clean_col)
         else:
-            formatters[col] = _fmt_text
+            formatters[clean_col] = _fmt_text
 
-    return (
+    table_styles = [
+        {"selector": "th", "props": [("font-weight", "600"), ("white-space", "normal")]},
+        {"selector": "td", "props": [("padding", "0.25rem 0.5rem"), ("vertical-align", "top")]},
+        {"selector": "table", "props": [("font-size", "0.9rem"), ("width", "100%"), ("min-width", "100%"), ("border-collapse", "collapse")]},
+    ]
+    for idx, col in enumerate(out.columns):
+        align = "right" if col in numeric_columns else "left"
+        table_styles.append({"selector": f"th.col_heading.level0.col{idx}", "props": [("text-align", align)]})
+        table_styles.append({"selector": f"td.col{idx}", "props": [("text-align", align)]})
+
+    styler = (
         out.style
+        .hide(axis="index")
         .format(formatters)
-        .set_properties(**{"text-align": "left", "white-space": "nowrap"})
-        .set_table_styles(
-            [
-                {"selector": "th", "props": [("text-align", "left"), ("font-weight", "600")]},
-                {"selector": "td", "props": [("padding", "0.25rem 0.5rem")]},
-                {"selector": "table", "props": [("font-size", "0.95rem")]},
-            ]
-        )
+        .set_table_attributes('style="width:100%; min-width:100%; table-layout:auto; margin:0;"')
+        .set_properties(**{"white-space": "normal", "max-width": "14rem"})
+        .set_table_styles(table_styles)
+    )
+    return styler
+
+
+def format_metric_stage_table(df: pd.DataFrame, digits: int = 2):
+    order = {"Before filtering": 0, "After filtering": 1}
+    display_df = df.copy()
+    display_df = display_df[[
+        "metric",
+        "stage",
+        "n_cells",
+        "median",
+        "mean",
+        "q1",
+        "q3",
+        "iqr",
+    ]].copy()
+    display_df["metric_order"] = display_df["metric"].astype(str)
+    display_df["stage_order"] = display_df["stage"].map(order).fillna(99)
+    display_df = display_df.sort_values(["metric_order", "stage_order"]).drop(columns=["metric_order", "stage_order"])
+
+    repeated = display_df["metric"].duplicated()
+    display_df.loc[repeated, "metric"] = ""
+
+    styler = format_table(display_df, digits=digits)
+    return styler.set_table_styles(
+        [
+            {"selector": "th", "props": [("text-align", "left"), ("font-weight", "600"), ("white-space", "normal")]},
+            {"selector": "td", "props": [("padding", "0.25rem 0.5rem"), ("vertical-align", "top")]},
+            {"selector": "table", "props": [("font-size", "0.9rem"), ("width", "100%")]},
+            {"selector": "tbody tr:nth-child(2n)", "props": [("border-bottom", "1px solid #d6d9dc")]},
+        ],
+        overwrite=False,
     )
 
 
+def format_resolution_table(df: pd.DataFrame, digits: int = 2):
+    styler = format_table(df, digits=digits)
+
+    def _highlight_selected(row):
+        selected_col = next((col for col in row.index if str(col).lower() == "selected resolution"), None)
+        if selected_col is not None and bool(row[selected_col]):
+            return ["background-color: #e6f4ea; font-weight: 600;" for _ in row]
+        return ["" for _ in row]
+
+    return styler.apply(_highlight_selected, axis=1)
+
+
+def apply_standard_figure_layout(fig: go.Figure, *, height: int, title: str, show_legend: bool = True, right_margin: int = 180) -> go.Figure:
+    fig.update_layout(
+        template="simple_white",
+        height=height,
+        title=dict(text=title, x=0.01, xanchor="left"),
+        font=dict(size=13),
+        margin=dict(l=40, r=right_margin, t=70, b=40),
+        legend=dict(
+            orientation="v",
+            y=1,
+            yanchor="top",
+            x=1.02,
+            xanchor="left",
+            bgcolor="rgba(255,255,255,0.85)",
+        ),
+        showlegend=show_legend,
+    )
+    return fig
+
+
 cfg = load_config(CONFIG_PATH)
-cfg
 ```
-
-## Load Inputs
-
-This section resolves the input matrix, sample metadata scaffold, and the core
-metadata keys used throughout the report. Reviewing this block first makes it
-clear which matrix format was loaded and which annotation columns will drive the
-QC summaries and embedding views.
 
 ```{python}
 input_h5ad = str(cfg["input"].get("input_h5ad", "")).strip()
@@ -713,7 +842,7 @@ cluster_counts_file = resolve_path(ROOT, str(cfg["output"]["cluster_counts_file"
 tables_dir = ROOT / "results" / "tables"
 tables_dir.mkdir(parents=True, exist_ok=True)
 
-sc.settings.verbosity = 2
+sc.settings.verbosity = 0
 adata.obs_names_make_unique()
 adata.var_names_make_unique()
 
@@ -733,20 +862,20 @@ for key in (batch_key, condition_key):
         adata.obs[key] = "unknown"
     adata.obs[key] = adata.obs[key].astype(str).fillna("unknown")
 
-adata
 ```
 
-## QC Metrics And Filtering Decisions
+## Run Summary
 
-This section computes the QC metrics used later in the report and records the
-exact filtering decision path. The template now exposes three layers of QC
-decision making:
+This report is organized into three main review blocks:
 
-- fixed thresholds, which provide a stable baseline
-- optional per-sample MAD outlier detection, which is useful for heterogeneous cohorts
-- optional Scrublet doublet scoring, which can be used diagnostically or as an active filter
+- `QC review`: filtering impact, QC distributions, and sample-level diagnostics
+- `Embeddings and clustering`: retained structure, batch effects, and cluster composition
+- `Appendix`: parameters, session details, and references
 
-Together these tables make the filtering logic explicit and auditable.
+The summary table below is the quickest way to confirm the loaded input, QC
+mode, and output object before reviewing the detailed diagnostics.
+
+## QC Review
 
 ```{python}
 annotate_qc_genes(adata, organism)
@@ -847,16 +976,7 @@ before_sample_qc = (
     .reset_index()
 )
 before_sample_qc["retained_fraction"] = before_sample_qc["n_cells_pass_qc"] / before_sample_qc["n_cells"]
-before_sample_qc
 ```
-
-## Filtering And Clustering
-
-This section applies the QC decisions to create the retained object, then runs
-the standard Scanpy preprocessing steps used downstream. The final Leiden result
-is still chosen by the same simple heuristic or manual override as before, but
-the report now also benchmarks multiple resolutions so the chosen value can be
-reviewed instead of taken on faith.
 
 ```{python}
 filtered = adata[adata.obs["pass_qc"].to_numpy()].copy()
@@ -928,11 +1048,7 @@ cluster_counts = (
     .sort_values("n_cells", ascending=False)
 )
 write_table(cluster_counts_file, cluster_counts)
-
-cluster_counts
 ```
-
-## Persist Outputs
 
 ```{python}
 qc_after = {
@@ -1005,6 +1121,37 @@ filter_effect_df = pd.DataFrame(
     ]
 )
 
+filter_effect_display_df = pd.DataFrame(
+    [
+        {
+            "measure": "Cells",
+            "before": int(adata.n_obs),
+            "after": int(filtered.n_obs),
+            "removed": int(adata.n_obs - filtered.n_obs),
+            "retained_fraction": float(filtered.n_obs / adata.n_obs) if adata.n_obs else math.nan,
+        },
+        {
+            "measure": "Genes",
+            "before": int(adata.n_vars),
+            "after": int(filtered.n_vars),
+            "removed": int(adata.n_vars - filtered.n_vars),
+            "retained_fraction": float(filtered.n_vars / adata.n_vars) if adata.n_vars else math.nan,
+        },
+    ]
+)
+
+metric_shift_display_df = pd.DataFrame(
+    [
+        {
+            "metric": row["metric"],
+            "before_median": row["before_median"],
+            "after_median": row["after_median"],
+            "median_change": row["median_change"],
+        }
+        for row in comparison_rows
+    ]
+)
+
 sample_after_qc = (
     after_obs.groupby(["sample_id", "sample_display"], dropna=False)
     .agg(
@@ -1023,6 +1170,55 @@ sample_compare_df["n_cells_after"] = sample_compare_df["n_cells_after"].fillna(0
 sample_compare_df["retained_fraction_after"] = sample_compare_df["n_cells_after"] / sample_compare_df["n_cells"]
 sample_compare_df["removed_cells"] = sample_compare_df["n_cells"] - sample_compare_df["n_cells_after"]
 write_table(sample_qc_summary_file, sample_compare_df)
+
+sample_overview_display_df = (
+    sample_compare_df[
+        [
+            "sample_display",
+            "sample_id",
+            "n_cells",
+            "n_cells_after",
+            "removed_cells",
+            "retained_fraction_after",
+            "n_doublets",
+        ]
+    ]
+    .sort_values(["retained_fraction_after", "n_cells_after", "sample_display"], ascending=[False, False, True])
+    .reset_index(drop=True)
+)
+
+sample_metric_specs = [
+    ("median_total_counts", "median_total_counts_after", "Total counts"),
+    ("median_n_genes", "median_n_genes_after", "Genes detected"),
+    ("median_pct_counts_mt", "median_pct_counts_mt_after", "Mitochondrial percentage"),
+    ("median_pct_counts_ribo", "median_pct_counts_ribo_after", "Ribosomal percentage"),
+    ("median_pct_counts_hb", "median_pct_counts_hb_after", "Hemoglobin percentage"),
+]
+sample_metric_shift_rows = []
+for _, row in sample_overview_display_df.merge(
+    sample_compare_df,
+    on=["sample_display", "sample_id", "n_cells", "n_cells_after", "removed_cells", "retained_fraction_after", "n_doublets"],
+    how="left",
+).iterrows():
+    first_metric = True
+    for before_col, after_col, label in sample_metric_specs:
+        before_val = row.get(before_col)
+        after_val = row.get(after_col)
+        if pd.isna(before_val) and pd.isna(after_val):
+            continue
+        sample_metric_shift_rows.append(
+            {
+                "sample_display": row["sample_display"] if first_metric else "",
+                "sample_id": row["sample_id"] if first_metric else "",
+                "metric": label,
+                "before": before_val,
+                "after": after_val,
+                "change": (after_val - before_val) if pd.notna(before_val) and pd.notna(after_val) else math.nan,
+            }
+        )
+        first_metric = False
+
+sample_metric_shift_display_df = pd.DataFrame(sample_metric_shift_rows)
 
 sample_compare_long = pd.concat(
     [
@@ -1094,6 +1290,11 @@ run_summary = {
     "output_h5ad": str(out_adata),
 }
 write_json(tables_dir / "run_summary.json", run_summary)
+leiden_resolution_note = describe_leiden_resolution_choice(
+    resolved_leiden_resolution,
+    leiden_resolution_source,
+    int(filtered.n_obs),
+)
 
 long_qc_df = pd.concat(
     [
@@ -1133,15 +1334,16 @@ session_info_df = pd.concat(
 )
 write_table(tables_dir / "session_info.csv", session_info_df)
 
-qc_summary
+condition_series = long_qc_df[condition_key].astype(str).str.strip()
+condition_defined_values = sorted(
+    {
+        value
+        for value in condition_series
+        if value and value.lower() not in {"unknown", "nan", "none", "na", "n/a"}
+    }
+)
+condition_available = len(condition_defined_values) >= 2
 ```
-
-## Overview
-
-This section summarizes the core run settings and the main output object. It is
-the fastest place to confirm that the report reflects the expected input format,
-organism, QC mode, and final clustering choice before inspecting the detailed
-plots.
 
 ```{python}
 format_table(
@@ -1188,7 +1390,7 @@ format_table(
 )
 ```
 
-## Filtering Effect Summary
+### Filtering Effect Summary
 
 These tables quantify what the filtering step removed and why. The first table
 captures the global effect on cells and genes, and the second shows how the main
@@ -1197,14 +1399,14 @@ doublet burden, or strong median shifts should trigger a closer review of the
 threshold settings and sample-level diagnostics below.
 
 ```{python}
-format_table(filter_effect_df)
+format_table(filter_effect_display_df)
 ```
 
 ```{python}
-format_table(pd.DataFrame(comparison_rows))
+format_table(metric_shift_display_df)
 ```
 
-## Cell-Level QC Before Vs After
+### Cell-Level QC Before Vs After
 
 These interactive figures compare the key QC metrics before and after filtering.
 The goal is to make the filtering effect easy to interpret at a glance:
@@ -1239,31 +1441,52 @@ if pd.to_numeric(long_qc_df["doublet_score"], errors="coerce").notna().any():
 ```
 
 ```{python}
-format_table(before_after_stats)
+format_metric_stage_table(before_after_stats)
 ```
 
-## Confounder Diagnostics
+### Confounder Diagnostics
 
 These panels show how the main QC covariates relate to one another before and
 after filtering. They are useful for detecting technical structure that may not
 be obvious from one-dimensional distributions alone, such as low-complexity
 cells with high mitochondrial load or high-count cells that are enriched for
-doublet calls.
+doublet calls. The default view is sample-focused; condition-specific views are
+shown separately only when the condition annotation is informative.
+
+::: {.panel-tabset}
+
+#### Sample
 
 ```{python}
-confounder_scatter(long_qc_df, "total_counts", "n_genes_by_counts", batch_key, f"Counts vs genes by {batch_key}")
+confounder_scatter(long_qc_df, "total_counts", "n_genes_by_counts", "sample_display", "Counts vs genes by sample")
 ```
 
 ```{python}
-confounder_scatter(long_qc_df, "total_counts", "pct_counts_mt", condition_key, f"Counts vs mitochondrial percentage by {condition_key}")
+confounder_scatter(long_qc_df, "total_counts", "pct_counts_mt", "sample_display", "Counts vs mitochondrial percentage by sample")
 ```
 
 ```{python}
 if pd.to_numeric(long_qc_df["doublet_score"], errors="coerce").notna().any():
-    confounder_scatter(long_qc_df, "total_counts", "doublet_score", batch_key, f"Counts vs doublet score by {batch_key}")
+    confounder_scatter(long_qc_df, "total_counts", "doublet_score", "sample_display", "Counts vs doublet score by sample")
 ```
 
-## Sample-Level QC Before Vs After
+#### Condition
+
+```{python}
+if condition_available:
+    confounder_scatter(long_qc_df, "total_counts", "n_genes_by_counts", condition_key, f"Counts vs genes by {condition_key}")
+else:
+    print(f"No condition-specific diagnostics shown because '{condition_key}' is not defined with at least two non-missing values.")
+```
+
+```{python}
+if condition_available:
+    confounder_scatter(long_qc_df, "total_counts", "pct_counts_mt", condition_key, f"Counts vs mitochondrial percentage by {condition_key}")
+```
+
+:::
+
+### Sample-Level QC Before Vs After
 
 These summaries make it easier to spot problematic samples, not just problematic
 cells. In mixed or clinically heterogeneous cohorts, this section is often the
@@ -1271,29 +1494,11 @@ most important QC review panel because it reveals whether one sample is driving
 most exclusions or carrying systematically different metric profiles.
 
 ```{python}
-format_table(
-    sample_compare_df[
-        [
-            "sample_id",
-            "sample_display",
-            "n_cells",
-            "n_cells_after",
-            "removed_cells",
-            "retained_fraction_after",
-            "n_doublets",
-            "median_total_counts",
-            "median_total_counts_after",
-            "median_n_genes",
-            "median_n_genes_after",
-            "median_pct_counts_mt",
-            "median_pct_counts_mt_after",
-            "median_pct_counts_ribo",
-            "median_pct_counts_ribo_after",
-            "median_pct_counts_hb",
-            "median_pct_counts_hb_after",
-        ]
-    ].sort_values(["retained_fraction_after", "n_cells_after"], ascending=[False, False])
-)
+format_table(sample_overview_display_df)
+```
+
+```{python}
+format_table(sample_metric_shift_display_df)
 ```
 
 ```{python}
@@ -1301,13 +1506,19 @@ retention_fig = px.bar(
     sample_compare_df.sort_values("retained_fraction_after", ascending=False),
     x="sample_display",
     y="retained_fraction_after",
-    color="retained_fraction_after",
-    color_continuous_scale="Tealgrn",
     template="simple_white",
     title="Retained cell fraction by sample",
     hover_data={"sample_id": True, "retained_fraction_after": ":.2%"},
 )
-retention_fig.update_layout(height=420, xaxis_title="", yaxis_title="Retained fraction")
+retention_fig.update_layout(
+    height=420,
+    xaxis_title="",
+    yaxis_title="Retained fraction",
+    font=dict(size=13),
+    margin=dict(l=40, r=40, t=70, b=100),
+)
+retention_fig.update_xaxes(tickangle=-25, automargin=True)
+retention_fig.update_traces(marker_color="#0f766e")
 retention_fig
 ```
 
@@ -1323,7 +1534,7 @@ compare_sample_metric(sample_compare_long, "median_n_genes_stage", "Median genes
 compare_sample_metric(sample_compare_long, "median_pct_counts_mt_stage", "Median mitochondrial percentage per sample")
 ```
 
-## Embedding And Clustering
+## Embeddings And Clustering
 
 These embeddings show the retained object after normalization, PCA, graph
 construction, UMAP, and Leiden clustering. Review them together rather than in
@@ -1332,6 +1543,12 @@ isolation:
 - `by leiden` checks whether the selected clustering granularity is plausible
 - `by batch` checks for residual batch structure
 - `by condition` checks whether biological structure is interpretable rather than purely technical
+
+### Embeddings
+
+::: {.panel-tabset}
+
+#### UMAP
 
 ```{python}
 embedding_plot(filtered, "X_umap", "leiden", "Interactive UMAP colored by Leiden cluster")
@@ -1342,8 +1559,11 @@ embedding_plot(filtered, "X_umap", batch_key, f"Interactive UMAP colored by {bat
 ```
 
 ```{python}
-embedding_plot(filtered, "X_umap", condition_key, f"Interactive UMAP colored by {condition_key}")
+if condition_available:
+    embedding_plot(filtered, "X_umap", condition_key, f"Interactive UMAP colored by {condition_key}")
 ```
+
+#### PCA
 
 ```{python}
 embedding_plot(filtered, "X_pca", "leiden", "Interactive PCA colored by Leiden cluster")
@@ -1354,10 +1574,19 @@ embedding_plot(filtered, "X_pca", batch_key, f"Interactive PCA colored by {batch
 ```
 
 ```{python}
+if condition_available:
+    embedding_plot(filtered, "X_pca", condition_key, f"Interactive PCA colored by {condition_key}")
+```
+
+#### Cluster Counts
+
+```{python}
 format_table(cluster_counts)
 ```
 
-## Resolution Diagnostics
+:::
+
+### Resolution Diagnostics
 
 The final Leiden resolution is still set either manually or by the simple
 heuristic used in this template, but this section now benchmarks a grid of
@@ -1370,15 +1599,21 @@ Interpretation:
 - lower Davies-Bouldin score can indicate better separation in PCA space
 - the selected resolution should usually sit in a stable, interpretable range rather than at an arbitrary extreme
 
+Selected resolution rationale:
+
+```{python}
+display(Markdown(leiden_resolution_note))
+```
+
 ```{python}
 resolution_diagnostics_plot(resolution_diagnostics_df)
 ```
 
 ```{python}
-format_table(resolution_diagnostics_df)
+format_resolution_table(resolution_diagnostics_df)
 ```
 
-## Cluster Composition
+### Cluster Composition
 
 These composition summaries show whether the inferred clusters are broadly
 represented across samples and conditions or dominated by only one subset. This
@@ -1394,14 +1629,44 @@ composition_heatmap(cluster_by_sample_fraction.fillna(0), "Cluster composition b
 ```
 
 ```{python}
-format_table(cluster_by_condition_counts.reset_index(names=condition_key))
+if condition_available:
+    format_table(cluster_by_condition_counts.reset_index(names=condition_key))
+else:
+    print(f"No condition-level cluster composition shown because '{condition_key}' is not defined with at least two non-missing values.")
 ```
 
 ```{python}
-composition_heatmap(cluster_by_condition_fraction.fillna(0), f"Cluster composition by {condition_key} (row fractions)")
+if condition_available:
+    composition_heatmap(cluster_by_condition_fraction.fillna(0), f"Cluster composition by {condition_key} (row fractions)")
 ```
 
-## Methods Appendix
+### Final Selected Leiden UMAP
+
+This final panel shows the retained object colored by the Leiden clustering
+actually used downstream. It is repeated here after the resolution review so
+the chosen clustering can be checked directly in its final form.
+
+```{python}
+display(
+    Markdown(
+        f"Final clustering shown here uses Leiden resolution `{resolved_leiden_resolution:.2f}` "
+        f"({leiden_resolution_source.replace('_', ' ')})."
+    )
+)
+```
+
+```{python}
+embedding_plot(
+    filtered,
+    "X_umap",
+    "leiden",
+    f"Final UMAP colored by Leiden cluster at resolution {resolved_leiden_resolution:.2f}",
+)
+```
+
+## Appendix
+
+### Methods Parameters
 
 This appendix records the parameter values used in the run. It is designed to
 support reproducibility and methods write-up rather than interpretation of the
@@ -1472,7 +1737,7 @@ format_table(
 )
 ```
 
-## Session Info
+### Session Info
 
 This section records the execution environment used to render the report and
 write the processed object. It is the quickest way to diagnose version-related
@@ -1482,7 +1747,7 @@ differences between runs.
 format_table(session_info_df)
 ```
 
-## References
+### References
 
 The workflow in this notebook is based on the Scanpy/scverse ecosystem and is
 rendered with Quarto using the Jupyter engine. The following resources are

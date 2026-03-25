@@ -165,6 +165,14 @@ Current input handling:
 - if no explicit matrix input is provided, the hook resolves the best upstream
   published object and records provenance
 
+Recommended practice:
+- for multi-sample preprocessing, prefer a combined upstream `.h5ad` that
+  already stores sample-level annotations in `obs`
+- for one-sample-only preprocessing, direct per-sample Cell Ranger outputs are acceptable
+- avoid relying on a plain Cell Ranger aggregated MTX directory as the only
+  source of sample identity; treat it as counts-only unless you reconstruct
+  sample assignments separately
+
 ## File And Object Naming Convention
 
 ### Single-modality objects
