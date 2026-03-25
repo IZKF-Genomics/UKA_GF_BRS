@@ -1,0 +1,116 @@
+# Workflow: archive_projects
+# Archive old project directories with rsync, verification, and post-verify cleanup.
+
+id: archive_projects
+description: "Archive old project directories, verify them, and then remove the original source directory."
+
+params:
+  source_root:
+    type: str
+    cli: "--source-root"
+    required: false
+    default: "/data/projects"
+    description: "Root directory containing flat run directories (no instrument-level folders)."
+  target_root:
+    type: str
+    cli: "--target-root"
+    required: false
+    default: "/mnt/nextgen2/archive/projects"
+    description: "Archive root directory containing instrument folders."
+  retention_days:
+    type: int
+    cli: "--retention-days"
+    required: false
+    default: 90
+    description: "Runs newer than this many days are retained and not archived."
+  instrument_folders:
+    type: str
+    cli: "--instrument-folders"
+    required: false
+    default: "miseq1_M00818,miseq2_M04404,miseq3_M00403,nextseq500_NB501289,novaseq_A01742"
+    description: "Compatibility parameter; ignored for archive_projects flat layout."
+  skip_runs:
+    type: str
+    cli: "--skip-runs"
+    required: false
+    default: ""
+    description: "Comma-separated run IDs to exclude from archive even if old enough."
+  non_interactive:
+    type: bool
+    cli: "--non-interactive"
+    required: false
+    default: false
+    description: "Cron-safe mode shortcut: sets interactive=false and yes=true."
+  interactive:
+    type: bool
+    required: false
+    default: true
+    description: "Enable interactive prompts for path/retention confirmation and skip selection."
+  yes:
+    type: bool
+    cli: "--yes"
+    required: false
+    default: false
+    description: "Skip final global confirmation prompt and proceed non-interactively."
+  dry_run:
+    type: bool
+    cli: "--dry-run"
+    required: false
+    default: false
+    description: "Plan only; do not copy or clean."
+  cleanup:
+    type: bool
+    cli: "--cleanup"
+    required: false
+    default: true
+    description: "Remove the source run directory after successful archive verification. Set false for archive-only mode."
+  min_free_gb:
+    type: int
+    required: false
+    default: 500
+    description: "Minimum free space required on target filesystem before starting."
+  manifest_path:
+    type: str
+    required: false
+    description: "Optional output path for manifest JSON."
+  manifest_dir:
+    type: str
+    required: false
+    default: "/data/shared/bpm_manifests"
+    description: "Directory used for default manifest/log output when manifest_path is not set."
+  keep_rules_path:
+    type: str
+    cli: "--keep-rules-path"
+    required: false
+    default: "/data/shared/bpm_manifests/keep_rules.yaml"
+    description: "YAML keep-rules file used by the integrated TUI and archive selection."
+  tui:
+    type: bool
+    cli: "--tui"
+    required: false
+    default: true
+    description: "Open the integrated keep-rules TUI before planning when interactive=true."
+  investigate:
+    type: str
+    cli: "--investigate"
+    required: false
+    default: ""
+    description: "Report-only mode for one run ID under source_root; prints included/excluded size breakdown and exits."
+  investigate_top:
+    type: int
+    cli: "--investigate-top"
+    required: false
+    default: 20
+    description: "Number of top included/excluded files and top-level paths to print in investigate mode."
+  exclude_patterns:
+    type: str
+    cli: "--exclude-patterns"
+    required: false
+    default: "work,.pixi,.renv,.nextflow,results,*.fastq.gz"
+    description: "Comma-separated rsync exclude patterns for archive copy/verify. Excluded files are still removed when cleanup is enabled."
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python, rsync]

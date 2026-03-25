@@ -1,0 +1,93 @@
+# Workflow: archive_raw
+# Archive old raw sequencing run directories with rsync and verification.
+# This workflow does not delete source data; use the generated manifest for guarded cleanup.
+
+id: archive_raw
+description: "Archive old raw sequencing run directories and write a cleanup manifest."
+
+params:
+  source_root:
+    type: str
+    cli: "--source-root"
+    required: false
+    default: "/data/raw"
+    description: "Root directory containing instrument folders with run directories."
+  target_root:
+    type: str
+    cli: "--target-root"
+    required: false
+    default: "/mnt/nextgen2/archive/raw"
+    description: "Archive root directory containing instrument folders."
+  retention_days:
+    type: int
+    cli: "--retention-days"
+    required: false
+    default: 90
+    description: "Runs newer than this many days are retained and not archived."
+  instrument_folders:
+    type: str
+    cli: "--instrument-folders"
+    required: false
+    default: "miseq1_M00818,miseq2_M04404,miseq3_M00403,nextseq500_NB501289,novaseq_A01742"
+    description: "Comma-separated instrument folder allowlist to scan under source_root."
+  skip_runs:
+    type: str
+    cli: "--skip-runs"
+    required: false
+    default: ""
+    description: "Comma-separated run IDs to exclude from archive even if old enough."
+  non_interactive:
+    type: bool
+    cli: "--non-interactive"
+    required: false
+    default: false
+    description: "Cron-safe mode shortcut: sets interactive=false and yes=true."
+  interactive:
+    type: bool
+    required: false
+    default: true
+    description: "Enable interactive prompts for path/retention confirmation and skip selection."
+  yes:
+    type: bool
+    cli: "--yes"
+    required: false
+    default: false
+    description: "Skip final global confirmation prompt and proceed non-interactively."
+  dry_run:
+    type: bool
+    cli: "--dry-run"
+    required: false
+    default: false
+    description: "Plan only; do not copy."
+  min_free_gb:
+    type: int
+    required: false
+    default: 500
+    description: "Minimum free space required on target filesystem before starting."
+  manifest_path:
+    type: str
+    required: false
+    description: "Optional output path for manifest JSON."
+  manifest_dir:
+    type: str
+    required: false
+    default: "/data/shared/bpm_manifests"
+    description: "Directory used for default manifest/log output when manifest_path is not set."
+  keep_rules_path:
+    type: str
+    cli: "--keep-rules-path"
+    required: false
+    default: "/data/shared/bpm_manifests/keep_rules.yaml"
+    description: "YAML keep-rules file used by the integrated TUI and archive selection."
+  tui:
+    type: bool
+    cli: "--tui"
+    required: false
+    default: true
+    description: "Open the integrated keep-rules TUI before planning when interactive=true."
+
+run:
+  entry: "run.py"
+
+tools:
+  required: [python, rsync]
