@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# get_threads.sh
+# Runtime helper: determine thread count from live CPU availability.
+# Usage: ./get_threads.sh <ratio>
+#
+# - ratio: fraction (0-1) of idle CPUs to allocate. Defaults to 0.33 if omitted.
+# - Prints the recommended integer thread count (>=1) to stdout.
+
+set -euo pipefail
+
+ratio_input="${1:-0.33}"
+
+detect_cores() {
+  if command -v nproc >/dev/null 2>&1; then
+    nproc
+  elif command -v getconf >/dev/null 2>&1; then
+    getconf _NPROCESSORS_ONLN
+  else
+    echo 1
+  fi
+}
+
+TOTAL_CORES=$(detect_cores)
+if [[ "$TOTAL_CORES" -lt 1 ]]; then TOTAL_CORES=1; fi
+
+IDLE_PCT=100
+if command -v mpstat >/dev/null 2>&1; then
+  IDLE_PCT=$(mpstat 1 1 | awk '/Average:/ && $12 ~ /[0-9.]+/ { print $12 }' || echo 100)
+fi
+
+IDLE_CPUS=$(awk -v idle_pct="$IDLE_PCT" -v cores="$TOTAL_CORES" 'BEGIN { v=int(idle_pct * cores / 100); if (v<1) v=1; print v }')
+RATIO=$(awk -v r="$ratio_input" 'BEGIN { if (r<=0) r=0.05; if (r>1) r=1; print r }')
+THREADS=$(awk -v ratio="$RATIO" -v idle="$IDLE_CPUS" 'BEGIN { v=int(ratio*idle); if (v<1) v=1; print v }')
+
+echo "$THREADS"
